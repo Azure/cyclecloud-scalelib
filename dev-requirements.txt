@@ -1,0 +1,6 @@
+mypy
+autoflake
+black
+pytest
+flake8
+hypothesis
