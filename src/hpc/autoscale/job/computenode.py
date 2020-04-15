@@ -30,3 +30,9 @@ class SchedulerNode(Node):
             managed=False,
             resources=ht.ResourceDict(resources),
         )
+
+    def __str__(self) -> str:
+        return "Scheduler{}".format(Node.__str__(self))
+
+    def __repr__(self) -> str:
+        return "Scheduler{}".format(Node.__repr__(self))

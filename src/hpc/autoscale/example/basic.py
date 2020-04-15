@@ -32,6 +32,14 @@ class BasicDriver:
     def handle_post_delete(self, deleted_nodes: List[Node]) -> None:
         pass
 
+    def __str__(self) -> str:
+        return "BasicDriver(jobs={}, scheduler_nodes={})".format(
+            self.jobs[:100], self.scheduler_nodes[:100]
+        )
+
+    def __repr__(self) -> str:
+        return str(self)
+
 
 def autoscale_driver(config_path: str, driver: BasicDriver) -> DemandResult:
     global _exit_code

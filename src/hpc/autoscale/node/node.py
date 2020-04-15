@@ -412,7 +412,7 @@ class UnmanagedNode(Node):
         assert self.exists
 
     def __str__(self) -> str:
-        return "UnmanagedNode({})".format(self.hostname)
+        return "Unmanaged{}".format(Node.__str__(self))
 
     def __repr__(self) -> str:
-        return str(self)
+        return "Unmanaged{}".format(Node.__repr__(self))

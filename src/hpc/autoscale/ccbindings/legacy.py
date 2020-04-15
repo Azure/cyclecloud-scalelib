@@ -250,6 +250,17 @@ class ClusterBinding(ClusterBindingInterface):
 
         return request
 
+    def __str__(self) -> str:
+        return "ClusterBinding(v=7.9, cluster='{cluster}', url='{url}', username='{username}', verify={verify})".format(
+            cluster=self.cluster_name,
+            url=str(self.session._config.get("url")),
+            username=str(self.session._config.get("username")),
+            verify=str(self.session._config.get("verify_certificates")),
+        )
+
+    def __repr__(self) -> str:
+        return str(self)
+
 
 def _get_session(config: Dict) -> requests.sessions.Session:
     try:

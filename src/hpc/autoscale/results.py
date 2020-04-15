@@ -51,6 +51,10 @@ class Result(ABC):
     def __bool__(self) -> bool:
         return self.status == "success"
 
+    @abstractmethod
+    def __str__(self) -> str:
+        ...
+
     def __repr__(self) -> str:
         return str(self)
 
@@ -264,3 +268,11 @@ class DefaultContextHandler(ResultsHandler):
                     result_node.metadata["contexts"] = set()
 
                 result_node.metadata["contexts"].add(self.ctx)
+
+    def __str__(self) -> str:
+        return "DefaultContextHandler(cur='{}', all='{}'".format(
+            self.ctx, list(self.by_context.keys())
+        )
+
+    def __repr__(self) -> str:
+        return str(self)

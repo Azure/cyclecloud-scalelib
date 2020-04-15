@@ -140,6 +140,14 @@ class DemandPrinter:
             for row in rows:
                 print(formats.format(*[str(r) for r in row]), file=self.stream)
 
+    def __str__(self) -> str:
+        return "DemandPrinter(columns={}, json={}, stream={})".format(
+            str(self.column_names), self.json, self.stream
+        )
+
+    def __repr__(self) -> str:
+        return str(self)
+
 
 def print_columns(
     demand_result: DemandResult, stream: Optional[TextIO] = None, json: bool = False,

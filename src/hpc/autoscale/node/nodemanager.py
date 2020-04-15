@@ -453,13 +453,20 @@ class NodeManager:
             return
         getattr(self.__cluster_bindings, op_name)(nodes=managed_nodes)
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         attrs = []
         for attr_name in dir(self):
+            if not (attr_name[0].isalpha() or attr_name.startswith("_NodeManager")):
+                continue
+
             attr = getattr(self, attr_name)
             if "__call__" not in dir(attr):
-                attrs.append("{}={}".format(attr_name, attr))
+                attr_expr = attr_name.replace("_NodeManager", "")
+                attrs.append("{}={}".format(attr_expr, attr))
         return "NodeManager({})".format(", ".join(attrs))
+
+    def __repr__(self) -> str:
+        return str(self)
 
 
 @apitrace
@@ -616,7 +623,9 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     max_placement_group_size=bucket.max_placement_group_size,
                     nodes=nodes,
                 )
-                logging.debug("Found %s", node_bucket)
+                logging.debug(
+                    "Found %s with limits %s", node_bucket, repr(bucket_limits[key])
+                )
                 buckets.append(node_bucket)
 
     ret = NodeManager(cluster_bindings, buckets)

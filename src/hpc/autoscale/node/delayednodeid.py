@@ -50,6 +50,9 @@ class DelayedNodeId:
             )
         )
 
+    def __repr__(self) -> str:
+        return str(self)
+
     def clone(self) -> "DelayedNodeId":
         return DelayedNodeId(
             self.name, self.node_id, self.operation_id, self.operation_offset

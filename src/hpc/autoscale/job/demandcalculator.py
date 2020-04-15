@@ -260,6 +260,23 @@ class DemandCalculator:
                 )
                 old_snode.update(new_snode)
 
+    def __str__(self) -> str:
+        attrs = []
+        for attr_name in dir(self):
+            if not (
+                attr_name[0].isalpha() or attr_name.startswith("_DemandCalculator")
+            ):
+                continue
+
+            attr = getattr(self, attr_name)
+            if "__call__" not in dir(attr):
+                attr_expr = attr_name.replace("_DemandCalculator", "")
+                attrs.append("{}={}".format(attr_expr, attr))
+        return "DemandCalculator({})".format(", ".join(attrs))
+
+    def __repr__(self) -> str:
+        return str(self)
+
 
 def new_demand_calculator(
     config: Union[str, dict],

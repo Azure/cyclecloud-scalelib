@@ -54,6 +54,17 @@ class NodeDefinition:
         assert resources is not None
         self.resources = resources
 
+    def __str__(self) -> str:
+        attr_exprs: List[str] = []
+        for attr_name in dir(self):
+            if attr_name[0].isalpha():
+                attr = getattr(self, attr_name)
+                attr_exprs.append("{}={}".format(attr_name, repr(attr)))
+        return "NodeDefinition({})".format(", ".join(attr_exprs))
+
+    def __repr__(self) -> str:
+        return str(self)
+
 
 class NodeBucket:
     """
@@ -185,11 +196,6 @@ class NodeBucket:
 
     def __repr__(self) -> str:
         return str(self)
-        # attrs = {}
-        # for x in sorted(dir(self)):
-        #     if x[0].isalpha():
-        #         attrs[x] = getattr(self, x)
-        # return "NodeBucket({})".format(attrs)
 
 
 def bucket_candidates(
