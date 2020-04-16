@@ -14,6 +14,7 @@ from hpc.autoscale.node.nodehistory import (
 )
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
 from hpc.autoscale.results import AllocationResult, BootupResult, Result
+from hpc.autoscale.util import apitrace, apitraceonly
 
 
 class DemandCalculator:
@@ -38,11 +39,14 @@ class DemandCalculator:
         )
         self.__set_buffer_delayed_invocations: List[Tuple[Any, ...]] = []
 
+    @apitrace
     def add_jobs(self, jobs: List[Job]) -> None:
         for job in jobs:
-            self.add_job(job)
+            self._add_job(job)
 
+    @apitrace
     def add_job(self, job: Job) -> None:
+        assert isinstance(job, Job)
         self._add_job(job)
 
     def _add_job(self, job: Job) -> Result:
@@ -190,12 +194,14 @@ class DemandCalculator:
     def get_compute_nodes(self) -> List[Node]:
         return list(self.__scheduler_nodes.values())
 
+    @apitrace
     def finish(self) -> DemandResult:
         # for nodearray, vm_size, count, placement_group_id in self.__set_buffer_delayed_invocations:
         #     self.__set_buffer(nodearray, vm_size, count, placement_group_id)
         self.node_history.update(self.__scheduler_nodes.values())
         return self.get_demand()
 
+    @apitraceonly
     def get_demand(self) -> DemandResult:
         required_nodes = [
             snode for snode in self.__scheduler_nodes.values() if snode.required
@@ -212,6 +218,7 @@ class DemandCalculator:
             list(self.node_mgr.get_new_nodes()), required_nodes, unrequired_nodes,
         )
 
+    @apitrace
     def find_unmatched_for(
         self, at_least: float = 300, unmatched_nodes: Optional[List[Node]] = None,
     ) -> List[Node]:
@@ -225,6 +232,7 @@ class DemandCalculator:
                 ret.append(by_hostname[hostname])
         return ret
 
+    @apitrace
     def delete(self, nodes: Optional[List[Node]] = None) -> None:
         nodes = nodes if nodes is not None else self.get_demand().unmatched_nodes
         if not nodes:
@@ -234,6 +242,7 @@ class DemandCalculator:
         logging.debug("deleting %s", [n.name for n in nodes])
         return self.node_mgr.delete(nodes)
 
+    @apitrace
     def bootup(self, nodes: Optional[List[Node]] = None) -> BootupResult:
         nodes = nodes if nodes is not None else self.get_demand().new_nodes
         if not nodes:
@@ -243,6 +252,7 @@ class DemandCalculator:
         logging.debug("booting up %s", [n.name for n in nodes])
         return self.node_mgr.bootup(nodes)
 
+    @apitrace
     def update_scheduler_nodes(self, scheduler_nodes: List[SchedulerNode]) -> None:
         for new_snode in scheduler_nodes:
             if new_snode.hostname not in self.__scheduler_nodes:
@@ -278,6 +288,7 @@ class DemandCalculator:
         return str(self)
 
 
+@apitrace
 def new_demand_calculator(
     config: Union[str, dict],
     existing_nodes: Optional[List[SchedulerNode]] = None,

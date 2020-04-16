@@ -42,6 +42,9 @@ class Job:
             name = ht.JobId(str(_default_job_id))
 
         if packing_strategy is not None:
+            assert PackingStrategy.is_valid(
+                packing_strategy
+            ), "Invalid packing_strategy {}".format(packing_strategy)
             self.__packing_strategy = packing_strategy
         elif node_count > 0:
             self.__packing_strategy = PackingStrategy.SCATTER
