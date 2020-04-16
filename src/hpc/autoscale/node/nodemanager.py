@@ -534,7 +534,10 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                 location = nodearray["Region"]
                 subnet = nodearray["SubnetId"]
                 vcpu_count = bucket.virtual_machine.vcpu_count
-                memory = bucket.virtual_machine.memory
+                bucket_memory_gb = nodearray.get("Memory") or (
+                    bucket.virtual_machine.memory
+                )
+                bucket_memory = ht.Memory(bucket_memory_gb, "g")
 
                 bucket_id = bucket.bucket_id
 
@@ -547,7 +550,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     if n["Name"] in bucket.active_nodes
                     and n.get("PlacementGroupId") == pg
                 ]
-
+                
                 nodes = []
 
                 for cc_node_rec in cc_node_records:
@@ -557,14 +560,14 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     vm_size_node = cc_node_rec["MachineType"]
                     hostname = cc_node_rec.get("Hostname")
                     private_ip = cc_node_rec.get("PrivateIp")
-                    location = cc_node_rec.get("Region")
                     vcpu_count = (
                         cc_node_rec.get("CoreCount")
                         or bucket.virtual_machine.vcpu_count
                     )
-                    memory = cc_node_rec.get("Memory") or (
-                        bucket.virtual_machine.memory * 1024
+                    node_memory_gb = cc_node_rec.get("Memory") or (
+                        bucket.virtual_machine.memory
                     )
+                    node_memory = ht.Memory(node_memory_gb, "g")
                     placement_group = cc_node_rec.get("PlacementGroupId")
                     infiniband = bool(placement_group)
                     state = cc_node_rec.get("Status")
@@ -587,7 +590,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                             location=location,
                             spot=spot,
                             vcpu_count=vcpu_count,
-                            memory=memory,
+                            memory=node_memory,
                             infiniband=infiniband,
                             state=state,
                             power_state=state,
@@ -607,7 +610,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     spot=spot,
                     subnet=subnet,
                     vcpu_count=vcpu_count,
-                    memory=ht.Memory(memory, "g"),
+                    memory=bucket_memory,
                     placement_group=pg,
                     resources=custom_resources,
                 )

@@ -57,7 +57,7 @@ MemoryValue = typing.Union[float, int]
 class Memory:
     def __init__(self, value: MemoryValue, magnitude: MemoryMagnitude) -> None:
         self.__value = value
-        assert isinstance(value, (int, float))
+        assert isinstance(value, (int, float)), type(value)
         self.__magnitude = magnitude
         assert (
             magnitude in _MAG_CONVERSIONS

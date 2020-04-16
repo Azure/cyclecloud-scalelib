@@ -121,6 +121,7 @@ class Node(BaseNode):
         self.__location = location
         self.__spot = spot
         self.__vcpu_count = vcpu_count
+        assert isinstance(memory, ht.Memory)
         self.__memory = memory
         self.__infiniband = infiniband
         self.__resources = resources or ht.ResourceDict({})
