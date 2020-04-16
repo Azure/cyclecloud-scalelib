@@ -68,6 +68,7 @@ class MockClusterBinding(ClusterBindingInterface):
         resources: Dict,
         max_core_count: int = 1_000_000,
         max_count: int = 100_000,
+        spot: bool = False,
     ) -> ClusterNodearrayStatus:
         nodearray_status = ClusterNodearrayStatus()
         nodearray_status.buckets = []
@@ -80,6 +81,7 @@ class MockClusterBinding(ClusterBindingInterface):
             "Region": self.region,
             "SubnetId": self.subnet_id,
             "Configuration": {"autoscale": {"resources": resources}},
+            "Interruptible": spot,
         }
         for attr in dir(nodearray_status):
             if attr[0].isalpha() and "count" in attr:
@@ -101,9 +103,17 @@ class MockClusterBinding(ClusterBindingInterface):
         family_consumed_core_count: Optional[int] = None,
         family_quota_core_count: Optional[int] = None,
         family_quota_count: Optional[int] = None,
+        regional_consumed_core_count: Optional[int] = None,
+        regional_quota_core_count: Optional[int] = None,
+        regional_quota_count: Optional[int] = None,
         max_placement_group_size: int = 100,
         placement_groups: Optional[List[str]] = None,
     ) -> NodearrayBucketStatus:
+        def pick(a: Optional[int], b: Optional[int]) -> int:
+            if a is not None:
+                return a
+            assert b is not None
+            return b
 
         assert vm_sizes.get_family(vm_size) != "unknown", vm_size
         assert isinstance(memory, Memory)
@@ -119,31 +129,30 @@ class MockClusterBinding(ClusterBindingInterface):
         bucket_status.active_count = max_count - available_count
         bucket_status.active_nodes = []
         bucket_status.max_placement_group_size = max_placement_group_size
-        bucket_status.family_consumed_core_count = (
-            family_consumed_core_count
-            if family_consumed_core_count is not None
-            else bucket_status.active_count * vcpu_count
-        )
-        bucket_status.family_quota_count = (
-            family_quota_count if family_quota_count is not None else available_count
-        )
-        bucket_status.family_quota_core_count = (
-            family_quota_core_count
-            if family_quota_core_count is not None
-            else bucket_status.family_quota_count * vcpu_count
+        bucket_status.family_consumed_core_count = pick(
+            family_consumed_core_count, bucket_status.active_count * vcpu_count
         )
 
-        bucket_status.regional_quota_count = bucket_status.family_quota_count
+        bucket_status.family_quota_count = pick(family_quota_count, available_count)
+        bucket_status.family_quota_core_count = pick(
+            family_quota_core_count, bucket_status.family_quota_count * vcpu_count
+        )
+
+        bucket_status.regional_quota_count = pick(
+            regional_quota_count, bucket_status.family_quota_count
+        )
         bucket_status.quota_count = bucket_status.family_quota_count
 
         bucket_status.active_core_count = bucket_status.active_count * vcpu_count
-        bucket_status.regional_consumed_core_count = (
-            bucket_status.family_consumed_core_count
+        bucket_status.regional_consumed_core_count = pick(
+            regional_consumed_core_count, bucket_status.family_consumed_core_count
         )
         bucket_status.consumed_core_count = bucket_status.family_consumed_core_count
         bucket_status.available_core_count = bucket_status.available_count * vcpu_count
         bucket_status.max_core_count = bucket_status.max_count * vcpu_count
-        bucket_status.regional_quota_core_count = bucket_status.family_quota_core_count
+        bucket_status.regional_quota_core_count = pick(
+            regional_quota_core_count, bucket_status.family_quota_core_count
+        )
         bucket_status.quota_core_count = bucket_status.family_quota_core_count
         bucket_status.max_placement_group_core_size = (
             bucket_status.max_placement_group_size * vcpu_count

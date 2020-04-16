@@ -1,10 +1,11 @@
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Union
 
 from cyclecloud.model.ClusterStatusModule import ClusterStatus  # noqa: F401
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.util import partition
+from math import ceil
 
 
 class _SharedLimit:
@@ -28,10 +29,10 @@ class _SharedLimit:
         return self._max_core_count // core_count
 
     def _active_count(self, core_count: int) -> int:
-        return self._consumed_core_count // core_count
+        return self._max_count(core_count) - self._available_count(core_count)
 
     def _available_count(self, core_count: int) -> int:
-        return self._max_count(core_count) - self._active_count(core_count)
+        return (self._max_core_count - self._consumed_core_count) // core_count
 
     def _decrement(self, nodes: int, cores_per_node: int) -> None:
         new_core_count = self._consumed_core_count + (nodes * cores_per_node)
@@ -48,6 +49,30 @@ class _SharedLimit:
         self._consumed_core_count = new_core_count
 
 
+class _SpotLimit:
+    """
+        Enabling spot/interruptible 0's out the family limit response
+        as the regional limit is supposed to be used in its place,
+        however that responsibility is on the caller and not the
+        REST api. For this library we handle that for them.
+    """
+    def __init__(self, regional_limits: _SharedLimit) -> None:
+        self._name = "Spot"
+        self._regional_limits = regional_limits
+
+    def _max_count(self, core_count: int) -> int:
+        return self._regional_limits._max_count(core_count)
+
+    def _active_count(self, core_count: int) -> int:
+        return self._regional_limits._active_count(core_count)
+
+    def _available_count(self, core_count: int) -> int:
+        return self._regional_limits._available_count(core_count)
+
+    def _decrement(self, nodes: int, cores_per_node: int) -> None:
+        pass
+
+
 class BucketLimits:
     def __init__(
         self,
@@ -55,7 +80,7 @@ class BucketLimits:
         regional_limits: _SharedLimit,
         cluster_limits: _SharedLimit,
         nodearray_limits: _SharedLimit,
-        family_limits: _SharedLimit,
+        family_limits: Union[_SharedLimit, _SpotLimit],
         active_core_count: int,
         active_count: int,
         available_core_count: int,
@@ -77,9 +102,10 @@ class BucketLimits:
             nodearray_limits, _SharedLimit
         ) and nodearray_limits._name.startswith("NodeArray")
         self._nodearray_limits = nodearray_limits
-        assert isinstance(
-            family_limits, _SharedLimit
-        ) and family_limits._name.startswith("VM Family")
+        assert isinstance(family_limits, (_SharedLimit, _SpotLimit)) and (
+            family_limits._name.startswith("VM Family")
+            or family_limits._name.startswith("Spot")
+        )
         self._family_limits = family_limits
         assert active_core_count is not None
         self.__active_core_count = active_core_count
@@ -196,6 +222,22 @@ class BucketLimits:
     def family_available_count(self) -> int:
         return self._family_limits._available_count(self.__vcpu_count)
 
+    def __str__(self) -> str:
+        return "BucketLimit(vcpu_count={}, region={}/{}, family={}/{}, cluster={}/{}, nodearray={}/{})".format(
+            self.__vcpu_count,
+            self.regional_available_count,
+            self.regional_quota_count,
+            self.family_available_count,
+            self.family_max_count,
+            self.cluster_available_count,
+            self.cluster_max_count,
+            self.nodearray_available_count,
+            self.nodearray_max_count,
+        )
+
+    def __repr__(self) -> str:
+        return str(self)
+
 
 def null_bucket_limits(num_nodes: int, vcpu_count: int) -> BucketLimits:
     cores = num_nodes * vcpu_count
@@ -299,12 +341,20 @@ def create_bucket_limits(
                     available_count = bucket.available_count
                     available_core_count = bucket.available_core_count
 
+                family_limit: Union[_SpotLimit, _SharedLimit] = family_limits[vm_family]
+                if nodearray.nodearray.get("Interruptible"):
+                    # enabling spot/interruptible 0's out the family limit response
+                    # as the regional limit is supposed to be used in its place,
+                    # however that responsibility is on the caller and not the
+                    # REST api. For this library we handle that for them.
+                    family_limit = _SpotLimit(regional_limits[region])
+
                 bucket_limits[key] = BucketLimits(
                     vcpu_count,
                     regional_limits[region],
                     cluster_limit,
                     nodearray_limits[nodearray.name],
-                    family_limits[vm_family],
+                    family_limit,
                     active_core_count=active_core_count,
                     active_count=active_count,
                     available_core_count=available_core_count,
