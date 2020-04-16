@@ -68,14 +68,14 @@ def test_basic():
         return Job(jobid, job_constraints=job_constraints, iterations=t)
 
     # fmt: off
-    # run_test(snodes(), [],                       unmatched=1, matched=0, new=0)  # noqa
-    # run_test(snodes(), [_xjob("1")],             unmatched=0, matched=1, new=0)  # noqa
-    # run_test(snodes(), [_xjob("1"), _xjob("2")], unmatched=0, matched=2, new=1)  # noqa      
+    run_test(snodes(), [],                       unmatched=1, matched=0, new=0)  # noqa
+    run_test(snodes(), [_xjob("1")],             unmatched=0, matched=1, new=0)  # noqa
+    run_test(snodes(), [_xjob("1"), _xjob("2")], unmatched=0, matched=2, new=1)  # noqa      
 
-    # run_test(snodes(),
-    #     [_xjob("1", {"customer_htc_flag": False}),
-    #         _xjob("2", {"customer_htc_flag": False})],
-    #                                             unmatched=1, matched=0, new=0)  # noqa
+    run_test(snodes(),
+        [_xjob("1", {"customer_htc_flag": False}),
+            _xjob("2", {"customer_htc_flag": False})],
+                                                unmatched=1, matched=0, new=0)  # noqa
 
     run_test(
         snodes(),
@@ -97,7 +97,7 @@ def test_basic():
     run_test_b(snodes(), [_job("1", t=4)],        unmatched=0, matched=1, new=0)  # noqa
 
     run_test_b(snodes(), [_job("1", {"slots": 4}, t=3,)],
-                                                unmatched=0, matched=3, new=2)  # noqa
+                                                  unmatched=0, matched=3, new=2)  # noqa
 
     # fmt: on
 

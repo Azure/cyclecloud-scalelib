@@ -544,7 +544,8 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                 cc_node_records = [
                     n
                     for n in cluster_status.nodes
-                    if n["Name"] in bucket.active_nodes and n.placement_group == pg
+                    if n["Name"] in bucket.active_nodes
+                    and n.get("PlacementGroupId") == pg
                 ]
 
                 nodes = []

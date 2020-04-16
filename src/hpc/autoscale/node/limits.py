@@ -52,7 +52,6 @@ class BucketLimits:
     def __init__(
         self,
         vcpu_count: int,
-        quota_limits: _SharedLimit,
         regional_limits: _SharedLimit,
         cluster_limits: _SharedLimit,
         nodearray_limits: _SharedLimit,
@@ -66,10 +65,6 @@ class BucketLimits:
     ) -> None:
         assert vcpu_count is not None
         self.__vcpu_count = vcpu_count
-        assert isinstance(quota_limits, _SharedLimit) and quota_limits._name.startswith(
-            "Quota"
-        )
-        self._quota_limits = quota_limits
         assert isinstance(
             regional_limits, _SharedLimit
         ) and regional_limits._name.startswith("Region")
@@ -105,7 +100,6 @@ class BucketLimits:
         self.__available_core_count -= vcpu_count * count
         self.__available_count -= count
 
-        self._quota_limits._decrement(count, vcpu_count)
         self._regional_limits._decrement(count, vcpu_count)
         self._cluster_limits._decrement(count, vcpu_count)
         self._nodearray_limits._decrement(count, vcpu_count)
@@ -137,22 +131,6 @@ class BucketLimits:
     @property
     def max_count(self) -> int:
         return self.__max_count
-
-    @property
-    def quota_consumed_core_count(self) -> int:
-        return self._quota_limits._consumed_core_count
-
-    @property
-    def quota_core_count(self) -> int:
-        return self._quota_limits._max_core_count
-
-    @property
-    def quota_count(self) -> int:
-        return self._quota_limits._max_count(self.__vcpu_count)
-
-    @property
-    def quota_available_count(self) -> int:
-        return self._quota_limits._available_count(self.__vcpu_count)
 
     @property
     def regional_consumed_core_count(self) -> int:
@@ -223,7 +201,6 @@ def null_bucket_limits(num_nodes: int, vcpu_count: int) -> BucketLimits:
     cores = num_nodes * vcpu_count
     return BucketLimits(
         vcpu_count,
-        _SharedLimit("Quota", cores, cores),
         _SharedLimit("Region(?)", cores, cores),
         _SharedLimit("Cluster(?)", cores, cores),
         _SharedLimit("NodeArray(?)", cores, cores),
@@ -240,6 +217,7 @@ def null_bucket_limits(num_nodes: int, vcpu_count: int) -> BucketLimits:
 def create_bucket_limits(
     cluster_name: ht.ClusterName, cluster_status: ClusterStatus,
 ) -> Dict[Tuple[ht.BucketId, ht.PlacementGroup], BucketLimits]:
+
     by_nodearray = partition(cluster_status.nodes, lambda n: n["Template"])
     for nodearray in cluster_status.nodearrays:
         if nodearray.name not in by_nodearray:
@@ -251,7 +229,6 @@ def create_bucket_limits(
         cluster_status.max_core_count,
     )
     nodearray_limits: Dict[str, _SharedLimit] = {}
-    quota_limit = None
     regional_limits: Dict[str, _SharedLimit] = {}
     family_limits: Dict[str, _SharedLimit] = {}
     bucket_limits: Dict[Tuple[ht.BucketId, ht.PlacementGroup], BucketLimits] = {}
@@ -264,15 +241,8 @@ def create_bucket_limits(
             0,
             nodearray.max_core_count,  # noqa: E128
         )
-        for bucket in nodearray.buckets:
-            if quota_limit is None:
-                quota_limit = _SharedLimit(
-                    "Quota",
-                    # TODO not sure if it is this or consumed_core_count
-                    bucket.regional_consumed_core_count,
-                    bucket.quota_core_count,  # noqa: E128
-                )
 
+        for bucket in nodearray.buckets:
             vm_family = vm_sizes.get_family(bucket.definition.machine_type)
 
             if region not in regional_limits:
@@ -291,8 +261,6 @@ def create_bucket_limits(
             assert (
                 bucket.bucket_id not in bucket_limits
             ), "duplicate UUID for bucket_id: {}".format(bucket.bucket_id)
-
-            assert quota_limit is not None
 
             vcpu_count = bucket.virtual_machine.vcpu_count
 
@@ -333,7 +301,6 @@ def create_bucket_limits(
 
                 bucket_limits[key] = BucketLimits(
                     vcpu_count,
-                    quota_limit,
                     regional_limits[region],
                     cluster_limit,
                     nodearray_limits[nodearray.name],

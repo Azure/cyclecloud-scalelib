@@ -123,7 +123,6 @@ class NodeBucket:
     def available_count(self) -> int:
         return min(
             self.limits.available_count,
-            self.limits.quota_available_count,
             self.limits.regional_available_count,
             self.limits.cluster_available_count,
             self.limits.nodearray_available_count,
