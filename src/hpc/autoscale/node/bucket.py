@@ -201,8 +201,8 @@ class NodeBucket:
     def __str__(self) -> str:
         if self.placement_group:
             return "NodeBucket({}, pg={})".format(self.nodearray, self.placement_group)
-        return "NodeBucket({}, available={}, id={})".format(
-            self.nodearray, self.available_count, self.bucket_id
+        return "NodeBucket({}, available={}, id={}, size={})".format(
+            self.nodearray, self.available_count, self.bucket_id, self.vm_size
         )
 
     def __repr__(self) -> str:
