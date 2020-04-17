@@ -8,6 +8,7 @@ import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings import new_cluster_bindings
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
+from hpc.autoscale.codeanalysis import hpcwrap
 from hpc.autoscale.hpclogging import apitrace
 from hpc.autoscale.node import constraints as constraintslib
 from hpc.autoscale.node import vm_sizes
@@ -17,10 +18,9 @@ from hpc.autoscale.node.bucket import (
     bucket_candidates,
     node_from_bucket,
 )
-from hpc.autoscale.node.constraints import minimum_space
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import create_bucket_limits, null_bucket_limits
-from hpc.autoscale.node.node import BaseNode, Node, UnmanagedNode
+from hpc.autoscale.node.node import BaseNode, Node, UnmanagedNode, minimum_space
 from hpc.autoscale.results import AllocationResult, BootupResult
 from hpc.autoscale.util import partition
 
@@ -100,8 +100,6 @@ class NodeManager:
                 assert result.total_slots > 0
                 total_slots_allocated += result.total_slots
 
-                print("\t\t", result.total_slots)
-
                 if total_slots_allocated >= slot_count:
                     break
             else:
@@ -173,9 +171,9 @@ class NodeManager:
 
             min_space = minimum_space(constraints, node)
             per_node = min(remaining, min_space)
-            print("\t", repr(node), per_node)
+
             match_result = node.decrement(constraints, per_node, assignment_id)
-            print("\t", repr(node), min_space, match_result.total_slots)
+
             assert match_result
             remaining -= match_result.total_slots
             assert remaining >= 0, remaining
@@ -334,15 +332,11 @@ class NodeManager:
         by_name = partition(self.get_nodes(), lambda n: n.name)
 
         ret = []
-        print(
-            "found {} nodes for operation {}".format(len(node_list.nodes), operation_id)
-        )
+
         for cc_node in node_list.nodes:
             name = cc_node["Name"]
             if name in by_name:
                 ret.append(by_name[name][0])
-            else:
-                print("Huh? {} not in {}".format(name, by_name))
 
         return ret
 
@@ -356,7 +350,7 @@ class NodeManager:
         result: NodeCreationResult = self.__cluster_bindings.create_nodes(nodes)
 
         for s in result.sets:
-            print(s.message)
+            logging.info(s.message)
 
         for creation_set in result.sets:
             if creation_set.message:
@@ -496,6 +490,11 @@ class NodeManager:
             return
         getattr(self.__cluster_bindings, op_name)(nodes=managed_nodes)
 
+    def set_system_default_resources(self) -> None:
+        self.add_default_resource({}, "ncpus", "node.vcpu_count")
+        self.add_default_resource({}, "pcpus", "node.pcpu_count")
+        self.add_default_resource({}, "ngpus", "node.gpu_count")
+
     def example_node(self, location: str, vm_size: str) -> Node:
         aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
 
@@ -543,7 +542,9 @@ class NodeManager:
 
 @apitrace
 def new_node_manager(
-    config: dict, existing_nodes: Optional[List[UnmanagedNode]] = None
+    config: dict,
+    existing_nodes: Optional[List[UnmanagedNode]] = None,
+    disable_default_resources: bool = False,
 ) -> NodeManager:
 
     logging.initialize_logging(config)
@@ -576,6 +577,9 @@ def new_node_manager(
         bucket = NodeBucket(node_def, limits, len(nodes_list), nodes_list)
 
         ret.add_unmanaged_bucket(bucket)
+
+    if not disable_default_resources:
+        set_system_default_resources(ret)
 
     return ret
 
@@ -725,17 +729,18 @@ class _DefaultResource:
         if node.resources.get(self.resource_name) is not None:
             return
 
-        # let's create a temporary node to do selection criteria
-        from hpc.autoscale.job.computenode import SchedulerNode
-
-        node_name = ht.NodeName("default-node-selection[{}]".format(self.resource_name))
-        temp_node = SchedulerNode(node_name, node.resources)
-
         for criteria in self.selection:
-            if not criteria.satisfied_by_node(temp_node):
+            if not criteria.satisfied_by_node(node):
                 return
 
         # it met all of our criteria, so set the default
         default_value = self.default_value_function(node)
         node.resources[self.resource_name] = default_value
         node.available[self.resource_name] = default_value
+
+
+@hpcwrap
+def set_system_default_resources(node_mgr: NodeManager) -> None:
+    node_mgr.add_default_resource({}, "ncpus", "node.vcpu_count")
+    node_mgr.add_default_resource({}, "pcpus", "node.pcpu_count")
+    node_mgr.add_default_resource({}, "ngpus", "node.gpu_count")

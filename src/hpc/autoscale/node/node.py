@@ -1,14 +1,42 @@
-from abc import ABC, abstractproperty
+from abc import ABC, abstractmethod, abstractproperty
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Set
 from uuid import uuid4
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
+from hpc.autoscale.codeanalysis import hpcwrap
 from hpc.autoscale.node import vm_sizes
-from hpc.autoscale.node.constraints import NodeConstraint, minimum_space
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
-from hpc.autoscale.results import MatchResult
+from hpc.autoscale.results import MatchResult, SatisfiedResult
+
+
+class NodeConstraint(ABC):
+    @abstractmethod
+    def satisfied_by_bucket(self, bucket: "NodeBucket") -> SatisfiedResult:
+        raise RuntimeError()
+
+    @abstractmethod
+    def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        raise RuntimeError()
+
+    @abstractmethod
+    def do_decrement(self, node: "Node") -> bool:
+        raise RuntimeError()
+
+    def minimum_space(self, node: "Node") -> int:
+        return -1
+
+    @abstractmethod
+    def to_dict(self) -> dict:
+        raise RuntimeError()
+
+    @abstractmethod
+    def __str__(self) -> str:
+        ...
+
+    def __repr__(self) -> str:
+        return str(self)
 
 
 class BaseNode(ABC):
@@ -449,3 +477,24 @@ class UnmanagedNode(Node):
 
     def __repr__(self) -> str:
         return "Unmanaged{}".format(Node.__repr__(self))
+
+
+@hpcwrap
+def minimum_space(constraints: List[NodeConstraint], node: "Node") -> int:
+    min_space = None if constraints else 1
+
+    for constraint in constraints:
+        # TODO not sure about how to handle this
+        constraint_min_space = constraint.minimum_space(node)
+        assert constraint_min_space is not None
+        # logging.info("RDH %s %s", constraint_min_space, job_constraint)
+
+        if constraint_min_space > -1:
+            if min_space is None:
+                min_space = constraint_min_space
+            min_space = min(min_space, constraint_min_space)
+
+    if min_space is None:
+        min_space = -1
+
+    return min_space

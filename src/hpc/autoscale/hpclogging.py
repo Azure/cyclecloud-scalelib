@@ -49,7 +49,7 @@ def trace(msg: str, *args: Any) -> None:
 
 
 def reprolog(func: Callable, args: Dict[str, Any], retval: Any) -> Any:
-    print("effective log level", _REPRO_LOGGER.getEffectiveLevel())
+
     if _REPRO_LOGGER.getEffectiveLevel() > REPRO:
         return
 
@@ -61,6 +61,7 @@ def reprolog(func: Callable, args: Dict[str, Any], retval: Any) -> Any:
         jsonpickle.encode(
             {
                 "timestamp": time.ctime(),
+                "instance_id": __INSTANCE_ID,
                 "function": func,
                 "args": args,
                 "retval": retval,
@@ -70,22 +71,27 @@ def reprolog(func: Callable, args: Dict[str, Any], retval: Any) -> Any:
 
 
 __CALL_ID = 10000
+__INSTANCE_ID = time.time()
 
 
 def apitrace(
     function: Callable,
     repro_level: bool = True,
-    debug_level: bool = True,
+    fine_level: bool = True,
     trace_level: bool = True,
 ) -> Callable:
 
-    if not (debug_level or trace_level):
+    if not (repro_level or fine_level or trace_level):
         return function
 
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
+    if hasattr(function, "is_apitraced"):
+        return function
+
+    def apitrace_wrapper(*args: Any, **kwargs: Any) -> Any:
         global __CALL_ID
         call_id = "invoke-{}".format(__CALL_ID)
         __CALL_ID += 1
+        instance_id = "inst-{}".format(__INSTANCE_ID)
 
         sig = inspect.signature(function)
         arg_strs: List[str] = []
@@ -94,12 +100,15 @@ def apitrace(
         args_dict = {}
 
         for n in range(len(args)):
-            arg_name = param_names[n]
+            arg_name = param_names[min(n, len(param_names) - 1)]
             arg_value = args[n]
             args_dict[arg_name] = arg_value
 
             if arg_name == "self":
-                self_arg = arg_value
+                if function.__name__ != "__init__":
+                    self_arg = arg_value
+                else:
+                    self_arg = "__init__"
             else:
                 arg_strs.append("{}={}".format(arg_name, repr(arg_value)))
 
@@ -110,38 +119,49 @@ def apitrace(
 
         if trace_level:
             trace(
-                "TRACE_ENTER: [%s] %s invoke %s(%s)",
+                "TRACE_ENTER: [%s] [%s] %s invoke %s(%s)",
+                instance_id,
                 call_id,
                 self_arg or "function",
                 function.__name__,
                 ", ".join(arg_strs),
             )
 
-        if debug_level:
-            logging.debug(
-                "ENTER: [%s] %s(%s)", call_id, function.__name__, ", ".join(arg_strs),
+        if fine_level:
+            fine(
+                "ENTER: [%s] [%s] %s(%s)",
+                instance_id,
+                call_id,
+                function.__name__,
+                ", ".join(arg_strs),
             )
 
         ret_val = function(*args, **kwargs)
         if trace_level:
             trace(
-                "TRACE_EXIT: [%s] %s(...) -> %s",
+                "TRACE_EXIT: [%s] [%s] %s(...) -> %s",
+                instance_id,
                 call_id,
                 function.__name__,
                 repr(ret_val),
             )
 
-        if debug_level:
-            logging.debug(
-                "EXIT: [%s] %s(...) -> %s", call_id, function.__name__, repr(ret_val)
+        if fine_level:
+            fine(
+                "EXIT: [%s] [%s] %s(...) -> %s",
+                instance_id,
+                call_id,
+                function.__name__,
+                repr(ret_val),
             )
 
-        if debug_level:
+        if repro_level:
             reprolog(function, args_dict, ret_val)
 
         return ret_val
 
-    return wrapped
+    setattr(apitrace_wrapper, "is_apitraced", True)
+    return apitrace_wrapper
 
 
 def initialize_logging(config: Optional[Dict[str, Any]] = None) -> None:

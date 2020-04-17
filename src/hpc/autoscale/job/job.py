@@ -1,12 +1,14 @@
 import typing
 from typing import Any, List, NewType, Optional, Union
 
+from hpc.autoscale import codeanalysis
 from hpc.autoscale import hpctypes as ht
+from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.node import nodemanager
 from hpc.autoscale.node.constraints import get_constraints
 from hpc.autoscale.results import AllocationResult, CandidatesResult
 
-if typing.TYPE_CHECKING:
+if typing.TYPE_CHECKING or codeanalysis.RUNTIME_TYPE_CHECKING:
     from hpc.autoscale.node.node import Node  # noqa: F401
     from hpc.autoscale.node.bucket import NodeBucket  # noqa: F401
 
@@ -25,6 +27,7 @@ class PackingStrategy:
 _default_job_id = 0
 
 
+@hpcwrapclass
 class Job:
     def __init__(
         self,

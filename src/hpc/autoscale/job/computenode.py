@@ -1,10 +1,12 @@
 import typing
 
 from hpc.autoscale import hpctypes as ht
+from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.node import Node
 
 
+@hpcwrapclass
 class SchedulerNode(Node):
     def __init__(self, hostname: str, resources: typing.Optional[dict] = None) -> None:
         resources = resources or ht.ResourceDict({})

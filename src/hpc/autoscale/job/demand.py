@@ -1,8 +1,10 @@
 from typing import List
 
+from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.node.node import Node
 
 
+@hpcwrapclass
 class DemandResult:
     """
     Product of DemandCalculator.

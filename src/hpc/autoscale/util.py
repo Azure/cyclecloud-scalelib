@@ -1,7 +1,10 @@
 import uuid as uuidlib
 from typing import Any, Callable, Dict, List, TypeVar
 
+from hpc.autoscale.codeanalysis import hpcwrapclass
 
+
+@hpcwrapclass
 class IncrementingUUID:
     """
     A pseudo uuid utility to make debugging tests easier.

@@ -23,6 +23,7 @@ from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
+from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpctypes import (
     ClusterName,
     Hostname,
@@ -45,6 +46,7 @@ from hpc.autoscale.util import partition
 logger = logging.getLogger("cyclecloud.clustersapi")
 
 
+@hpcwrapclass
 class MockClusterBinding(ClusterBindingInterface):
     def __init__(self, cluster_name: str = "clusty") -> None:
         self.__cluster_name = ClusterName(cluster_name)
@@ -381,6 +383,7 @@ class MockClusterBinding(ClusterBindingInterface):
 NodeRecord = Dict[str, Any]
 
 
+@hpcwrapclass
 class MockNodeManagementResult:
     def __init__(self, operation_id: OperationId, nodes: List[Node]) -> None:
         self.operation_id = operation_id

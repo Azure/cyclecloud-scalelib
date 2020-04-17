@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import util
+from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.node import constraints as constraintslib  # noqa: F401
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import BucketLimits
@@ -10,6 +11,7 @@ from hpc.autoscale.node.node import Node
 from hpc.autoscale.results import CandidatesResult, Result
 
 
+@hpcwrapclass
 class NodeDefinition:
     """
     Can be serialized into a node request
@@ -63,6 +65,7 @@ class NodeDefinition:
         return str(self)
 
 
+@hpcwrapclass
 class NodeBucket:
     """
     combination of a definition plus the allocation constraints and existing nodes
@@ -210,7 +213,7 @@ class NodeBucket:
 
 
 def bucket_candidates(
-    candidates: List[NodeBucket], constraints: List["constraintslib.NodeConstraint"],
+    candidates: List["NodeBucket"], constraints: List["constraintslib.NodeConstraint"],
 ) -> CandidatesResult:
     if not candidates:
         return CandidatesResult("NoBucketsDefined", child_results=[],)  # TODO 46

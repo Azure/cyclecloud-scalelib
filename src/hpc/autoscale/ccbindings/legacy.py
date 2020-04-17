@@ -22,12 +22,14 @@ from urllib3.exceptions import InsecureRequestWarning
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
+from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.util import partition
 
 logger = logging.getLogger("cyclecloud.clustersapi")
 
 
+@hpcwrapclass
 class ClusterBinding(ClusterBindingInterface):
     def __init__(
         self,

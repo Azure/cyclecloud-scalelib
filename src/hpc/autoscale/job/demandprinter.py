@@ -4,11 +4,13 @@ import json
 import sys
 from typing import Any, List, Optional, Set, TextIO, Tuple
 
+from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpctypes import Hostname
 from hpc.autoscale.job.demand import DemandResult
 from hpc.autoscale.node.node import Node
 
 
+@hpcwrapclass
 class DemandPrinter:
     def __init__(
         self,

@@ -3,6 +3,7 @@ import sys
 from typing import List
 
 import hpc.autoscale.hpclogging as logging
+from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.job import demandprinter
 from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demand import DemandResult
@@ -18,6 +19,7 @@ logging.basicConfig(
 _exit_code = 0
 
 
+@hpcwrapclass
 class BasicDriver:
     def __init__(self, jobs: List[Job], scheduler_nodes: List[SchedulerNode],) -> None:
         self.jobs = jobs

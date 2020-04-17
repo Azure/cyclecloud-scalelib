@@ -2,11 +2,13 @@ import json
 from typing import Any, List, Optional, Tuple, Union
 
 import hpc.autoscale.hpclogging as logging
+from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpclogging import apitrace
 from hpc.autoscale.hpctypes import OperationId
 from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demand import DemandResult
 from hpc.autoscale.job.job import Job, PackingStrategy
+from hpc.autoscale.node import nodemanager
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import (
     NodeHistory,
@@ -17,6 +19,7 @@ from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
 from hpc.autoscale.results import AllocationResult, BootupResult, Result
 
 
+@hpcwrapclass
 class DemandCalculator:
     """
         This class is responsible for calculating what the demand for nodes is based on the Jobs fed into it.
@@ -150,7 +153,10 @@ class DemandCalculator:
 
         if not candidates_result:
             # TODO log or something
-            logging.warn("There are no resources to scale up for job %s", job)
+            logging.warning("There are no resources to scale up for job %s", job)
+            logging.warning("See below:")
+            for line in repr(candidates_result).splitlines():
+                logging.warning("    %s", line)
             return candidates_result
 
         failure_reasons = self._handle_allocate(
@@ -297,6 +303,7 @@ def new_demand_calculator(
     existing_nodes: Optional[List[SchedulerNode]] = None,
     node_mgr: Optional[NodeManager] = None,
     node_history: Optional[NodeHistory] = None,
+    disable_default_resources: bool = False,
 ) -> DemandCalculator:
 
     if isinstance(config, str):
@@ -312,6 +319,9 @@ def new_demand_calculator(
 
     if node_mgr is None:
         node_mgr = new_node_manager(config_dict)
+
+    if not disable_default_resources:
+        nodemanager.set_system_default_resources(node_mgr)
 
     node_history = node_history or SQLiteNodeHistory()
 

@@ -17,6 +17,8 @@ import typing
 
 from typing_extensions import Literal
 
+from hpc.autoscale.codeanalysis import hpcwrapclass
+
 BucketId = typing.NewType("BucketId", str)
 ClusterName = typing.NewType("ClusterName", str)
 Hostname = typing.NewType("Hostname", str)
@@ -54,6 +56,7 @@ _MAG_CONVERSIONS = {
 MemoryValue = typing.Union[float, int]
 
 
+@hpcwrapclass
 class Memory:
     def __init__(self, value: MemoryValue, magnitude: MemoryMagnitude) -> None:
         self.__value = value

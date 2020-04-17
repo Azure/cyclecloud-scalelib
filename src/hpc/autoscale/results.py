@@ -8,9 +8,10 @@ from uuid import uuid4
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import node as nodepkg
+from hpc.autoscale.codeanalysis import RUNTIME_TYPE_CHECKING, hpcwrapclass
 
-if typing.TYPE_CHECKING:
-    from hpc.autoscale.node.node import Node
+if typing.TYPE_CHECKING or RUNTIME_TYPE_CHECKING:
+    from hpc.autoscale import node
 
 Reasons = Optional[List[str]]  # pylint: disable=invalid-name
 
@@ -59,11 +60,12 @@ class Result(ABC):
         return str(self)
 
 
+@hpcwrapclass
 class AllocationResult(Result):
     def __init__(
         self,
         status: str,
-        nodes: Optional[List["Node"]] = None,
+        nodes: Optional[List["node.node.Node"]] = None,
         slots_allocated: Optional[int] = None,
         reasons: Reasons = None,
     ) -> None:
@@ -89,15 +91,16 @@ class AllocationResult(Result):
             )
         else:
             return "AllocationResult(status={}, reason={})".format(
-                self.status, self.reasons
+                self.status, "see log for more details"
             )
 
 
+@hpcwrapclass
 class MatchResult(Result):
     def __init__(
         self,
         status: str,
-        node: "Node",
+        node: "node.node.Node",
         slots: int,
         reasons: Optional[List[str]] = None,
     ) -> None:
@@ -122,6 +125,7 @@ class MatchResult(Result):
             )
 
 
+@hpcwrapclass
 class CandidatesResult(Result):
     def __init__(
         self,
@@ -135,7 +139,7 @@ class CandidatesResult(Result):
         fire_result_handlers(self)
 
     def __str__(self) -> str:
-        reasons = " AND ".join(set(self.reasons))[:150]
+        reasons = " AND ".join(set(self.reasons))[:5]
         if self:
             return "CandidatesResult(status={}, candidates={})".format(
                 self.status, [str(x) for x in self.candidates]
@@ -144,7 +148,7 @@ class CandidatesResult(Result):
             return "CandidatesResult(status={}, reason={})".format(self.status, reasons)
 
     def __repr__(self) -> str:
-        reasons = " AND ".join(set(self.reasons))
+        reasons = "\n    ".join(set(self.reasons))
         if self:
             return "CandidatesResult(status={}, candidates={})".format(
                 self.status, self.candidates
@@ -153,12 +157,13 @@ class CandidatesResult(Result):
             return "CandidatesResult(status={}, reason={})".format(self.status, reasons)
 
 
+@hpcwrapclass
 class SatisfiedResult(Result):
     def __init__(
         self,
         status: str,
         constraint: "nodepkg.constraints.NodeConstraint",
-        node: "Node",
+        node: "node.node.Node",
         reasons: Reasons = None,
         score: Optional[int] = 1,
     ) -> None:
@@ -186,13 +191,14 @@ class SatisfiedResult(Result):
             )
 
 
+@hpcwrapclass
 class BootupResult(Result):
     def __init__(
         self,
         status: str,
         operation_id: ht.OperationId,
         request_id: Optional[ht.RequestId],
-        nodes: Optional[List["Node"]] = None,
+        nodes: Optional[List["node.node.Node"]] = None,
         reasons: Reasons = None,
     ) -> None:
         Result.__init__(self, status, reasons)
@@ -215,6 +221,7 @@ class ResultsHandler(ABC):
         pass
 
 
+@hpcwrapclass
 class DefaultContextHandler(ResultsHandler):
     """
         This class does the following:
