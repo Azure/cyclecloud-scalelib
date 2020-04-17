@@ -1,9 +1,9 @@
-import logging
 from abc import ABC, abstractproperty
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Set
 from uuid import uuid4
 
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.node.constraints import NodeConstraint, minimum_space

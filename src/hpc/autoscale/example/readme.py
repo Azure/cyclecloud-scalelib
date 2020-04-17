@@ -1,8 +1,8 @@
-import logging
 import sys
 import typing
 from uuid import uuid4
 
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.example.readmeutil import clone_dcalc, example, withcontext
 from hpc.autoscale.hpctypes import Memory
 from hpc.autoscale.job.computenode import SchedulerNode

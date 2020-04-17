@@ -1,8 +1,8 @@
-import logging
 import os
 import sys
 from typing import List
 
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.job import demandprinter
 from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demand import DemandResult

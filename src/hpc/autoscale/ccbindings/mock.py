@@ -2,7 +2,6 @@
 # Licensed under the MIT License.
 #
 
-import logging
 import uuid
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
@@ -22,6 +21,7 @@ from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeCreationResultSetModule import NodeCreationResultSet
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
 from hpc.autoscale.hpctypes import (
     ClusterName,

@@ -1,8 +1,8 @@
-import logging
 from typing import Any
 
 import pytest
 
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
 from hpc.autoscale.hpctypes import Memory
 from hpc.autoscale.node.node import BaseNode

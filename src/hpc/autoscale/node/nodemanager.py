@@ -1,13 +1,14 @@
 import functools
-import logging
 from typing import Callable, Dict, List, Optional, Union
 from uuid import uuid4
 
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings import new_cluster_bindings
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
+from hpc.autoscale.hpclogging import apitrace
 from hpc.autoscale.node import constraints as constraintslib
 from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.node.bucket import (
@@ -21,7 +22,7 @@ from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import create_bucket_limits, null_bucket_limits
 from hpc.autoscale.node.node import BaseNode, Node, UnmanagedNode
 from hpc.autoscale.results import AllocationResult, BootupResult
-from hpc.autoscale.util import apitrace, partition
+from hpc.autoscale.util import partition
 
 logger = logging.getLogger("cyclecloud.buckets")
 
@@ -544,6 +545,9 @@ class NodeManager:
 def new_node_manager(
     config: dict, existing_nodes: Optional[List[UnmanagedNode]] = None
 ) -> NodeManager:
+
+    logging.initialize_logging(config)
+
     ret = _new_node_manager_79(new_cluster_bindings(config))
     existing_nodes = existing_nodes or []
     by_key: Dict[str, List[Node]] = partition(

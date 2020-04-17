@@ -1,8 +1,8 @@
 import json
-import logging
 import os
 from typing import Any, Dict, Optional
 
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 
 RESOURCE_FILE = os.path.join(os.path.dirname(__file__), "vm_sizes.json")

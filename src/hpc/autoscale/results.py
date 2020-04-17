@@ -1,11 +1,11 @@
 """ A collection of Result types that are used throughout the demand calculation."""
-import logging
 import typing
 from abc import ABC, abstractmethod
 from collections.abc import Hashable
 from typing import Callable, Dict, List, Optional, TypeVar
 from uuid import uuid4
 
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import node as nodepkg
 

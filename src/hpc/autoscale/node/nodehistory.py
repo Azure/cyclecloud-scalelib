@@ -1,10 +1,10 @@
 import datetime
-import logging
 import shutil
 import sqlite3
 import typing
 from abc import ABC, abstractmethod
 
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.hpctypes import Hostname
 from hpc.autoscale.node.node import Node
 
@@ -100,7 +100,7 @@ class SQLiteNodeHistory(NodeHistory):
             stmt = "INSERT OR REPLACE INTO nodes (hostname, last_match_time) VALUES {}".format(
                 values_expr
             )
-            logging.log(logging.DEBUG // 2, stmt)
+            logging.fine(stmt)
             self.conn.execute(stmt)
 
         if to_delete:

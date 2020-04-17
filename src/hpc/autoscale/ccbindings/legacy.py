@@ -2,7 +2,6 @@
 # Licensed under the MIT License.
 #
 
-import logging
 from typing import Any, Dict, List, Optional
 
 import cyclecloud.api.clusters
@@ -20,6 +19,7 @@ from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from requests.structures import CaseInsensitiveDict
 from urllib3.exceptions import InsecureRequestWarning
 
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
 from hpc.autoscale.node.node import Node

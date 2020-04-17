@@ -1,7 +1,8 @@
 import json
-import logging
 from typing import Any, List, Optional, Tuple, Union
 
+import hpc.autoscale.hpclogging as logging
+from hpc.autoscale.hpclogging import apitrace
 from hpc.autoscale.hpctypes import OperationId
 from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demand import DemandResult
@@ -14,7 +15,6 @@ from hpc.autoscale.node.nodehistory import (
 )
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
 from hpc.autoscale.results import AllocationResult, BootupResult, Result
-from hpc.autoscale.util import apitrace, apitraceonly
 
 
 class DemandCalculator:
@@ -201,8 +201,11 @@ class DemandCalculator:
         self.node_history.update(self.__scheduler_nodes.values())
         return self.get_demand()
 
-    @apitraceonly
+    @apitrace
     def get_demand(self) -> DemandResult:
+        return self._get_demand()
+
+    def _get_demand(self) -> DemandResult:
         required_nodes = [
             snode for snode in self.__scheduler_nodes.values() if snode.required
         ]

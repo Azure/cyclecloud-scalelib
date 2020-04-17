@@ -1,9 +1,9 @@
-import logging
 import typing
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
 
 import hpc  # noqa: F401
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.hpctypes import ResourceType
 from hpc.autoscale.results import SatisfiedResult
