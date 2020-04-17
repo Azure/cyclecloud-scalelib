@@ -17,7 +17,6 @@ class SchedulerNode(Node):
             hostname=ht.Hostname(hostname),
             private_ip=None,
             vm_size=ht.VMSize("unknown"),
-            vm_family=ht.VMFamily("unknown"),
             location=ht.Location("unknown"),
             spot=False,
             vcpu_count=1,

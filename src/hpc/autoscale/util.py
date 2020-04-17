@@ -56,6 +56,16 @@ def partition(node_list: List[T], func: Callable[[T], K]) -> Dict[K, List[T]]:
     return by_key
 
 
+def partition_single(node_list: List[T], func: Callable[[T], K]) -> Dict[K, T]:
+    result = partition(node_list, func)
+    ret: Dict[K, T] = {}
+    for key, value in result.items():
+        if len(value) != 1:
+            raise RuntimeError("Could not partition list into single values")
+        ret[key] = value[0]
+    return ret
+
+
 def tracelog(msg: str, *args: Any) -> None:
     logging.log(logging.DEBUG // 2, msg, *args)
 

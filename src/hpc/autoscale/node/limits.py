@@ -5,7 +5,6 @@ from cyclecloud.model.ClusterStatusModule import ClusterStatus  # noqa: F401
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.util import partition
-from math import ceil
 
 
 class _SharedLimit:
@@ -56,6 +55,7 @@ class _SpotLimit:
         however that responsibility is on the caller and not the
         REST api. For this library we handle that for them.
     """
+
     def __init__(self, regional_limits: _SharedLimit) -> None:
         self._name = "Spot"
         self._regional_limits = regional_limits
@@ -68,6 +68,14 @@ class _SpotLimit:
 
     def _available_count(self, core_count: int) -> int:
         return self._regional_limits._available_count(core_count)
+
+    @property
+    def _consumed_core_count(self) -> int:
+        return self._regional_limits._consumed_core_count
+
+    @property
+    def _max_core_count(self) -> int:
+        return self._regional_limits._max_core_count
 
     def _decrement(self, nodes: int, cores_per_node: int) -> None:
         pass
@@ -285,7 +293,11 @@ def create_bucket_limits(
         )
 
         for bucket in nodearray.buckets:
-            vm_family = vm_sizes.get_family(bucket.definition.machine_type)
+            aux_vm_info = vm_sizes.get_aux_vm_size_info(
+                region, bucket.definition.machine_type
+            )
+            assert isinstance(aux_vm_info, vm_sizes.AuxVMSizeInfo)
+            vm_family = aux_vm_info.vm_family
 
             if region not in regional_limits:
                 regional_limits[region] = _SharedLimit(

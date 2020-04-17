@@ -114,11 +114,11 @@ class MatchResult(Result):
         reasons = " AND ".join(self.reasons)
         if self:
             return "MatchResult(status={}, node={}, tasks={})".format(
-                self.status, self.node, self.total_slots
+                self.status, repr(self.node), self.total_slots
             )
         else:
             return "MatchResult(status={}, node={}, reason={})".format(
-                self.status, self.node, reasons
+                self.status, repr(self.node), reasons
             )
 
 

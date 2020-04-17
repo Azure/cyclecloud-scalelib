@@ -1,10 +1,11 @@
 import logging
 from abc import ABC, abstractproperty
 from copy import deepcopy
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 from uuid import uuid4
 
 from hpc.autoscale import hpctypes as ht
+from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.node.constraints import NodeConstraint, minimum_space
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.results import MatchResult
@@ -87,6 +88,22 @@ class BaseNode(ABC):
     def delayed_node_id(self) -> DelayedNodeId:
         ...
 
+    @abstractproperty
+    def vm_capabilities(self) -> Dict[str, Any]:
+        ...
+
+    @abstractproperty
+    def pcpu_count(self) -> int:
+        ...
+
+    @abstractproperty
+    def gpu_count(self) -> int:
+        ...
+
+    @abstractproperty
+    def cores_per_socket(self) -> int:
+        ...
+
 
 class Node(BaseNode):
     def __init__(
@@ -98,7 +115,6 @@ class Node(BaseNode):
         hostname: Optional[ht.Hostname],
         private_ip: Optional[ht.IpAddress],
         vm_size: ht.VMSize,
-        vm_family: ht.VMFamily,
         location: ht.Location,
         spot: bool,
         vcpu_count: int,
@@ -115,7 +131,6 @@ class Node(BaseNode):
         self.__nodearray = nodearray
         self.__bucket_id = bucket_id
         self.__vm_size = vm_size
-        self.__vm_family = vm_family
         self.__hostname = hostname
         self.__private_ip = private_ip
         self.__location = location
@@ -149,6 +164,8 @@ class Node(BaseNode):
         self.__node_attribute_overrides: Dict = {}
         self.__assignments: Set[str] = set()
 
+        self.__aux_vm_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
+
     @property
     def required(self) -> bool:
         return self._allocated
@@ -176,7 +193,7 @@ class Node(BaseNode):
 
     @property
     def vm_family(self) -> ht.VMFamily:
-        return self.__vm_family
+        return ht.VMFamily(self.__aux_vm_info.vm_family)
 
     @property
     def hostname(self) -> Optional[ht.Hostname]:
@@ -249,6 +266,22 @@ class Node(BaseNode):
         return self.__node_id
 
     @property
+    def vm_capabilities(self) -> Dict[str, Any]:
+        return self.__aux_vm_info.capabilities
+
+    @property
+    def pcpu_count(self) -> int:
+        return self.__aux_vm_info.pcpu_count
+
+    @property
+    def gpu_count(self) -> int:
+        return self.__aux_vm_info.gpu_count
+
+    @property
+    def cores_per_socket(self) -> int:
+        return self.__aux_vm_info.cores_per_socket
+
+    @property
     def metadata(self) -> Dict:
         """
             Convenience: this is not used by the library at all,
@@ -275,7 +308,6 @@ class Node(BaseNode):
             hostname=self.hostname,
             private_ip=self.private_ip,
             vm_size=self.vm_size,
-            vm_family=self.vm_family,
             location=self.location,
             spot=self.spot,
             vcpu_count=self.vcpu_count,
@@ -376,7 +408,8 @@ class Node(BaseNode):
         return "Node({}, {})".format(self.name, hostname)
 
     def __repr__(self) -> str:
-        return str(self)
+        hostname = self.hostname if self.exists else "..."
+        return "Node({}, {}, {})".format(self.name, hostname, self.available)
 
 
 class UnmanagedNode(Node):
@@ -397,7 +430,6 @@ class UnmanagedNode(Node):
             hostname=ht.Hostname(hostname),
             private_ip=None,
             vm_size=ht.VMSize("unknown"),
-            vm_family=ht.VMFamily("unknown"),
             location=ht.Location("unknown"),
             spot=False,
             vcpu_count=vcpu_count or 1,

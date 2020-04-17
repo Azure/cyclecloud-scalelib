@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import util
@@ -20,7 +20,6 @@ class NodeDefinition:
         nodearray: ht.NodeArrayName,
         bucket_id: ht.BucketId,
         vm_size: ht.VMSize,
-        vm_family: ht.VMFamily,
         location: ht.Location,
         spot: bool,
         subnet: ht.SubnetId,
@@ -35,8 +34,6 @@ class NodeDefinition:
         self.bucket_id = bucket_id
         assert vm_size is not None
         self.vm_size = vm_size
-        assert vm_family is not None
-        self.vm_family = vm_family
         assert location is not None
         self.location = location
         assert spot is not None
@@ -99,7 +96,6 @@ class NodeBucket:
             hostname=None,
             private_ip=None,
             vm_size=definition.vm_size,
-            vm_family=definition.vm_family,
             location=self.location,
             spot=definition.spot,
             vcpu_count=self.vcpu_count,
@@ -176,7 +172,23 @@ class NodeBucket:
 
     @property
     def vm_family(self) -> ht.VMFamily:
-        return self.__definition.vm_family
+        return self.__example.vm_family
+
+    @property
+    def vm_capabilities(self) -> Dict[str, Any]:
+        return self.__example.vm_capabilities
+
+    @property
+    def pcpu_count(self) -> int:
+        return self.__example.pcpu_count
+
+    @property
+    def gpu_count(self) -> int:
+        return self.__example.gpu_count
+
+    @property
+    def cores_per_socket(self) -> int:
+        return self.__example.cores_per_socket
 
     @property
     def nodearray(self) -> ht.NodeArrayName:
@@ -253,7 +265,6 @@ def node_from_bucket(
         nodearray=bucket.nodearray,
         bucket_id=bucket.bucket_id,
         vm_size=bucket.vm_size,
-        vm_family=bucket.vm_family,
         hostname=hostname,
         private_ip=None,
         location=bucket.location,

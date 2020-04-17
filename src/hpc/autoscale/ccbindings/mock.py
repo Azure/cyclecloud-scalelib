@@ -100,6 +100,7 @@ class MockClusterBinding(ClusterBindingInterface):
         memory: Memory,
         max_count: int,
         available_count: int,
+        location: str = "westus2",
         family_consumed_core_count: Optional[int] = None,
         family_quota_core_count: Optional[int] = None,
         family_quota_count: Optional[int] = None,
@@ -115,7 +116,9 @@ class MockClusterBinding(ClusterBindingInterface):
             assert b is not None
             return b
 
-        assert vm_sizes.get_family(vm_size) != "unknown", vm_size
+        assert (
+            vm_sizes.get_aux_vm_size_info(location, vm_size).vm_family != "unknown"
+        ), vm_size
         assert isinstance(memory, Memory)
         if noderray_name not in self.nodearrays:
             raise RuntimeError("Please call add_nodearray first.")
@@ -225,7 +228,6 @@ class MockClusterBinding(ClusterBindingInterface):
             hostname=hostname,
             private_ip=None,
             vm_size=vm_size,
-            vm_family=vm_sizes.get_family(vm_size),
             location=nodearray_record["Region"],
             spot=spot,
             vcpu_count=bucket.virtual_machine.vcpu_count,

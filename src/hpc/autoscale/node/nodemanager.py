@@ -1,6 +1,5 @@
 import functools
 import logging
-from math import ceil
 from typing import Callable, Dict, List, Optional, Union
 from uuid import uuid4
 
@@ -17,7 +16,7 @@ from hpc.autoscale.node.bucket import (
     bucket_candidates,
     node_from_bucket,
 )
-from hpc.autoscale.node.constraints import NodeConstraint, minimum_space
+from hpc.autoscale.node.constraints import minimum_space
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import create_bucket_limits, null_bucket_limits
 from hpc.autoscale.node.node import BaseNode, Node, UnmanagedNode
@@ -60,8 +59,6 @@ class NodeManager:
         self,
         constraints: Union[List[constraintslib.Constraint], constraintslib.Constraint],
         node_count: Optional[int] = None,
-        core_count: Optional[int] = None,
-        memory: Optional[ht.Memory] = None,
         slot_count: Optional[int] = None,
         allow_existing: bool = True,
         all_or_nothing: bool = False,
@@ -72,63 +69,122 @@ class NodeManager:
 
         parsed_constraints = constraintslib.get_constraints(constraints)
 
-        # TODO hacks
-        # parsed_constraints.append(constraintslib.NotAllocated())
         candidates_result = bucket_candidates(self.get_buckets(), parsed_constraints)
+        if not candidates_result:
+            return AllocationResult(
+                "NoCandidatesFound", reasons=candidates_result.reasons,
+            )
 
-        remaining = _RemainingToAllocate(node_count, core_count, memory, slot_count)
-
-        allocated_nodes = []
+        allocated_nodes = {}
         total_slots_allocated = 0
 
-        if candidates_result:
-            for candidate in candidates_result.candidates:
-                node_count = self._get_node_count(
-                    parsed_constraints,
-                    candidate,
-                    node_count=remaining.count,
-                    core_count=remaining.vcpu_count,
-                    slot_count=remaining.slot_count,
-                    memory=remaining.memory,
-                    all_or_nothing=all_or_nothing,
-                    allow_existing=allow_existing,
-                )
-                if not node_count:
-                    logging.debug(
-                        "Ignoring candidate %s because it does not have capacity",
-                        candidate.nodearray,
-                    )
-                    continue
+        for candidate in candidates_result.candidates:
 
-                result = self._allocate(
+            if slot_count:
+                result = self._allocate_slots(
                     candidate,
-                    node_count,
+                    slot_count,
                     parsed_constraints,
                     allow_existing,
                     assignment_id,
                 )
 
-                if result:
-                    allocated_nodes.extend(result.nodes)
-                    total_slots_allocated += result.total_slots
-                    if remaining.decrement(candidate, result.total_slots) <= 0:
-                        break
+                if not result:
+                    continue
+
+                for node in result.nodes:
+                    allocated_nodes[node.name] = node
+
+                # allocated_nodes.extend([n for n in result.nodes if n not in allocated_nodes])
+                assert result.total_slots > 0
+                total_slots_allocated += result.total_slots
+
+                print("\t\t", result.total_slots)
+
+                if total_slots_allocated >= slot_count:
+                    break
+            else:
+                assert node_count is not None
+                node_count_floored = self._get_node_count(
+                    candidate,
+                    node_count - len(allocated_nodes),
+                    all_or_nothing,
+                    allow_existing,
+                )
+
+                if node_count_floored < 1:
+                    continue
+
+                result = self._allocate_nodes(
+                    candidate,
+                    node_count_floored,
+                    parsed_constraints,
+                    allow_existing,
+                    assignment_id,
+                )
+                if not result:
+                    continue
+
+                for node in result.nodes:
+                    allocated_nodes[node.name] = node
+
+                total_slots_allocated = len(allocated_nodes)
+
+                if total_slots_allocated >= node_count:
+                    break
 
         if allocated_nodes:
+            assert total_slots_allocated
             return AllocationResult(
-                "success", nodes=allocated_nodes, slots_allocated=total_slots_allocated
+                "success",
+                nodes=list(allocated_nodes.values()),
+                slots_allocated=total_slots_allocated,
             )
 
         return AllocationResult(
             "NoAllocationSelected",
             reasons=[
-                "Could not allocate based on the selection criteria: {}".format(
-                    constraints
+                "Could not allocate based on the selection criteria: {} all_or_nothing={} allow_existing={}".format(
+                    constraints, all_or_nothing, allow_existing
                 )
             ],
         )
 
-    def _allocate(
+    def _allocate_slots(
+        self,
+        bucket: NodeBucket,
+        slot_count: int,
+        constraints: List[constraintslib.NodeConstraint],
+        allow_existing: bool = False,
+        assignment_id: Optional[str] = None,
+    ) -> AllocationResult:
+        remaining = slot_count
+        allocated_nodes: List[Node] = []
+
+        while remaining > 0:
+            alloc_result = self._allocate_nodes(
+                bucket, 1, constraints, allow_existing, assignment_id
+            )
+            remaining -= 1
+            assert alloc_result
+            assert len(alloc_result.nodes) == 1
+            node = alloc_result.nodes[0]
+
+            min_space = minimum_space(constraints, node)
+            per_node = min(remaining, min_space)
+            print("\t", repr(node), per_node)
+            match_result = node.decrement(constraints, per_node, assignment_id)
+            print("\t", repr(node), min_space, match_result.total_slots)
+            assert match_result
+            remaining -= match_result.total_slots
+            assert remaining >= 0, remaining
+            allocated_nodes.append(node)
+
+        return AllocationResult(
+            "success", nodes=allocated_nodes, slots_allocated=slot_count - remaining
+        )
+
+    def _allocate_nodes(
         self,
         bucket: NodeBucket,
         count: int,
@@ -160,7 +216,7 @@ class NodeManager:
 
             satisfied = functools.reduce(lambda a, b: a and b, [c.satisfied_by_node(node) for c in constraints])  # type: ignore
             if satisfied:
-                match_result = node.decrement(constraints)
+                match_result = node.decrement(constraints, assignment_id=assignment_id)
                 assert match_result
                 slots_allocated += match_result.total_slots
                 allocated_nodes.append(node)
@@ -209,7 +265,6 @@ class NodeManager:
         self,
         bucket: NodeBucket,
         count: Optional[int] = None,
-        core_count: Optional[int] = None,
         memory: Optional[ht.Memory] = None,
         all_or_nothing: bool = False,
     ) -> AllocationResult:
@@ -217,44 +272,17 @@ class NodeManager:
 
     def _get_node_count(
         self,
-        constraints: List[NodeConstraint],
         bucket: NodeBucket,
-        node_count: Optional[int] = None,
-        core_count: Optional[int] = None,
-        slot_count: Optional[int] = None,
-        memory: Optional[ht.Memory] = None,
+        node_count: int,
         all_or_nothing: bool = False,
         allow_existing: bool = True,
     ) -> int:
-        assert (
-            bool(node_count) ^ bool(core_count) ^ bool(memory) ^ bool(slot_count)
-        ), "Please pick one and only one of count, vcpu_count, slot_count or memory."
-
-        if node_count is None:
-            if not core_count:
-                if not memory:
-                    if not slot_count:
-                        raise RuntimeError(
-                            "Either count, core_count, slot_count or memory must be specified"
-                        )
-                    per_node = minimum_space(constraints, bucket.example_node)
-                    if per_node > 0:
-                        count = int(ceil(slot_count / per_node))
-                    else:
-                        count = 0
-                else:
-                    count = int(ceil((memory / bucket.memory).value))
-                    assert count > 0
-            else:
-                count = int(ceil(core_count / float(bucket.vcpu_count)))
-                assert count > 0
-        else:
-            count = node_count
 
         available_count_total = self._availabe_count(bucket, allow_existing)
 
+        count = node_count
         if not all_or_nothing:
-            count = min(count, available_count_total)
+            count = min(node_count, available_count_total)
 
         if count == 0 or count > available_count_total:
             # TODO report what the user reported
@@ -357,6 +385,20 @@ class NodeManager:
 
         return BootupResult("success", result.operation_id, request_id, started_nodes)
 
+    @property
+    def cluster_max_core_count(self) -> int:
+        raise NotImplementedError()
+
+    @property
+    def cluster_consumed_core_count(self) -> int:
+        raise NotImplementedError()
+
+    def get_regional_max_core_count(self, location: Optional[str] = None) -> int:
+        raise NotImplementedError()
+
+    def get_regional_consumed_core_count(self, location: Optional[str] = None) -> int:
+        raise NotImplementedError()
+
     @apitrace
     def add_default_resource(
         self,
@@ -453,10 +495,39 @@ class NodeManager:
             return
         getattr(self.__cluster_bindings, op_name)(nodes=managed_nodes)
 
+    def example_node(self, location: str, vm_size: str) -> Node:
+        aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
+
+        node = Node(
+            node_id=DelayedNodeId(ht.NodeName("__example__")),
+            name=ht.NodeName("__example__"),
+            nodearray=ht.NodeArrayName("__example_nodearray__"),
+            bucket_id=ht.BucketId("__example_bucket_id__"),
+            hostname=None,
+            private_ip=None,
+            vm_size=ht.VMSize(vm_size),
+            location=ht.Location(location),
+            spot=False,
+            vcpu_count=aux_info.vcpu_count,
+            memory=aux_info.memory,
+            infiniband=aux_info.infiniband,
+            state=ht.NodeStatus("Off"),
+            power_state=ht.NodeStatus("Off"),
+            exists=False,
+            placement_group=None,
+            managed=False,
+            resources=ht.ResourceDict({}),
+        )
+        self._apply_defaults(node)
+        return node
+
     def __str__(self) -> str:
         attrs = []
         for attr_name in dir(self):
             if not (attr_name[0].isalpha() or attr_name.startswith("_NodeManager")):
+                continue
+            # TODO RDH
+            if "core_count" in attr_name:
                 continue
 
             attr = getattr(self, attr_name)
@@ -488,7 +559,6 @@ def new_node_manager(
             nodearray=ht.NodeArrayName("__unmanaged__"),
             bucket_id=ht.BucketId(str(uuid4())),
             vm_size=ht.VMSize("unknown"),
-            vm_family=ht.VMFamily("unknown"),
             location=ht.Location("unknown"),
             spot=False,
             subnet=ht.SubnetId("unknown"),
@@ -529,8 +599,6 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
             )
             for pg in placement_groups:
                 vm_size = bucket.definition.machine_type
-                vm_family = vm_sizes.get_family(vm_size)
-
                 location = nodearray["Region"]
                 subnet = nodearray["SubnetId"]
                 vcpu_count = bucket.virtual_machine.vcpu_count
@@ -550,7 +618,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     if n["Name"] in bucket.active_nodes
                     and n.get("PlacementGroupId") == pg
                 ]
-                
+
                 nodes = []
 
                 for cc_node_rec in cc_node_records:
@@ -584,7 +652,6 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                             nodearray=nodearray_name,
                             bucket_id=bucket_id,
                             vm_size=vm_size_node,
-                            vm_family=vm_sizes.get_family(vm_size_node),
                             hostname=hostname,
                             private_ip=private_ip,
                             location=location,
@@ -605,7 +672,6 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     nodearray=pool_name,
                     bucket_id=bucket_id,
                     vm_size=vm_size,
-                    vm_family=vm_family,
                     location=location,
                     spot=spot,
                     subnet=subnet,
@@ -669,45 +735,3 @@ class _DefaultResource:
         default_value = self.default_value_function(node)
         node.resources[self.resource_name] = default_value
         node.available[self.resource_name] = default_value
-
-
-class _RemainingToAllocate:
-    def __init__(
-        self,
-        count: Optional[int],
-        vcpu_count: Optional[int],
-        memory: Optional[ht.Memory],
-        slot_count: Optional[int],
-    ) -> None:
-        self.count = count
-        self.vcpu_count = vcpu_count
-        self.memory = memory
-        self.slot_count = slot_count
-
-    def __int__(self) -> int:
-        if self.count is not None:
-            return self.count
-        if self.vcpu_count is not None:
-            return self.vcpu_count
-        if self.memory is not None:
-            return int(ceil(self.memory.value))
-        if self.slot_count is not None:
-            return self.slot_count
-        raise RuntimeError()
-
-    def decrement(self, bucket: NodeBucket, value: int) -> int:
-        if self.count is not None:
-            self.count -= value
-
-        elif self.vcpu_count is not None:
-            self.vcpu_count -= bucket.vcpu_count * value
-
-        elif self.memory is not None:
-            self.memory = max(
-                ht.Memory(0, self.memory.magnitude), self.memory - bucket.memory * value
-            )
-
-        elif self.slot_count is not None:
-            self.slot_count -= value
-
-        return int(self)

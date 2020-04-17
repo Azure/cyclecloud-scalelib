@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import pytest
@@ -12,6 +13,10 @@ from hpc.autoscale.results import (
     unregister_all_result_handlers,
 )
 from hpc.autoscale.util import partition
+
+logging.basicConfig(
+    filename="/tmp/log.txt", filemode="w", format="%(message)s", level=logging.DEBUG
+)
 
 
 def setup_function(function: Any) -> None:
@@ -92,7 +97,9 @@ def test_over_allocate(node_mgr: NodeManager) -> None:
         {"node.nodearray": "htc"}, node_count=10, all_or_nothing=True
     )
 
-    result = node_mgr.allocate({"node.nodearray": "htc"}, node_count=10)
+    result = node_mgr.allocate(
+        {"node.nodearray": "htc"}, node_count=10, all_or_nothing=False
+    )
     assert result and len(result.nodes) == 9
     assert result.nodes[0].nodearray == "htc"
 
@@ -106,11 +113,27 @@ def test_multi_array_alloc(bindings: MockClusterBinding) -> None:
 
 
 def test_packing(node_mgr: NodeManager) -> None:
-    result1 = node_mgr.allocate({"pcpus": 1}, slot_count=1)
-    assert result1 and len(result1.nodes) == 1
-    result2 = node_mgr.allocate({"pcpus": 1}, slot_count=1)
-    assert result2 and len(result2.nodes) == 1
-    assert result2.nodes == result1.nodes
+    node_mgr.add_default_resource({}, "ncpus", 4)
+
+    result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=2)
+    assert result, str(result)
+    assert len(result.nodes) == 1, result.nodes
+    assert result.nodes[0].name == "htc-1"
+    assert result.nodes[0].resources["ncpus"] == 4
+    assert result.nodes[0].available["ncpus"] == 2, result.nodes[0].available["ncpus"]
+    assert len(node_mgr.new_nodes) == 1, len(node_mgr.new_nodes)
+    result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=4)
+    assert result
+    assert len(result.nodes) == 2, result.nodes
+    assert result.nodes[0].name == "htc-1"
+    assert result.nodes[1].name == "htc-2"
+    assert len(node_mgr.new_nodes) == 2
+    assert len(set([n.name for n in node_mgr.new_nodes])) == 2
+    result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=2)
+    assert len(result.nodes) == 1
+    assert result.nodes[0].name == "htc-2"
+
+    assert len(node_mgr.new_nodes) == 2
 
 
 def test_or_ordering() -> None:
@@ -309,3 +332,7 @@ def test_default_resources() -> None:
     by_nodetype = partition(node_mgr.get_buckets(), lambda b: b.resources["nodetype"])
     assert by_nodetype.get("A")[0].resources["vcpus"] == 4
     assert by_nodetype.get("B")[0].resources["vcpus"] == 4
+
+
+# def test_top_level_limits(node_mgr: NodeManager) -> None:
+#     assert node_mgr.cluster_max_core_count == 20
