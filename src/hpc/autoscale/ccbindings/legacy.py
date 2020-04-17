@@ -76,9 +76,10 @@ class ClusterBinding(ClusterBindingInterface):
             creation_request.sets.append(request_set)
 
         creation_request.validate()
-        _http_response, result = self.clusters_module.create_nodes(
+        http_response, result = self.clusters_module.create_nodes(
             self.session, self.cluster_name, creation_request
         )
+        logging.fine(http_response)
         return result
 
     def deallocate_nodes(
@@ -94,13 +95,14 @@ class ClusterBinding(ClusterBindingInterface):
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter
         )
-        _http_response, result = self.clusters_module.deallocate_nodes(
+        http_response, result = self.clusters_module.deallocate_nodes(
             self.session, self.cluster_name, request
         )
+        logging.fine(http_response)
         return result
 
     def get_cluster_status(self, nodes: bool = False) -> cyclecloud.model.ClusterStatus:
-        _http_response, result = self.clusters_module.get_cluster_status(
+        http_response, result = self.clusters_module.get_cluster_status(
             self.session, self.cluster_name, nodes
         )
         return result
@@ -111,9 +113,10 @@ class ClusterBinding(ClusterBindingInterface):
         request_id: Optional[ht.RequestId] = None,
     ) -> NodeList:
 
-        _http_response, result = self.clusters_module.get_nodes(
+        http_response, result = self.clusters_module.get_nodes(
             self.session, self.cluster_name, operation_id, request_id
         )
+        logging.fine(http_response)
         return result
 
     def remove_nodes(
@@ -129,9 +132,10 @@ class ClusterBinding(ClusterBindingInterface):
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter
         )
-        _http_response, result = self.clusters_module.remove_nodes(
+        http_response, result = self.clusters_module.remove_nodes(
             self.session, self.cluster_name, request
         )
+        logging.fine(http_response)
         return result
 
     def scale(
@@ -141,13 +145,14 @@ class ClusterBinding(ClusterBindingInterface):
         total_node_count: Optional[int] = None,
     ) -> NodeCreationResult:
 
-        _http_response, result = self.clusters_module.scale(
+        http_response, result = self.clusters_module.scale(
             self.session,
             self.cluster_name,
             nodearray,
             total_core_count,
             total_node_count,
         )
+        logging.fine(http_response)
         return result
 
     def shutdown_nodes(
@@ -163,9 +168,10 @@ class ClusterBinding(ClusterBindingInterface):
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter
         )
-        _http_response, result = self.clusters_module.shutdown_nodes(
+        http_response, result = self.clusters_module.shutdown_nodes(
             self.session, self.cluster_name, request
         )
+        logging.fine(http_response)
         return result
 
     def start_nodes(
@@ -181,9 +187,10 @@ class ClusterBinding(ClusterBindingInterface):
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter
         )
-        _http_response, result = self.clusters_module.start_nodes(
+        http_response, result = self.clusters_module.start_nodes(
             self.session, self.cluster_name, request
         )
+        logging.fine(http_response)
         return result
 
     def terminate_nodes(
@@ -199,9 +206,10 @@ class ClusterBinding(ClusterBindingInterface):
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter
         )
-        _http_response, result = self.clusters_module.terminate_nodes(
+        http_response, result = self.clusters_module.terminate_nodes(
             self.session, self.cluster_name, request
         )
+        logging.fine(http_response)
         return result
 
     def delete_nodes(self, nodes: List[Node]) -> NodeManagementResult:
