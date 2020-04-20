@@ -131,11 +131,10 @@ setup(
             "../notices",
         ]
     },
-    install_requires=["requests == 2.21.0", "typing_extensions"]
-    + ["certifi==2019.3.9", "chardet==3.0.4", "idna==2.8", "urllib3==1.24.1"],  # noqa: W503
+    install_requires=["requests == 2.21.0", "typing_extensions", "frozendict"]
+    + ["urllib3==1.24.1"],  # noqa: W503
     tests_require=["pytest==3.2.3"],
     cmdclass={"test": PyTest, "format": Formatter, "types": TypeChecking},
-    url="http://www.cyclecomputing.com",
-    maintainer="Cycle Computing",
-    maintainer_email="support@cyclecomputing.com",
+    url="http://www.microsoft.com",
+    maintainer="Azure CycleCloud"
 )

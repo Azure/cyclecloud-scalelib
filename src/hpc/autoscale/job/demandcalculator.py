@@ -8,7 +8,6 @@ from hpc.autoscale.hpctypes import OperationId
 from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demand import DemandResult
 from hpc.autoscale.job.job import Job, PackingStrategy
-from hpc.autoscale.node import nodemanager
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import (
     NodeHistory,
@@ -318,10 +317,14 @@ def new_demand_calculator(
             config = json.load(fr)
 
     if node_mgr is None:
-        node_mgr = new_node_manager(config_dict)
+        node_mgr = new_node_manager(
+            config_dict, disable_default_resources=disable_default_resources
+        )
+    else:
+        logging.initialize_logging(config_dict)
 
-    if not disable_default_resources:
-        nodemanager.set_system_default_resources(node_mgr)
+        if not disable_default_resources:
+            node_mgr.set_system_default_resources()
 
     node_history = node_history or SQLiteNodeHistory()
 

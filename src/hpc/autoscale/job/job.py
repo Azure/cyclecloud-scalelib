@@ -126,7 +126,7 @@ class Job:
 
         return node_mgr.allocate(
             self._job_constraints,
-            node_count=1,
+            slot_count=self.iterations_remaining,
             allow_existing=allow_existing,
             all_or_nothing=all_or_nothing,
             assignment_id=self.name,

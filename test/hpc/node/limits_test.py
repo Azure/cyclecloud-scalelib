@@ -1,5 +1,4 @@
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
-from hpc.autoscale.hpctypes import Memory
 from hpc.autoscale.node.limits import _SharedLimit
 from hpc.autoscale.node.nodemanager import new_node_manager
 
@@ -10,8 +9,6 @@ def test_family_and_spots():
     bindings.add_bucket(
         "htc",
         "Standard_F4s",
-        4,
-        Memory(8, "g"),
         max_count=20,
         available_count=10,
         family_consumed_core_count=40,
@@ -26,8 +23,6 @@ def test_family_and_spots():
     bindings.add_bucket(
         "htcspot",
         "Standard_F4s",
-        4,
-        Memory(8, "g"),
         max_count=20,
         available_count=10,
         family_consumed_core_count=0,

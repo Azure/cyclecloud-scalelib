@@ -94,7 +94,7 @@ class AllocationResult(Result):
             )
         else:
             return "AllocationResult(status={}, reason={})".format(
-                self.status, "see log for more details"
+                self.status, self.reasons
             )
 
 

@@ -55,7 +55,6 @@ class MockClusterBinding(ClusterBindingInterface):
         self.operations: Dict[OperationId, "MockNodeManagementResult"] = {}
         self.max_core_count = 10000
         self.max_count = 1000
-        self.region = "westus"
         self.subnet_id = "subnetid1"
         self.state = "Started"
         self.target_state = "Started"
@@ -68,6 +67,7 @@ class MockClusterBinding(ClusterBindingInterface):
         self,
         name: NodeArrayName,
         resources: Dict,
+        location: str = "westus2",
         max_core_count: int = 1_000_000,
         max_count: int = 100_000,
         spot: bool = False,
@@ -80,7 +80,7 @@ class MockClusterBinding(ClusterBindingInterface):
         nodearray_status.nodearray = {
             "Name": name,
             "Status": self.state,
-            "Region": self.region,
+            "Region": location,
             "SubnetId": self.subnet_id,
             "Configuration": {"autoscale": {"resources": resources}},
             "Interruptible": spot,
@@ -96,13 +96,10 @@ class MockClusterBinding(ClusterBindingInterface):
 
     def add_bucket(
         self,
-        noderray_name: NodeArrayName,
+        nodearray_name: NodeArrayName,
         vm_size: VMSize,
-        vcpu_count: int,
-        memory: Memory,
         max_count: int,
         available_count: int,
-        location: str = "westus2",
         family_consumed_core_count: Optional[int] = None,
         family_quota_core_count: Optional[int] = None,
         family_quota_count: Optional[int] = None,
@@ -118,14 +115,19 @@ class MockClusterBinding(ClusterBindingInterface):
             assert b is not None
             return b
 
-        assert (
-            vm_sizes.get_aux_vm_size_info(location, vm_size).vm_family != "unknown"
-        ), vm_size
-        assert isinstance(memory, Memory)
-        if noderray_name not in self.nodearrays:
+        if nodearray_name not in self.nodearrays:
             raise RuntimeError("Please call add_nodearray first.")
 
-        nodearray_status = self.nodearrays[noderray_name]
+        nodearray_status = self.nodearrays[nodearray_name]
+
+        location = nodearray_status.nodearray["Region"]
+
+        aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
+
+        assert aux_info.vm_family != "unknown", vm_size
+
+        vcpu_count = aux_info.vcpu_count
+
         bucket_status = NodearrayBucketStatus()
         bucket_status.bucket_id = str(uuid.uuid4())
         bucket_status.available_count = available_count
@@ -144,7 +146,7 @@ class MockClusterBinding(ClusterBindingInterface):
         )
 
         bucket_status.regional_quota_count = pick(
-            regional_quota_count, bucket_status.family_quota_count
+            regional_quota_count, nodearray_status.max_count
         )
         bucket_status.quota_count = bucket_status.family_quota_count
 
@@ -156,7 +158,7 @@ class MockClusterBinding(ClusterBindingInterface):
         bucket_status.available_core_count = bucket_status.available_count * vcpu_count
         bucket_status.max_core_count = bucket_status.max_count * vcpu_count
         bucket_status.regional_quota_core_count = pick(
-            regional_quota_core_count, bucket_status.family_quota_core_count
+            regional_quota_core_count, nodearray_status.max_core_count
         )
         bucket_status.quota_core_count = bucket_status.family_quota_core_count
         bucket_status.max_placement_group_core_size = (
@@ -167,9 +169,9 @@ class MockClusterBinding(ClusterBindingInterface):
         bucket_status.definition.machine_type = vm_size
         bucket_status.virtual_machine = NodearrayBucketStatusVirtualMachine()
         bucket_status.virtual_machine.vcpu_count = vcpu_count
-        bucket_status.virtual_machine.memory = memory.convert_to("m").value
-        # TODO RDH
-        bucket_status.virtual_machine.infiniband = False
+        bucket_status.virtual_machine.memory = aux_info.memory.convert_to("m").value
+
+        bucket_status.virtual_machine.infiniband = aux_info.infiniband
         bucket_status.placement_groups = placement_groups
 
         for attr in dir(bucket_status):
@@ -318,6 +320,7 @@ class MockClusterBinding(ClusterBindingInterface):
         operation_id: Optional[OperationId] = None,
         request_id: Optional[RequestId] = None,
     ) -> "MockNodeManagementResult":
+
         # TODO what is the actual error?
         if not operation_id:
             all_nodes: List[Node] = []

@@ -3,7 +3,6 @@ from typing import List, Optional
 
 import pytest
 
-from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import results
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
 from hpc.autoscale.example.basic import BasicDriver, autoscale_driver
@@ -35,8 +34,8 @@ def _bindings():
     mock_bindings.add_nodearray(
         "htc4", {"slots": 4, "customer_htc_flag": True},
     )
-    mock_bindings.add_bucket("htc2", "Standard_F2", 2, ht.Memory(4, "g"), 10, 8)
-    mock_bindings.add_bucket("htc4", "Standard_F4", 4, ht.Memory(8, "g"), 5, 4)
+    mock_bindings.add_bucket("htc2", "Standard_F2", 10, 8)
+    mock_bindings.add_bucket("htc4", "Standard_F4", 5, 4)
     return mock_bindings
 
 

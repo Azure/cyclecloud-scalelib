@@ -1,3 +1,4 @@
+import typing
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
@@ -7,8 +8,10 @@ from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.node import constraints as constraintslib  # noqa: F401
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import BucketLimits
-from hpc.autoscale.node.node import Node
 from hpc.autoscale.results import CandidatesResult, Result
+
+if typing.TYPE_CHECKING:
+    from hpc.autoscale.node.node import Node
 
 
 @hpcwrapclass
@@ -51,7 +54,7 @@ class NodeDefinition:
         self.memory = memory
         self.placement_group = placement_group
         assert resources is not None
-        self.resources = resources
+        self.resources = deepcopy(resources)
 
     def __str__(self) -> str:
         attr_exprs: List[str] = []
@@ -76,12 +79,10 @@ class NodeBucket:
         definition: NodeDefinition,
         limits: BucketLimits,
         max_placement_group_size: int,
-        nodes: List[Node],
+        nodes: List["Node"],
     ) -> None:
         # example node to be used to see if your job would match this
         self.__definition = definition
-        if nodes:
-            assert isinstance(nodes[0], Node), type(nodes[0])
 
         assert limits
         self.limits = limits
@@ -91,6 +92,8 @@ class NodeBucket:
         self.nodes = nodes
         example_node_name = ht.NodeName("{}-0".format(definition.nodearray))
         # TODO infiniband
+        from hpc.autoscale.node.node import Node
+
         self.__example = Node(
             node_id=DelayedNodeId(example_node_name),
             name=example_node_name,
@@ -198,14 +201,14 @@ class NodeBucket:
         return self.__definition.nodearray
 
     @property
-    def example_node(self) -> Node:
+    def example_node(self) -> "Node":
         return self.__example
 
     def __str__(self) -> str:
         if self.placement_group:
             return "NodeBucket({}, pg={})".format(self.nodearray, self.placement_group)
-        return "NodeBucket({}, available={}, id={}, size={})".format(
-            self.nodearray, self.available_count, self.bucket_id, self.vm_size
+        return "NodeBucket({}, available={}, id={})".format(
+            self.nodearray, self.available_count, self.bucket_id
         )
 
     def __repr__(self) -> str:
@@ -258,10 +261,11 @@ def node_from_bucket(
     hostname: Optional[ht.Hostname] = None,
     placement_group: Optional[ht.PlacementGroup] = None,
     exists: bool = True,
-) -> Node:
+) -> "Node":
     if hostname is None:
         hostname = ht.Hostname(util.uuid("hostname"))
-    resources = deepcopy(bucket.resources)
+    from hpc.autoscale.node.node import Node
+
     return Node(
         node_id=DelayedNodeId(new_node_name),
         name=new_node_name,
@@ -280,5 +284,5 @@ def node_from_bucket(
         exists=exists,
         placement_group=placement_group,
         managed=True,
-        resources=ht.ResourceDict(resources),
+        resources=ht.ResourceDict(bucket.resources),
     )

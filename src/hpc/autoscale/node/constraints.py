@@ -15,7 +15,7 @@ Constraint = Union["NodeConstraint", ConstraintDict]
 
 
 if typing.TYPE_CHECKING:
-    from hpc.autoscale.node.node import Node, BaseNode
+    from hpc.autoscale.node.node import Node
     from hpc.autoscale.node.bucket import NodeBucket
 
 
@@ -64,13 +64,13 @@ class NodeResourceConstraint(BaseNodeConstraint):
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
         if self.attr not in node.available:
-            # TODO log
+
             return SatisfiedResult(
                 "UndefinedResource",
                 self,
                 node,
                 [
-                    "Resource[name={}] not defined Node[name={} hostname={}]".format(
+                    "Resource[name={}] not defined for Node[name={} hostname={}]".format(
                         self.attr, node.name, node.hostname
                     )
                 ],
@@ -136,11 +136,12 @@ class MinResourcePerNode(BaseNodeConstraint):
         return SatisfiedResult("InsufficientResource", self, node, reasons=[msg],)
 
     def do_decrement(self, node: "Node") -> bool:
-        assert (
-            self.attr in node.available
-        ), "Resource[name={}] not in Node[name={}, hostname={}] for constraint {}".format(
-            self.attr, node.name, node.hostname, str(self)
-        )
+        if self.attr not in node.available:
+            msg = "Resource[name={}] not in Node[name={}, hostname={}] for constraint {}".format(
+                self.attr, node.name, node.hostname, str(self)
+            )
+            raise RuntimeError(msg)
+
         remaining = node.available[self.attr]
 
         # TODO type checking here.
@@ -175,21 +176,35 @@ class ExclusiveNode(BaseNodeConstraint):
         self.is_exclusive = is_exclusive
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
-        if self.is_exclusive and bool(node.assignments):
-            msg = "Job is exclusive and Node[name={} hostname={}] already has a match".format(
-                node.name, node.hostname
-            )
+        if bool(node.assignments):
+            if self.is_exclusive:
+                msg = "Job is exclusive and Node[name={} hostname={}] already has a match".format(
+                    node.name, node.hostname
+                )
+            else:
+                msg = "[name={} hostname={}]already has an exclusive job".format(
+                    node.name, node.hostname
+                )
             return SatisfiedResult("ExclusiveRequirementFailed", self, node, [msg],)
+
         return SatisfiedResult("success", self, node)
 
     def do_decrement(self, node: "Node") -> bool:
+        if node.closed:
+            raise RuntimeError(
+                "Can not call ExclusiveNode.do_decrement on a closed node!"
+            )
         node.closed = self.is_exclusive
         return True
 
     def minimum_space(self, node: "Node") -> int:
-        if self.is_exclusive and bool(node.assignments):
+        if node.closed:
             return 0
-        return 1
+
+        if not self.is_exclusive:
+            return -1
+
+        return 0 if bool(node.assignments) else 1
 
     def to_dict(self) -> dict:
         return ConstraintDict({"exclusive": self.is_exclusive})
@@ -208,6 +223,14 @@ class InAPlacementGroup(BaseNodeConstraint):
         )
         return SatisfiedResult("NotInAPlacementGroup", self, node, [msg],)
 
+    def minimum_space(self, node: "Node") -> int:
+        if not node.placement_group:
+            return 0
+        return -1
+
+    def do_decrement(self, node: "Node") -> bool:
+        return bool(node.placement_group)
+
     def to_dict(self) -> dict:
         return ConstraintDict({"class": InAPlacementGroup.__class__.__name__})
 
@@ -225,7 +248,7 @@ class Or(BaseNodeConstraint):
         self.constraints = get_constraints(list(constraints))
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
-        reasons = []
+        reasons: List[str] = []
         for n, c in enumerate(self.constraints):
             result = c.satisfied_by_node(node)
 
@@ -312,8 +335,13 @@ class Not(BaseNodeConstraint):
 @hpcwrapclass
 class NodePropertyConstraint(BaseNodeConstraint):
     def __init__(self, attr: str, *values: ht.ResourceTypeAtom) -> None:
-
         self.attr = attr
+        from hpc.autoscale.node.node import QUERYABLE_PROPERTIES
+
+        if attr not in QUERYABLE_PROPERTIES:
+            msg = "Property[name={}] not defined for Node".format(self.attr)
+            logging.error(msg)
+            raise ValueError("UndefinedNodeProperty: " + msg)
 
         if len(values) == 1 and isinstance(values[0], list):
             self.values: List[Optional[ht.ResourceTypeAtom]] = values[0]
@@ -321,15 +349,8 @@ class NodePropertyConstraint(BaseNodeConstraint):
             self.values = list(values)
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
-
-        if self.attr not in dir(node):
-            msg = "Property[name={}] not defined Node[name={} hostname={}]".format(
-                self.attr, node.name, node.hostname
-            )
-            logging.error(msg)
-            return SatisfiedResult("UndefinedNodeProperty", self, node, [msg],)
-
         target = getattr(node, self.attr)
+
         if target not in self.values:
             assert target != "htc"
             if len(self.values) > 1:
@@ -372,7 +393,7 @@ class NotAllocated(BaseNodeConstraint):
         node._allocated = True
         return True
 
-    def minimum_space(self, node: "BaseNode") -> int:
+    def minimum_space(self, node: "Node") -> int:
         return 0
 
     def to_dict(self) -> dict:
@@ -407,7 +428,7 @@ def _parse_node_property_constraint(
 
 @hpcwrap
 def new_job_constraint(
-    attr: str, value: Union[ResourceType, Constraint], in_alias: bool = False
+    attr: str, value: Union[ResourceType, Constraint, list], in_alias: bool = False
 ) -> NodeConstraint:
 
     if attr == "not":
@@ -437,7 +458,13 @@ def new_job_constraint(
         if attr == "or":
             child_values: List[NodeConstraint] = []
             for child in value:
-                child_values.append(And(*get_constraints([child])))
+                and_cons = get_constraints([child])
+                # we only need the And object if there is actually
+                # more than one constraint
+                if len(and_cons) > 1:
+                    child_values.append(And(*and_cons))
+                else:
+                    child_values.append(and_cons[0])
             return Or(*child_values)
 
         elif attr == "and":
@@ -490,7 +517,7 @@ def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConst
         else:
             for attr, value in constraint_expression.items():
                 # TODO
-                c = new_job_constraint(attr, value)  # type: ignore
+                c = new_job_constraint(attr, value)
                 assert c is not None
                 job_constraints.append(c)
 

@@ -1,4 +1,5 @@
 import functools
+from copy import deepcopy
 from typing import Callable, Dict, List, Optional, Union
 from uuid import uuid4
 
@@ -8,7 +9,7 @@ import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings import new_cluster_bindings
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
-from hpc.autoscale.codeanalysis import hpcwrap
+from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpclogging import apitrace
 from hpc.autoscale.node import constraints as constraintslib
 from hpc.autoscale.node import vm_sizes
@@ -20,16 +21,17 @@ from hpc.autoscale.node.bucket import (
 )
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import create_bucket_limits, null_bucket_limits
-from hpc.autoscale.node.node import BaseNode, Node, UnmanagedNode, minimum_space
+from hpc.autoscale.node.node import Node, UnmanagedNode, minimum_space
 from hpc.autoscale.results import AllocationResult, BootupResult
 from hpc.autoscale.util import partition
 
 logger = logging.getLogger("cyclecloud.buckets")
 
 
-DefaultValueFunc = Callable[[BaseNode], ht.ResourceTypeAtom]
+DefaultValueFunc = Callable[[Node], ht.ResourceTypeAtom]
 
 
+@hpcwrapclass
 class NodeManager:
     """
     """
@@ -45,6 +47,7 @@ class NodeManager:
                 self._node_names.add(node.name)
         self.__unmanaged_nodes: List[UnmanagedNode] = []
         self.__default_resources: List[_DefaultResource] = []
+
         # list of nodes a user has 'allocated'.
         # self.new_nodes = []  # type: List[Node]
 
@@ -121,6 +124,7 @@ class NodeManager:
                     allow_existing,
                     assignment_id,
                 )
+
                 if not result:
                     continue
 
@@ -160,24 +164,19 @@ class NodeManager:
         remaining = slot_count
         allocated_nodes: List[Node] = []
 
+        # at_least_one = False
+
         while remaining > 0:
             alloc_result = self._allocate_nodes(
                 bucket, 1, constraints, allow_existing, assignment_id
             )
-            remaining -= 1
-            assert alloc_result
+            if not alloc_result:
+                return alloc_result
+
             assert len(alloc_result.nodes) == 1
             node = alloc_result.nodes[0]
-
-            min_space = minimum_space(constraints, node)
-            per_node = min(remaining, min_space)
-
-            match_result = node.decrement(constraints, per_node, assignment_id)
-
-            assert match_result
-            remaining -= match_result.total_slots
-            assert remaining >= 0, remaining
             allocated_nodes.append(node)
+            remaining -= alloc_result.total_slots
 
         return AllocationResult(
             "success", nodes=allocated_nodes, slots_allocated=slot_count - remaining
@@ -191,6 +190,15 @@ class NodeManager:
         allow_existing: bool = False,
         assignment_id: Optional[str] = None,
     ) -> AllocationResult:
+
+        for constraint in constraints:
+            sat_result = constraint.satisfied_by_bucket(bucket)
+            assert constraint.satisfied_by_node(bucket.example_node)
+            if not sat_result:
+                return AllocationResult(sat_result.status, reasons=sat_result.reasons)
+            min_space = constraint.minimum_space(bucket.example_node)
+            if min_space != -1:
+                assert min_space > 0, constraint
 
         remaining = count
         assert count > 0
@@ -222,6 +230,7 @@ class NodeManager:
                 remaining -= 1
 
         for _ in range(remaining):
+            assert remaining > 0
             node_name = self._next_node_name(bucket)
             new_node = node_from_bucket(
                 bucket,
@@ -235,10 +244,20 @@ class NodeManager:
 
             self._apply_defaults(new_node)
 
+            assert new_node.vcpu_count == bucket.vcpu_count
+
             min_space = minimum_space(constraints, new_node)
             if min_space == -1:
                 min_space = remaining
+            else:
+                for constraint in constraints:
+                    res = constraint.satisfied_by_node(new_node)
+                    assert res, "{} {} {}".format(res, constraint, new_node.vcpu_count)
             per_node = min(remaining, min_space)
+
+            assert per_node > 0, "{} {} {} {}".format(
+                per_node, remaining, new_node.resources, constraints
+            )
 
             match_result = new_node.decrement(constraints, per_node, assignment_id)
             assert match_result
@@ -404,16 +423,14 @@ class NodeManager:
         if isinstance(default_value, str):
             if default_value.startswith("node."):
                 attr = default_value[len("node.") :]  # noqa: E203
-                acceptable = [
-                    x for x in dir(BaseNode) if x[0].isalpha() and x[0].islower()
-                ]
-                if attr not in dir(BaseNode):
+                acceptable = [x for x in dir(Node) if x[0].isalpha() and x[0].islower()]
+                if attr not in dir(Node):
                     msg = "Invalid node.attribute '{}'. Expected one of {}".format(
                         attr, acceptable
                     )
                     raise RuntimeError(msg)
 
-                def get_from_base_node(node: BaseNode) -> ht.ResourceTypeAtom:
+                def get_from_base_node(node: Node) -> ht.ResourceTypeAtom:
                     return getattr(node, attr)
 
                 default_value = get_from_base_node
@@ -426,7 +443,7 @@ class NodeManager:
 
         if not hasattr(default_value, "__call__"):
 
-            def default_value_func(node: BaseNode) -> ht.ResourceTypeAtom:
+            def default_value_func(node: Node) -> ht.ResourceTypeAtom:
                 # already checked if it has a call
                 return default_value  # type: ignore
 
@@ -438,6 +455,7 @@ class NodeManager:
         self._apply_defaults_all()
 
     def _apply_defaults_all(self) -> None:
+
         for dr in self.__default_resources:
             for bucket in self.get_buckets():
                 dr.apply_default(bucket.example_node)
@@ -526,7 +544,7 @@ class NodeManager:
         for attr_name in dir(self):
             if not (attr_name[0].isalpha() or attr_name.startswith("_NodeManager")):
                 continue
-            # TODO RDH
+            # TODO RDH - we need a better str
             if "core_count" in attr_name:
                 continue
 
@@ -570,7 +588,7 @@ def new_node_manager(
             vcpu_count=a_node.vcpu_count,
             memory=a_node.memory,
             placement_group=None,
-            resources=a_node.resources,
+            resources=deepcopy(a_node.resources),
         )
 
         limits = null_bucket_limits(len(nodes_list), a_node.vcpu_count)
@@ -579,7 +597,7 @@ def new_node_manager(
         ret.add_unmanaged_bucket(bucket)
 
     if not disable_default_resources:
-        set_system_default_resources(ret)
+        ret.set_system_default_resources()
 
     return ret
 
@@ -595,9 +613,14 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
 
     for nodearray_status in cluster_status.nodearrays:
         nodearray = nodearray_status.nodearray
-        custom_resources = ht.ResourceDict(
-            nodearray.get("Configuration", {}).get("autoscale", {}).get("resources", {})
+        custom_resources = deepcopy(
+            ht.ResourceDict(
+                nodearray.get("Configuration", {})
+                .get("autoscale", {})
+                .get("resources", {})
+            )
         )
+
         spot = nodearray.get("Interruptible", False)
 
         for bucket in nodearray_status.buckets:
@@ -647,7 +670,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     placement_group = cc_node_rec.get("PlacementGroupId")
                     infiniband = bool(placement_group)
                     state = cc_node_rec.get("Status")
-                    resources = (
+                    resources = deepcopy(
                         cc_node_rec.get("Configuration", {})
                         .get("autoscale", {})
                         .get("resources", {})
@@ -735,12 +758,5 @@ class _DefaultResource:
 
         # it met all of our criteria, so set the default
         default_value = self.default_value_function(node)
-        node.resources[self.resource_name] = default_value
+        node._resources[self.resource_name] = default_value
         node.available[self.resource_name] = default_value
-
-
-@hpcwrap
-def set_system_default_resources(node_mgr: NodeManager) -> None:
-    node_mgr.add_default_resource({}, "ncpus", "node.vcpu_count")
-    node_mgr.add_default_resource({}, "pcpus", "node.pcpu_count")
-    node_mgr.add_default_resource({}, "ngpus", "node.gpu_count")

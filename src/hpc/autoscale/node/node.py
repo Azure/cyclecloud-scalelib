@@ -1,7 +1,9 @@
-from abc import ABC, abstractproperty
+from abc import ABC
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
+
+from frozendict import frozendict
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
@@ -11,102 +13,17 @@ from hpc.autoscale.node.constraints import NodeConstraint
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.results import MatchResult
 
-
-class BaseNode(ABC):
-    @abstractproperty
-    def required(self) -> bool:
-        ...
-
-    @abstractproperty
-    def name(self) -> ht.NodeName:
-        ...
-
-    @abstractproperty
-    def nodearray(self) -> ht.NodeArrayName:
-        ...
-
-    @abstractproperty
-    def bucket_id(self) -> ht.BucketId:
-        ...
-
-    @abstractproperty
-    def vm_size(self) -> ht.VMSize:
-        ...
-
-    @abstractproperty
-    def vm_family(self) -> ht.VMFamily:
-        ...
-
-    @abstractproperty
-    def hostname(self) -> Optional[ht.Hostname]:
-        ...
-
-    @abstractproperty
-    def private_ip(self) -> Optional[ht.IpAddress]:
-        ...
-
-    @abstractproperty
-    def location(self) -> ht.Location:
-        ...
-
-    @abstractproperty
-    def spot(self) -> bool:
-        ...
-
-    @abstractproperty
-    def vcpu_count(self) -> int:
-        ...
-
-    @abstractproperty
-    def memory(self) -> ht.Memory:
-        ...
-
-    @abstractproperty
-    def infiniband(self) -> bool:
-        ...
-
-    @abstractproperty
-    def state(self) -> ht.NodeStatus:
-        ...
-
-    @abstractproperty
-    def exists(self) -> bool:
-        ...
-
-    @abstractproperty
-    def placement_group(self) -> Optional[ht.PlacementGroup]:
-        ...
-
-    @abstractproperty
-    def resources(self) -> ht.ResourceDict:
-        ...
-
-    @abstractproperty
-    def managed(self) -> bool:
-        ...
-
-    @abstractproperty
-    def delayed_node_id(self) -> DelayedNodeId:
-        ...
-
-    @abstractproperty
-    def vm_capabilities(self) -> Dict[str, Any]:
-        ...
-
-    @abstractproperty
-    def pcpu_count(self) -> int:
-        ...
-
-    @abstractproperty
-    def gpu_count(self) -> int:
-        ...
-
-    @abstractproperty
-    def cores_per_socket(self) -> int:
-        ...
+# state is added by default because it also has a setter
+# property and most tools get confused by this
+QUERYABLE_PROPERTIES: List[str] = ["state"]
 
 
-class Node(BaseNode):
+def nodeproperty(function: Callable) -> property:
+    QUERYABLE_PROPERTIES.append(function.__name__)
+    return property(function)
+
+
+class Node(ABC):
     def __init__(
         self,
         node_id: DelayedNodeId,
@@ -140,11 +57,9 @@ class Node(BaseNode):
         assert isinstance(memory, ht.Memory)
         self.__memory = memory
         self.__infiniband = infiniband
-        self.__resources = resources or ht.ResourceDict({})
-        self.__available = deepcopy(self.__resources)
 
-        self.__available["__vcpu_count"] = self.vcpu_count
-        self.__available["__memory_mb"] = self.memory.convert_to("m").value
+        self._resources = resources or ht.ResourceDict({})
+        self.__available = deepcopy(self._resources)
 
         self.__state = state
         self.__exists = exists
@@ -180,23 +95,23 @@ class Node(BaseNode):
     def name(self) -> ht.NodeName:
         return self.__name
 
-    @property
+    @nodeproperty
     def nodearray(self) -> ht.NodeArrayName:
         return self.__nodearray
 
-    @property
+    @nodeproperty
     def bucket_id(self) -> ht.BucketId:
         return self.__bucket_id
 
-    @property
+    @nodeproperty
     def vm_size(self) -> ht.VMSize:
         return self.__vm_size
 
-    @property
+    @nodeproperty
     def vm_family(self) -> ht.VMFamily:
         return ht.VMFamily(self.__aux_vm_info.vm_family)
 
-    @property
+    @nodeproperty
     def hostname(self) -> Optional[ht.Hostname]:
         return self.__hostname
 
@@ -206,27 +121,27 @@ class Node(BaseNode):
             raise AssertionError("null hostname")
         return ht.Hostname(str(self.hostname))
 
-    @property
+    @nodeproperty
     def private_ip(self) -> Optional[ht.IpAddress]:
         return self.__private_ip
 
-    @property
+    @nodeproperty
     def location(self) -> ht.Location:
         return self.__location
 
-    @property
+    @nodeproperty
     def spot(self) -> bool:
         return self.__spot
 
-    @property
+    @nodeproperty
     def vcpu_count(self) -> int:
         return self.__vcpu_count
 
-    @property
+    @nodeproperty
     def memory(self) -> ht.Memory:
         return self.__memory
 
-    @property
+    @nodeproperty
     def infiniband(self) -> bool:
         return self.__infiniband
 
@@ -238,17 +153,17 @@ class Node(BaseNode):
     def state(self, value: ht.NodeStatus) -> None:
         self.__state = value
 
-    @property
+    @nodeproperty
     def exists(self) -> bool:
         return self.__exists
 
-    @property
+    @nodeproperty
     def placement_group(self) -> Optional[ht.PlacementGroup]:
         return self.__placement_group
 
     @property
     def resources(self) -> ht.ResourceDict:
-        return self.__resources
+        return frozendict(self._resources)
 
     @property
     def managed(self) -> bool:
@@ -258,7 +173,7 @@ class Node(BaseNode):
     def managed(self, value: bool) -> None:
         self.__managed = value
 
-    @property
+    @nodeproperty
     def version(self) -> str:
         return self.__version
 
@@ -270,15 +185,15 @@ class Node(BaseNode):
     def vm_capabilities(self) -> Dict[str, Any]:
         return self.__aux_vm_info.capabilities
 
-    @property
+    @nodeproperty
     def pcpu_count(self) -> int:
         return self.__aux_vm_info.pcpu_count
 
-    @property
+    @nodeproperty
     def gpu_count(self) -> int:
         return self.__aux_vm_info.gpu_count
 
-    @property
+    @nodeproperty
     def cores_per_socket(self) -> int:
         return self.__aux_vm_info.cores_per_socket
 
@@ -301,7 +216,7 @@ class Node(BaseNode):
         return self.__node_attribute_overrides
 
     def clone(self) -> "Node":
-        return Node(
+        ret = Node(
             node_id=self.__node_id.clone(),
             name=self.name,
             nodearray=self.nodearray,
@@ -319,8 +234,10 @@ class Node(BaseNode):
             exists=self.exists,
             placement_group=self.placement_group,
             managed=self.managed,
-            resources=ht.ResourceDict(deepcopy(self.resources)),
+            resources=ht.ResourceDict(deepcopy(self._resources)),
         )
+        ret.available.update(self.available)
+        return ret
 
     @property
     def closed(self) -> bool:
@@ -418,10 +335,20 @@ class UnmanagedNode(Node):
         self,
         hostname: str,
         resources: Optional[dict] = None,
+        vm_size: Optional[ht.VMSize] = None,
+        location: Optional[ht.Location] = None,
         vcpu_count: Optional[int] = None,
         memory: Optional[ht.Memory] = None,
+        placement_group: Optional[ht.PlacementGroup] = None,
     ) -> None:
         resources = resources or ht.ResourceDict({})
+        if vm_size:
+            assert (
+                vm_size and location
+            ), "You must specify location when specifying vm_size"
+        vm_size = vm_size or ht.VMSize("unknown")
+        location = location or ht.Location("unknown")
+        aux = vm_sizes.get_aux_vm_size_info(location, vm_size)
         Node.__init__(
             self,
             node_id=DelayedNodeId(ht.NodeName(hostname)),
@@ -430,16 +357,16 @@ class UnmanagedNode(Node):
             bucket_id=ht.BucketId("unknown"),
             hostname=ht.Hostname(hostname),
             private_ip=None,
-            vm_size=ht.VMSize("unknown"),
-            location=ht.Location("unknown"),
+            vm_size=vm_size,
+            location=location,
             spot=False,
-            vcpu_count=vcpu_count or 1,
-            memory=memory or ht.Memory(0, "m"),
+            vcpu_count=aux.vcpu_count,
+            memory=aux.memory,
             infiniband=False,
             state=ht.NodeStatus("running"),
             power_state=ht.NodeStatus("running"),
             exists=True,
-            placement_group=None,
+            placement_group=placement_group,
             managed=False,
             resources=ht.ResourceDict(resources),
         )
@@ -460,7 +387,6 @@ def minimum_space(constraints: List[NodeConstraint], node: "Node") -> int:
         # TODO not sure about how to handle this
         constraint_min_space = constraint.minimum_space(node)
         assert constraint_min_space is not None
-        # logging.info("RDH %s %s", constraint_min_space, job_constraint)
 
         if constraint_min_space > -1:
             if min_space is None:

@@ -11,11 +11,6 @@ from hpc.autoscale.job.demandcalculator import new_demand_calculator
 from hpc.autoscale.job.job import Job
 from hpc.autoscale.node.node import Node
 
-logging.basicConfig(
-    format="%(asctime)-15s: %(levelname)s %(message)s",
-    stream=sys.stderr,
-    level=logging.DEBUG,
-)
 _exit_code = 0
 
 

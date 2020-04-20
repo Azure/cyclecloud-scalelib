@@ -56,10 +56,10 @@ def target_counts_demand() -> None:
     dcalc.add_job(
         Job(
             "tn-2x5",
-            {"node.nodearray": "htc", "ncpus": 2, "exclusive": False},
-            iterations=2,
+            {"node.nodearray": "htc", "ncpus": 2, "exclusive": True},
             node_count=5,
-        )
+        ),
+        colocated=True,
     )
 
     demand_result = dcalc.finish()
@@ -114,7 +114,6 @@ def target_counts_node_mgr() -> None:
 
     """
     node_mgr = new_node_manager(CONFIG)
-    node_mgr.add_default_resource({}, "ncpus", "node.vcpu_count")
 
     result = node_mgr.allocate({"node.nodearray": "htc"}, node_count=2)
 

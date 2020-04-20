@@ -1,11 +1,12 @@
-from typing import Any
+from typing import Any, List
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as s
 
-import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
-from hpc.autoscale.hpctypes import Memory
-from hpc.autoscale.node.node import BaseNode
+from hpc.autoscale.node import vm_sizes
+from hpc.autoscale.node.node import Node, UnmanagedNode
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
 from hpc.autoscale.results import (
     DefaultContextHandler,
@@ -13,10 +14,6 @@ from hpc.autoscale.results import (
     unregister_all_result_handlers,
 )
 from hpc.autoscale.util import partition
-
-logging.basicConfig(
-    filename="/tmp/log.txt", filemode="w", format="%(message)s", level=logging.DEBUG
-)
 
 
 def setup_function(function: Any) -> None:
@@ -38,8 +35,6 @@ def _bindings() -> MockClusterBinding:
     bindings.add_bucket(
         "htc",
         "Standard_F4s",
-        4,
-        Memory(8, "g"),
         max_count=20,
         available_count=10,
         family_consumed_core_count=0,
@@ -50,8 +45,6 @@ def _bindings() -> MockClusterBinding:
     bindings.add_bucket(
         "hpc",
         "Standard_F8s",
-        4,
-        Memory(8, "g"),
         max_count=20,
         available_count=10,
         family_consumed_core_count=0,
@@ -105,10 +98,22 @@ def test_over_allocate(node_mgr: NodeManager) -> None:
 
 
 def test_multi_array_alloc(bindings: MockClusterBinding) -> None:
-    result = _node_mgr(bindings).allocate(
+    node_mgr = _node_mgr(bindings)
+    hpc, htc = node_mgr.get_buckets()
+    if hpc.nodearray == "htc":
+        hpc, htc = htc, hpc
+
+    assert hpc.vm_family == htc.vm_family
+
+    assert hpc.available_count == 10
+    assert htc.available_count == 10
+    result = node_mgr.allocate(
         {"node.nodearray": ["htc", "hpc"], "exclusive": True}, node_count=20
     )
-    assert result and len(result.nodes) == 20
+
+    assert result and len(result.nodes) == 15
+    assert hpc.available_count == 0
+    assert htc.available_count == 0
     assert set(["htc", "hpc"]) == set([n.nodearray for n in result.nodes])
 
 
@@ -137,16 +142,61 @@ def test_packing(node_mgr: NodeManager) -> None:
 
 
 def test_or_ordering() -> None:
+    bindings = MockClusterBinding()
+    bindings.add_nodearray("array-a", {"nodetype": "A"})
+    bindings.add_bucket("array-a", "Standard_F4", 10, 10)
+    bindings.add_nodearray("array-b", {"nodetype": "B"})
+    bindings.add_bucket("array-b", "Standard_F4s", 10, 10)
+
     register_result_handler(DefaultContextHandler("[test_or_ordering]"))
     for ordering in [["A", "B"], ["B", "A"]]:
-        node_mgr = _node_mgr(_bindings())
+        node_mgr = _node_mgr(bindings)
+        hi, lo = node_mgr.get_buckets()
 
+        if hi.resources["nodetype"] != ordering[0]:
+            hi, lo = lo, hi
+
+        assert hi.available_count == 10
+        assert lo.available_count == 10
         result = node_mgr.allocate(
-            {"nodetype": ordering, "exclusive": True}, node_count=15
+            {
+                "or": [{"nodetype": ordering[0]}, {"nodetype": ordering[1]}],
+                "exclusive": True,
+            },
+            node_count=15,
         )
+        assert hi.available_count == 0
+        assert lo.available_count == 5
+        assert result
 
-        assert result and len(result.nodes) == 15
-        assert set(["htc", "hpc"]) == set([n.nodearray for n in result.nodes])
+        by_array = partition(result.nodes, lambda n: n.resources["nodetype"])
+        assert len(by_array[ordering[0]]) == 10
+        assert len(by_array[ordering[1]]) == 5
+
+
+def test_choice_ordering() -> None:
+    bindings = MockClusterBinding()
+    bindings.add_nodearray("array-a", {"nodetype": "A"})
+    bindings.add_bucket("array-a", "Standard_F4", 10, 10)
+    bindings.add_nodearray("array-b", {"nodetype": "B"})
+    bindings.add_bucket("array-b", "Standard_F4s", 10, 10)
+
+    register_result_handler(DefaultContextHandler("[test_or_ordering]"))
+    for ordering in [["A", "B"], ["B", "A"]]:
+        node_mgr = _node_mgr(bindings)
+        hi, lo = node_mgr.get_buckets()
+
+        if hi.resources["nodetype"] != ordering[0]:
+            hi, lo = lo, hi
+
+        assert hi.available_count == 10
+        assert lo.available_count == 10
+        result = node_mgr.allocate(
+            {"nodetype": ordering, "exclusive": True,}, node_count=15,  # noqa: E231
+        )
+        assert hi.available_count == 0
+        assert lo.available_count == 5
+        assert result
 
         by_array = partition(result.nodes, lambda n: n.resources["nodetype"])
         assert len(by_array[ordering[0]]) == 10
@@ -159,8 +209,6 @@ def test_vm_family_limit(bindings: MockClusterBinding) -> None:
     bindings.add_bucket(
         "htc",
         "Standard_F4",
-        vcpu_count=4,
-        memory=Memory(8, "g"),
         available_count=20,
         max_count=20,
         family_quota_count=30,
@@ -170,8 +218,6 @@ def test_vm_family_limit(bindings: MockClusterBinding) -> None:
     bindings.add_bucket(
         "htc",
         "Standard_F2",
-        vcpu_count=2,
-        memory=Memory(4, "g"),
         available_count=20,
         max_count=20,
         family_quota_count=30,
@@ -196,44 +242,33 @@ def test_vm_family_limit(bindings: MockClusterBinding) -> None:
 
 def test_mock_bindings(bindings: MockClusterBinding) -> None:
     ctx = register_result_handler(DefaultContextHandler("[test]"))
-    for x in _node_mgr(bindings).get_buckets():
-        assert x.family_available_count == 20
-        assert x.available_count == 10
+    hpc, htc = _node_mgr(bindings).get_buckets()
+    if hpc.nodearray != "hpc":
+        hpc, htc = htc, hpc
+    assert hpc.nodearray == "hpc"
+    assert htc.nodearray == "htc"
 
-        x.decrement(2)
-        assert x.family_available_count == 18
-        assert x.available_count == 8
+    assert hpc.family_available_count == 10
+    assert hpc.available_count == 10
 
-        x.increment(1)
-        assert x.family_available_count == 19
-        assert x.available_count == 9
+    assert hpc.family_available_count == 10
+    assert htc.family_available_count == 20
 
-        # make sure we go back to 20, otherwise it will fail.
-        x.increment(1)
-        assert x.family_available_count == 20
-        assert x.available_count == 10
-
-    bucket1, bucket2 = _node_mgr(bindings).get_buckets()
-    assert bucket1.family_available_count == 20
-    assert bucket2.family_available_count == 20
-    bucket1.decrement(1)
-    assert bucket1.family_available_count == 19
-    assert bucket2.family_available_count == 19
-    bucket1.increment(1)
-    assert bucket1.family_available_count == 20
-    assert bucket2.family_available_count == 20
+    hpc.decrement(1)
+    assert hpc.family_available_count == 9
+    assert htc.family_available_count == 18
+    hpc.increment(1)
+    assert hpc.family_available_count == 10
+    assert htc.family_available_count == 20
 
     ctx.set_context("[failure]")
     nm = _node_mgr(bindings)
-    assert 20 == len(nm.allocate({}, node_count=20).nodes)
 
     b = MockClusterBinding()
     b.add_nodearray("haspgs", {})
     b.add_bucket(
         "haspgs",
         "Standard_F4",
-        4,
-        Memory(8, "g"),
         100,
         100,
         max_placement_group_size=20,
@@ -305,25 +340,25 @@ def test_default_resources() -> None:
 
     b = _bindings()
     b.add_nodearray("other", {"nodetype": "C"})
-    b.add_bucket("other", "Standard_F4", 10, Memory.value_of("100g"), 1, 1)
+    b.add_bucket("other", "Standard_F16", 1, 1)
 
     # a few specific with finally applying a global default
     node_mgr = _node_mgr(b)
 
     node_mgr.add_default_resource({"nodetype": "A"}, "vcpus", 2)
     node_mgr.add_default_resource({"nodetype": "B"}, "vcpus", "node.vcpu_count")
-    node_mgr.add_default_resource({}, "vcpus", lambda node: node.vcpu_count // 2)
+    node_mgr.add_default_resource({}, "vcpus", lambda node: node.vcpu_count - 2)
 
     by_nodetype = partition(node_mgr.get_buckets(), lambda b: b.resources["nodetype"])
     assert by_nodetype.get("A")[0].resources["vcpus"] == 2
-    assert by_nodetype.get("B")[0].resources["vcpus"] == 4
-    assert by_nodetype.get("C")[0].resources["vcpus"] == 5
+    assert by_nodetype.get("B")[0].resources["vcpus"] == 8
+    assert by_nodetype.get("C")[0].resources["vcpus"] == 14
 
-    # use a BaseNode function, which is essentially the same as the next
+    # use a Node function, which is essentially the same as the next
     node_mgr = _node_mgr(_bindings())
-    node_mgr.add_default_resource({}, "vcpus", BaseNode.vcpu_count)
+    node_mgr.add_default_resource({}, "vcpus", Node.vcpu_count)
     assert by_nodetype.get("A")[0].resources["vcpus"] == 2
-    assert by_nodetype.get("B")[0].resources["vcpus"] == 4
+    assert by_nodetype.get("B")[0].resources["vcpus"] == 8
 
     # use a node reference
     node_mgr = _node_mgr(_bindings())
@@ -331,8 +366,101 @@ def test_default_resources() -> None:
 
     by_nodetype = partition(node_mgr.get_buckets(), lambda b: b.resources["nodetype"])
     assert by_nodetype.get("A")[0].resources["vcpus"] == 4
-    assert by_nodetype.get("B")[0].resources["vcpus"] == 4
+    assert by_nodetype.get("B")[0].resources["vcpus"] == 8
+
+
+@given(
+    s.integers(1, 3),
+    s.integers(1, 3),
+    s.lists(
+        s.integers(0, len(vm_sizes.VM_SIZES["southcentralus"]) - 1),
+        min_size=9,
+        max_size=9,
+        unique=True,
+    ),
+    s.lists(s.integers(1, 25), min_size=1, max_size=10,),
+    s.lists(s.integers(1, 32), min_size=20, max_size=20,),
+    s.lists(s.booleans(), min_size=20, max_size=20,),
+    s.lists(s.booleans(), min_size=20, max_size=20,),
+    s.lists(s.integers(1, 2 ** 31), min_size=10, max_size=10,),
+)
+@settings(deadline=None)
+def test_slot_count_hypothesis(
+    num_arrays: int,
+    num_buckets: int,
+    vm_indices: List[int],
+    magnitudes: List[int],
+    ncpus_per_job: List[int],
+    slots_or_nodes: List[bool],
+    exclusivity: List[bool],
+    shuffle_seeds: List[int],
+) -> None:
+
+    # construct a dc with num_buckets x num_arrays
+    # use vm_indices to figure out which vms to pick
+    def next_node_mgr(existing_nodes: List[Node]) -> NodeManager:
+        bindings = MockClusterBinding()
+        for_region = list(vm_sizes.VM_SIZES["southcentralus"].keys())
+
+        for n in range(num_arrays):
+            nodearray = "nodearray{}".format(n)
+            bindings.add_nodearray(nodearray, {}, location="southcentralus")
+            for b in range(num_buckets):
+                vm_size = for_region[vm_indices[n * num_buckets + b]]
+                bindings.add_bucket(
+                    nodearray, vm_size, max_count=10, available_count=10,
+                )
+
+        return _node_mgr(bindings)
+
+    # create len(job_iters) jobs with ncpus_per_job
+    def make_requests(node_mgr: NodeManager) -> None:
+        for n, mag in enumerate(magnitudes):
+            node_count = None if slots_or_nodes[n] else mag
+            slot_count = None if node_count else mag
+            node_mgr.allocate(
+                {"ncpus": ncpus_per_job[n], "exclusive": exclusivity[n]},
+                node_count=node_count,
+                slot_count=slot_count,
+            )
+
+    node_mgr = next_node_mgr([])
+    assert len(node_mgr.get_buckets()) == num_buckets * num_arrays
+
+    for bucket in node_mgr.get_buckets():
+        assert bucket.resources["ncpus"] >= 1
+        assert bucket.resources["ncpus"] == bucket.vcpu_count
+        assert bucket.location == "southcentralus"
+
+    make_requests(node_mgr)
+
+    # let's take the previous existing nodes
+    # and feed them into the next dc, simulating a repeating cron
+    # to see that we get the same demand regardless of existing nodes
+    existing_nodes = list(node_mgr.get_nodes())
+
+    base_nodes = [UnmanagedNode(n.hostname, n.resources) for n in existing_nodes]
+
+    for sseed in shuffle_seeds:
+        import random
+
+        random.seed(sseed)
+        random.shuffle(existing_nodes)
+
+        node_mgr = next_node_mgr(existing_nodes)
+
+        existing_nodes = [
+            UnmanagedNode(n.hostname, n.resources) for n in existing_nodes
+        ]
+        assert len(existing_nodes) == len(base_nodes)
+        assert 0 == len(node_mgr.get_new_nodes())
+        result = node_mgr.allocate({}, node_count=1)
+        if result:
+            assert 1 == len(node_mgr.get_new_nodes())
 
 
 # def test_top_level_limits(node_mgr: NodeManager) -> None:
 #     assert node_mgr.cluster_max_core_count == 20
+
+if __name__ == "__main__":
+    test_slot_count_hypothesis()
