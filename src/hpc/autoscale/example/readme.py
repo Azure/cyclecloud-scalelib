@@ -9,7 +9,6 @@ from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demandcalculator import DemandCalculator, new_demand_calculator
 from hpc.autoscale.job.demandprinter import print_demand
 from hpc.autoscale.job.job import Job
-from hpc.autoscale.node import nodemanager
 from hpc.autoscale.node.constraints import BaseNodeConstraint
 from hpc.autoscale.node.node import Node, UnmanagedNode
 from hpc.autoscale.node.nodemanager import new_node_manager

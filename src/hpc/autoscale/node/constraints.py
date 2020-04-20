@@ -4,11 +4,9 @@ from typing import Any, Dict, List, Optional, Union
 
 import hpc  # noqa: F401
 import hpc.autoscale.hpclogging as logging
-from hpc.autoscale import codeanalysis
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.codeanalysis import hpcwrap, hpcwrapclass
-from hpc.autoscale.hpctypes import ResourceType, ResourceTypeAtom
-from hpc.autoscale.node.node import NodeConstraint
+from hpc.autoscale.hpctypes import ResourceType
 from hpc.autoscale.results import SatisfiedResult
 
 ConstraintDict = typing.NewType("ConstraintDict", Dict[Any, Any])
@@ -20,13 +18,34 @@ if typing.TYPE_CHECKING:
     from hpc.autoscale.node.node import Node, BaseNode
     from hpc.autoscale.node.bucket import NodeBucket
 
-if codeanalysis.RUNTIME_TYPE_CHECKING:
-
-    from hpc.autoscale.node.node import Node, BaseNode
-    from hpc.autoscale.node.bucket import NodeBucket
-
 
 # TODO split by job and node constraints (job being a subclass of node constraint)
+class NodeConstraint(ABC):
+    @abstractmethod
+    def satisfied_by_bucket(self, bucket: "NodeBucket") -> SatisfiedResult:
+        raise RuntimeError()
+
+    @abstractmethod
+    def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        raise RuntimeError()
+
+    @abstractmethod
+    def do_decrement(self, node: "Node") -> bool:
+        raise RuntimeError()
+
+    def minimum_space(self, node: "Node") -> int:
+        return -1
+
+    @abstractmethod
+    def to_dict(self) -> dict:
+        raise RuntimeError()
+
+    @abstractmethod
+    def __str__(self) -> str:
+        ...
+
+    def __repr__(self) -> str:
+        return str(self)
 
 
 class BaseNodeConstraint(NodeConstraint):
@@ -361,7 +380,7 @@ class NotAllocated(BaseNodeConstraint):
 
 
 def _parse_node_property_constraint(
-    attr: str, value: Union[ResourceTypeAtom, Constraint]
+    attr: str, value: Union[ResourceType, Constraint]
 ) -> NodePropertyConstraint:
 
     node_attr = attr[5:]
@@ -379,7 +398,7 @@ def _parse_node_property_constraint(
                 )
                 raise RuntimeError(msg)
         if not isinstance(value, list):
-            value = [value]
+            value = [value]  # type: ignore
         return NodePropertyConstraint(node_attr, *value)  # type: ignore
 
     msg = "Expected string, int or boolean for '{}' but got {}".format(attr, value)
@@ -397,6 +416,9 @@ def new_job_constraint(
         return Not(job_cons)
 
     if attr.startswith("node."):
+        assert isinstance(
+            value, (str, int, float, bool, list)
+        ), "Expected str, int, float or bool. Got {}".format(type(value))
         return _parse_node_property_constraint(attr, value)
 
     if isinstance(value, str):

@@ -31,7 +31,7 @@ def hpcwrap(function: Callable) -> Callable:
         # disable type checking, often because it uses subscripted types, sadly.
         typechecked_func = function
     else:
-        typechecked_func = typechecked(function)
+        typechecked_func = typecheck_function(function, apitraceall)
 
     def hpcwrapper(*args: Any, **kwargs: Any) -> Optional[Any]:
         if function.__name__ in WHITELIST_FUNCTIONS_TYPES:
@@ -40,9 +40,24 @@ def hpcwrap(function: Callable) -> Callable:
                 logging.warning(
                     "Runtime type checking is disabled for %s", function.__name__
                 )
-        return apitraceall(typechecked_func)(*args, **kwargs)
+        return typechecked_func(*args, **kwargs)
 
     return hpcwrapper
+
+
+def typecheck_function(
+    function: Callable, apitrace: Callable[[Callable], Callable]
+) -> Callable:
+    def typecheck_wrap(*args: Any, **kwargs: Any) -> Any:
+
+        from hpc.autoscale.node.node import Node  # noqa
+        from hpc.autoscale.node.bucket import NodeBucket  # noqa
+
+        from hpc.autoscale.job.job import Job  # noqa
+
+        return typechecked(function)(*args, **kwargs)
+
+    return typecheck_wrap
 
 
 def hpcwrapclass(cls: type) -> type:

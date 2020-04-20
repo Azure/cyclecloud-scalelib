@@ -8,10 +8,13 @@ from uuid import uuid4
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import node as nodepkg
-from hpc.autoscale.codeanalysis import RUNTIME_TYPE_CHECKING, hpcwrapclass
+from hpc.autoscale.codeanalysis import hpcwrapclass
 
-if typing.TYPE_CHECKING or RUNTIME_TYPE_CHECKING:
-    from hpc.autoscale import node
+if typing.TYPE_CHECKING:
+    from hpc.autoscale.node.node import Node
+    from hpc.autoscale.node.node import NodeConstraint  # noqa: F401
+    from hpc.autoscale.node.bucket import NodeBucket  # noqa: F401
+
 
 Reasons = Optional[List[str]]  # pylint: disable=invalid-name
 
@@ -65,7 +68,7 @@ class AllocationResult(Result):
     def __init__(
         self,
         status: str,
-        nodes: Optional[List["node.node.Node"]] = None,
+        nodes: Optional[List["Node"]] = None,
         slots_allocated: Optional[int] = None,
         reasons: Reasons = None,
     ) -> None:
@@ -100,7 +103,7 @@ class MatchResult(Result):
     def __init__(
         self,
         status: str,
-        node: "node.node.Node",
+        node: "Node",
         slots: int,
         reasons: Optional[List[str]] = None,
     ) -> None:
@@ -130,7 +133,7 @@ class CandidatesResult(Result):
     def __init__(
         self,
         status: str,
-        candidates: Optional[List["nodepkg.bucket.NodeBucket"]] = None,
+        candidates: Optional[List["NodeBucket"]] = None,
         child_results: List[Result] = None,
     ) -> None:
         Result.__init__(self, status, [str(r) for r in (child_results or [])])
@@ -163,7 +166,7 @@ class SatisfiedResult(Result):
         self,
         status: str,
         constraint: "nodepkg.constraints.NodeConstraint",
-        node: "node.node.Node",
+        node: "Node",
         reasons: Reasons = None,
         score: Optional[int] = 1,
     ) -> None:
@@ -198,7 +201,7 @@ class BootupResult(Result):
         status: str,
         operation_id: ht.OperationId,
         request_id: Optional[ht.RequestId],
-        nodes: Optional[List["node.node.Node"]] = None,
+        nodes: Optional[List["Node"]] = None,
         reasons: Reasons = None,
     ) -> None:
         Result.__init__(self, status, reasons)
