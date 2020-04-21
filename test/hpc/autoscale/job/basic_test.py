@@ -52,19 +52,19 @@ def test_basic():
     def snodes():
         return [SchedulerNode("ip-010A0005", {"slots": 4})]
 
-    def _xjob(jobid, job_constraints=None):
-        job_constraints = job_constraints or [{"slots": 1}]
-        if not isinstance(job_constraints, list):
-            job_constraints = [job_constraints]
-        job_constraints += [{"exclusive": True}]
+    def _xjob(jobid, constraints=None):
+        constraints = constraints or [{"slots": 1}]
+        if not isinstance(constraints, list):
+            constraints = [constraints]
+        constraints += [{"exclusive": True}]
 
-        return Job(jobid, job_constraints=job_constraints)
+        return Job(jobid, constraints=constraints)
 
-    def _job(jobid, job_constraints=None, t=1):
-        job_constraints = job_constraints or [{"slots": 1}]
-        if not isinstance(job_constraints, list):
-            job_constraints = [job_constraints]
-        return Job(jobid, job_constraints=job_constraints, iterations=t)
+    def _job(jobid, constraints=None, t=1):
+        constraints = constraints or [{"slots": 1}]
+        if not isinstance(constraints, list):
+            constraints = [constraints]
+        return Job(jobid, constraints=constraints, iterations=t)
 
     # fmt: off
     run_test(snodes(), [],                       unmatched=1, matched=0, new=0)  # noqa

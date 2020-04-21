@@ -510,11 +510,11 @@ def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConst
 
     assert isinstance(constraint_expressions, list), type(constraint_expressions)
 
-    job_constraints = []
+    constraints = []
 
     for constraint_expression in constraint_expressions:
         if isinstance(constraint_expression, NodeConstraint):
-            job_constraints.append(constraint_expression)
+            constraints.append(constraint_expression)
         elif isinstance(constraint_expression, list):
             pass
         else:
@@ -522,9 +522,9 @@ def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConst
                 # TODO
                 c = new_job_constraint(attr, value)
                 assert c is not None
-                job_constraints.append(c)
+                constraints.append(c)
 
-    return job_constraints
+    return constraints
 
 
 _COMPLETE = True

@@ -118,7 +118,7 @@ class DemandCalculator:
             while job.iterations_remaining > 0:
                 # TODO this is ugly and hokey RDH
                 still_valid = True
-                for constraint in job._job_constraints:
+                for constraint in job._constraints:
                     still_valid = still_valid and constraint.satisfied_by_node(snode)
 
                 # TODO hokey
@@ -126,7 +126,7 @@ class DemandCalculator:
                     break
 
                 add_job_result = snode.decrement(
-                    job._job_constraints, job.iterations_remaining, job.name
+                    job._constraints, job.iterations_remaining, job.name
                 )
 
                 if not add_job_result:

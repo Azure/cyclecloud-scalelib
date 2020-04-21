@@ -293,12 +293,10 @@ def _new_dc(bindings: MockClusterBinding, existing_nodes: Optional[List[Node]] =
 
 def _mpi_job(job_name="1", nodes=1, placeby="pg", resources=None):
     resources = resources or {"ncpus": 2}
-    job_constraints = get_constraints([resources])
-    job_constraints.append(InAPlacementGroup())
-    job_constraints.append(ExclusiveNode())
-    return Job(
-        job_name, job_constraints=job_constraints, node_count=nodes, colocated=True,
-    )
+    constraints = get_constraints([resources])
+    constraints.append(InAPlacementGroup())
+    constraints.append(ExclusiveNode())
+    return Job(job_name, constraints=constraints, node_count=nodes, colocated=True,)
 
 
 def _htc_job(job_name="1", slot_count=1, resources=None):

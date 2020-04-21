@@ -31,7 +31,7 @@ class Job:
     def __init__(
         self,
         name: Optional[Union[str, ht.JobId]] = None,
-        job_constraints: Any = None,
+        constraints: Any = None,
         iterations: int = 1,
         node_count: int = 0,
         colocated: bool = False,
@@ -60,13 +60,14 @@ class Job:
         self.__nodes_remaining = node_count
         self.__colocated = colocated
 
-        if job_constraints is None:
-            job_constraints = []
-        if not isinstance(job_constraints, list):
-            job_constraints = [job_constraints]
-        job_constraints = get_constraints(job_constraints)
-        self._job_constraints = job_constraints
-        for jc in self._job_constraints:
+        if constraints is None:
+            constraints = []
+
+        if not isinstance(constraints, list):
+            constraints = [constraints]
+
+        self._constraints = get_constraints(constraints)
+        for jc in self._constraints:
             assert jc is not None
         self.__executing_hostnames = executing_hostnames or []
 
@@ -117,7 +118,7 @@ class Job:
         if self.__node_count > 0:
 
             return node_mgr.allocate(
-                self._job_constraints,
+                self._constraints,
                 node_count=self.__node_count,
                 allow_existing=allow_existing,
                 all_or_nothing=self.__colocated,
@@ -125,7 +126,7 @@ class Job:
             )
 
         return node_mgr.allocate(
-            self._job_constraints,
+            self._constraints,
             slot_count=self.iterations_remaining,
             allow_existing=allow_existing,
             all_or_nothing=all_or_nothing,
@@ -135,7 +136,7 @@ class Job:
     def bucket_candidates(self, candidates: List["NodeBucket"]) -> CandidatesResult:
         from hpc.autoscale.node import bucket
 
-        return bucket.bucket_candidates(candidates, self._job_constraints)
+        return bucket.bucket_candidates(candidates, self._constraints)
 
     def __str__(self) -> str:
         if self.executing_hostnames:
@@ -151,7 +152,7 @@ class Job:
             "iterations": self.iterations,
             "node-count": self.node_count,
             "colocated": self.__colocated,
-            "constraints": [jc.to_dict() for jc in self._job_constraints],
+            "constraints": [jc.to_dict() for jc in self._constraints],
         }
 
     @classmethod
