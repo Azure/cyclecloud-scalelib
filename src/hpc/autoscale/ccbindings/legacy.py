@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 #
 
+import json
 from typing import Any, Dict, List, Optional
 
 import cyclecloud.api.clusters
@@ -16,13 +17,14 @@ from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementRequestModule import NodeManagementRequest
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
+from cyclecloud.session import ResponseStatus
 from requests.structures import CaseInsensitiveDict
 from urllib3.exceptions import InsecureRequestWarning
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
-from hpc.autoscale.codeanalysis import hpcwrapclass
+from hpc.autoscale.codeanalysis import hpcwrap, hpcwrapclass
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.util import partition
 
@@ -47,6 +49,7 @@ class ClusterBinding(ClusterBindingInterface):
     def cluster_name(self) -> ht.ClusterName:
         return self.__cluster_name
 
+    @hpcwrap
     def create_nodes(self, nodes: List[Node]) -> NodeCreationResult:
         creation_request = NodeCreationRequest()
         creation_request.sets = []
@@ -81,7 +84,9 @@ class ClusterBinding(ClusterBindingInterface):
         http_response, result = self.clusters_module.create_nodes(
             self.session, self.cluster_name, creation_request
         )
-        logging.fine(http_response)
+
+        self._log_response(http_response, result)
+
         return result
 
     def deallocate_nodes(
@@ -100,9 +105,10 @@ class ClusterBinding(ClusterBindingInterface):
         http_response, result = self.clusters_module.deallocate_nodes(
             self.session, self.cluster_name, request
         )
-        logging.fine(http_response)
+        self._log_response(http_response, result)
         return result
 
+    @hpcwrap
     def get_cluster_status(self, nodes: bool = False) -> cyclecloud.model.ClusterStatus:
         http_response, result = self.clusters_module.get_cluster_status(
             self.session, self.cluster_name, nodes
@@ -118,7 +124,7 @@ class ClusterBinding(ClusterBindingInterface):
         http_response, result = self.clusters_module.get_nodes(
             self.session, self.cluster_name, operation_id, request_id
         )
-        logging.fine(http_response)
+        self._log_response(http_response, result)
         return result
 
     def remove_nodes(
@@ -137,7 +143,7 @@ class ClusterBinding(ClusterBindingInterface):
         http_response, result = self.clusters_module.remove_nodes(
             self.session, self.cluster_name, request
         )
-        logging.fine(http_response)
+        self._log_response(http_response, result)
         return result
 
     def scale(
@@ -154,7 +160,7 @@ class ClusterBinding(ClusterBindingInterface):
             total_core_count,
             total_node_count,
         )
-        logging.fine(http_response)
+        self._log_response(http_response, result)
         return result
 
     def shutdown_nodes(
@@ -173,7 +179,7 @@ class ClusterBinding(ClusterBindingInterface):
         http_response, result = self.clusters_module.shutdown_nodes(
             self.session, self.cluster_name, request
         )
-        logging.fine(http_response)
+        self._log_response(http_response, result)
         return result
 
     def start_nodes(
@@ -192,7 +198,7 @@ class ClusterBinding(ClusterBindingInterface):
         http_response, result = self.clusters_module.start_nodes(
             self.session, self.cluster_name, request
         )
-        logging.fine(http_response)
+        self._log_response(http_response, result)
         return result
 
     def terminate_nodes(
@@ -211,11 +217,34 @@ class ClusterBinding(ClusterBindingInterface):
         http_response, result = self.clusters_module.terminate_nodes(
             self.session, self.cluster_name, request
         )
-        logging.fine(http_response)
+        self._log_response(http_response, result)
         return result
 
     def delete_nodes(self, nodes: List[Node]) -> NodeManagementResult:
         raise RuntimeError()
+
+    def _log_response(self, s: ResponseStatus, r: Any) -> None:
+        if logging.getLogger().getEffectiveLevel() > logging.DEBUG:
+            return
+
+        import inspect
+
+        current_frame = inspect.currentframe()
+        caller_frame = inspect.getouterframes(current_frame, 2)
+        caller = "[{}]".format(caller_frame[1].function)
+
+        as_json = json.dumps(r.to_dict())
+
+        logging.debug(
+            "[%s] Response: Status=%s -> %s", caller, s.status_code, as_json[:100],
+        )
+
+        if logging.getLogger().getEffectiveLevel() > logging.FINE:
+            return
+
+        logging.fine(
+            "[%s] Full response: Status=%s -> %s", caller, s.status_code, as_json,
+        )
 
     def _node_management_request(
         self,

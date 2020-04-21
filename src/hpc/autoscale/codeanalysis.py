@@ -52,7 +52,7 @@ def typecheck_function(
         from hpc.autoscale.node.bucket import NodeBucket  # noqa
 
         from hpc.autoscale.job.job import Job  # noqa
-        
+
         # let's not require that this is installed unless
         # they turn on runtime type checking
         from typeguard import typechecked

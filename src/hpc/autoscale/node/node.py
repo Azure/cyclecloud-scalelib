@@ -315,7 +315,7 @@ class Node(ABC):
         for attr, new_value in snode.available.items():
             current_value = self.available.get(attr)
             if current_value != new_value:
-                logging.debug(
+                logging.warning(
                     "Updating %s.%s: %s->%s", self, attr, current_value, new_value,
                 )
         self.available.update(snode.available)

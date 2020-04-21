@@ -272,9 +272,8 @@ class DemandCalculator:
                 # TODO inform bucket catalog?
             else:
                 old_snode = self.__scheduler_nodes[new_snode.hostname]
-                logging.debug(
-                    "Found new node[hostname=%s] that does not exist in CycleCloud",
-                    new_snode.hostname,
+                logging.fine(
+                    "Found existing CycleCloud node[hostname=%s]", new_snode.hostname,
                 )
                 old_snode.update(new_snode)
 
