@@ -45,7 +45,7 @@ class NodeManager:
         for node_bucket in node_buckets:
             for node in node_bucket.nodes:
                 self._node_names.add(node.name)
-        self.__unmanaged_nodes: List[UnmanagedNode] = []
+
         self.__default_resources: List[_DefaultResource] = []
 
         # list of nodes a user has 'allocated'.
@@ -329,12 +329,39 @@ class NodeManager:
             index += 1
 
     @apitrace
-    def add_unmanaged_bucket(self, unmanaged_bucket: NodeBucket) -> None:
-        self.__node_buckets.append(unmanaged_bucket)
+    def add_unmanaged_nodes(self, existing_nodes: List[UnmanagedNode]) -> None:
+        by_key: Dict[str, List[Node]] = partition(
+            # typing will complain that List[Node] is List[UnmanagedNode]
+            # just a limitation of python3's typing
+            existing_nodes,  # type: ignore
+            lambda n: str((n.vcpu_count, n.memory, n.resources)),
+        )
+
+        for key, nodes_list in by_key.items():
+            a_node = nodes_list[0]
+            # create a null definition, limits and bucket for each
+            # unique set of unmanaged nodes
+            node_def = NodeDefinition(
+                nodearray=ht.NodeArrayName("__unmanaged__"),
+                bucket_id=ht.BucketId(str(uuid4())),
+                vm_size=ht.VMSize("unknown"),
+                location=ht.Location("unknown"),
+                spot=False,
+                subnet=ht.SubnetId("unknown"),
+                vcpu_count=a_node.vcpu_count,
+                memory=a_node.memory,
+                placement_group=None,
+                resources=deepcopy(a_node.resources),
+            )
+
+            limits = null_bucket_limits(len(nodes_list), a_node.vcpu_count)
+            bucket = NodeBucket(node_def, limits, len(nodes_list), nodes_list)
+
+        self.__node_buckets.append(bucket)
 
     def get_nodes(self) -> List[Node]:
         # TODO slow
-        ret: List[Node] = list(self.__unmanaged_nodes)
+        ret: List[Node] = []
         for node_bucket in self.__node_buckets:
             ret.extend(node_bucket.nodes)
         return ret
@@ -401,17 +428,40 @@ class NodeManager:
 
     @property
     def cluster_max_core_count(self) -> int:
-        raise NotImplementedError()
+        assert (
+            self.get_buckets()
+        ), "We need at least one bucket defined to get cluster limits"
+        return self.get_buckets()[0].limits.cluster_max_core_count
 
     @property
     def cluster_consumed_core_count(self) -> int:
-        raise NotImplementedError()
+        assert (
+            self.get_buckets()
+        ), "We need at least one bucket defined to get cluster limits"
+        return self.get_buckets()[0].limits.cluster_consumed_core_count
 
     def get_regional_max_core_count(self, location: Optional[str] = None) -> int:
-        raise NotImplementedError()
+        for bucket in self.get_buckets():
+            if bucket.location == location:
+                return self.get_buckets()[0].limits.regional_quota_core_count
+        raise RuntimeError(
+            "No bucket found in location {} so we do not have the regional limits.".format(
+                location
+            )
+        )
+
+    def get_locations(self) -> List[ht.Location]:
+        return list(partition(self.get_buckets(), lambda b: b.location).keys())
 
     def get_regional_consumed_core_count(self, location: Optional[str] = None) -> int:
-        raise NotImplementedError()
+        for bucket in self.get_buckets():
+            if bucket.location == location:
+                return self.get_buckets()[0].limits.regional_consumed_core_count
+        raise RuntimeError(
+            "No bucket found in location {} so we do not have the regional limits.".format(
+                location
+            )
+        )
 
     @apitrace
     def add_default_resource(
@@ -569,32 +619,6 @@ def new_node_manager(
 
     ret = _new_node_manager_79(new_cluster_bindings(config))
     existing_nodes = existing_nodes or []
-    by_key: Dict[str, List[Node]] = partition(
-        existing_nodes,  # type: ignore
-        lambda n: str((n.vcpu_count, n.memory, n.resources)),
-    )
-
-    for key, nodes_list in by_key.items():
-        a_node = nodes_list[0]
-        # create a null definition, limits and bucket for each
-        # unique set of unmanaged nodes
-        node_def = NodeDefinition(
-            nodearray=ht.NodeArrayName("__unmanaged__"),
-            bucket_id=ht.BucketId(str(uuid4())),
-            vm_size=ht.VMSize("unknown"),
-            location=ht.Location("unknown"),
-            spot=False,
-            subnet=ht.SubnetId("unknown"),
-            vcpu_count=a_node.vcpu_count,
-            memory=a_node.memory,
-            placement_group=None,
-            resources=deepcopy(a_node.resources),
-        )
-
-        limits = null_bucket_limits(len(nodes_list), a_node.vcpu_count)
-        bucket = NodeBucket(node_def, limits, len(nodes_list), nodes_list)
-
-        ret.add_unmanaged_bucket(bucket)
 
     if not disable_default_resources:
         ret.set_system_default_resources()

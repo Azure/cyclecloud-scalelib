@@ -459,8 +459,17 @@ def test_slot_count_hypothesis(
             assert 1 == len(node_mgr.get_new_nodes())
 
 
-# def test_top_level_limits(node_mgr: NodeManager) -> None:
-#     assert node_mgr.cluster_max_core_count == 20
+def test_top_level_limits(node_mgr: NodeManager) -> None:
+    assert node_mgr.cluster_max_core_count == 10_000
+    assert node_mgr.cluster_consumed_core_count == 0
+    assert ["westus2"] == node_mgr.get_locations()
+    assert node_mgr.get_regional_consumed_core_count("westus2") == 0
+    assert node_mgr.get_regional_max_core_count("westus2") == 1_000_000
+
+    assert node_mgr.allocate({"node.vcpu_count": 4}, node_count=1)
+    assert node_mgr.cluster_consumed_core_count == 4
+    assert node_mgr.get_regional_consumed_core_count("westus2") == 4
+
 
 if __name__ == "__main__":
     test_slot_count_hypothesis()
