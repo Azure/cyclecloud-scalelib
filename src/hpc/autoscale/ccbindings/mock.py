@@ -20,6 +20,7 @@ from cyclecloud.model.NodearrayBucketStatusVirtualMachineModule import (
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeCreationResultSetModule import NodeCreationResultSet
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
+from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
@@ -172,7 +173,12 @@ class MockClusterBinding(ClusterBindingInterface):
         bucket_status.virtual_machine.memory = aux_info.memory.convert_to("m").value
 
         bucket_status.virtual_machine.infiniband = aux_info.infiniband
-        bucket_status.placement_groups = placement_groups
+
+        bucket_status.placement_groups = []
+        for pg in placement_groups or []:
+            bucket_status.placement_groups.append(
+                PlacementGroupStatus(name=pg, active_core_count=0, active_count=0)
+            )
 
         for attr in dir(bucket_status):
             if attr[0].isalpha() and "count" in attr:

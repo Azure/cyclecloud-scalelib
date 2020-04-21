@@ -321,7 +321,7 @@ def create_bucket_limits(
             # the nodearray could actually have PlacementGroupId set
             placement_groups = set(
                 [nodearray.nodearray.get("PlacementGroupId")]
-                + (bucket.placement_groups or [])
+                + ([p.name for p in (bucket.placement_groups or [])])
             )
             for pg in placement_groups:
                 key = (bucket.bucket_id, pg)

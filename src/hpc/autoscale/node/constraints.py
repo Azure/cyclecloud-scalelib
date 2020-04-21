@@ -440,7 +440,7 @@ def new_job_constraint(
         return Not(job_cons)
 
     if attr.startswith("node."):
-        assert isinstance(
+        assert value is None or isinstance(
             value, (str, int, float, bool, list)
         ), "Expected str, int, float or bool. Got {}".format(type(value))
         return _parse_node_property_constraint(attr, value)

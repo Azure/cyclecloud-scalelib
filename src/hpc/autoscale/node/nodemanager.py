@@ -707,7 +707,8 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
         for bucket in nodearray_status.buckets:
             # TODO move to a util func
             placement_groups = set(
-                [nodearray.get("PlacementGroupId")] + (bucket.placement_groups or [])
+                [nodearray.get("PlacementGroupId")]
+                + ([p.name for p in (bucket.placement_groups or [])])
             )
             for pg in placement_groups:
                 vm_size = bucket.definition.machine_type
