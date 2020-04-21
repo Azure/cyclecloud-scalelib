@@ -2,8 +2,6 @@ import inspect
 import os
 from typing import Any, Callable, List, Optional
 
-from typeguard import typechecked
-
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.hpclogging import apitrace
 
@@ -54,6 +52,10 @@ def typecheck_function(
         from hpc.autoscale.node.bucket import NodeBucket  # noqa
 
         from hpc.autoscale.job.job import Job  # noqa
+        
+        # let's not require that this is installed unless
+        # they turn on runtime type checking
+        from typeguard import typechecked
 
         return typechecked(function)(*args, **kwargs)
 
