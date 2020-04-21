@@ -470,5 +470,20 @@ def test_top_level_limits(node_mgr: NodeManager) -> None:
     assert node_mgr.get_regional_consumed_core_count("westus2") == 4
 
 
+def test_config_based_default_resources(bindings) -> None:
+    config = {"_mock_bindings": bindings, "default_resources": []}
+    node_mgr = new_node_manager(config)
+    for b in node_mgr.get_buckets():
+        assert "blah" not in b.resources
+
+    config["default_resources"].append(
+        {"select": {}, "name": "blah", "value": "node.pcpu_count"}
+    )
+
+    node_mgr = new_node_manager(config)
+    for b in node_mgr.get_buckets():
+        assert b.resources["blah"] == b.pcpu_count
+
+
 if __name__ == "__main__":
     test_slot_count_hypothesis()

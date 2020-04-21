@@ -656,6 +656,27 @@ def new_node_manager(
     ret = _new_node_manager_79(new_cluster_bindings(config))
     existing_nodes = existing_nodes or []
 
+    for entry in config.get("default_resources", []):
+        if set(["select", "name", "value"]) != set(entry.keys()):
+            raise RuntimeError(
+                "default_resources: Expected select=dict name=str value=str: {}".format(
+                    entry
+                )
+            )
+
+        try:
+            assert isinstance(entry["select"], dict)
+            assert isinstance(entry["name"], str)
+            assert isinstance(entry["value"], str)
+        except AssertionError as e:
+            raise RuntimeError(
+                "default_resources: Expected select=dict name=str value=str: {}".format(
+                    e
+                )
+            )
+
+        ret.add_default_resource(entry["select"], entry["name"], entry["value"])
+
     if not disable_default_resources:
         ret.set_system_default_resources()
 
