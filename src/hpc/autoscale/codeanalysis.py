@@ -7,7 +7,7 @@ from typeguard import typechecked
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.hpclogging import apitrace
 
-RUNTIME_TYPE_CHECKING = os.getenv("HPC_RUNTIME_CHECKS", "false").lower() == "true"
+RUNTIME_TYPE_CHECKING = os.environ.get("HPC_RUNTIME_CHECKS", "false").lower() == "true"
 TRACE_FUNCTIONS: List[str] = ["all"]
 WHITELIST_FUNCTIONS_TYPES = ["register_result_handler"]
 

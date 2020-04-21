@@ -1,4 +1,3 @@
-import json
 import sys
 import typing
 from uuid import uuid4
@@ -20,9 +19,6 @@ CONFIG = {
     "username": "USERNAME",
     "password": "PASSWORD",
 }
-
-
-CONFIG = json.load(open("/Users/ryhamel/autoscale.json"))
 
 DRY_RUN = True
 

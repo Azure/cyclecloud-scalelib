@@ -34,7 +34,13 @@ class PyTest(TestCommand):
         import pytest
 
         # run the tests, then the format checks.
-        errno = pytest.main(self.test_args)
+        os.environ["HPC_RUNTIME_CHECKS"] = "true"
+        errno = pytest.main(self.test_args + ["-k", "not hypothesis"])
+        if errno != 0:
+            sys.exit(errno)
+
+        os.environ["HPC_RUNTIME_CHECKS"] = "false"
+        errno = pytest.main(self.test_args + ["-k", "hypothesis"])
         if errno != 0:
             sys.exit(errno)
 
