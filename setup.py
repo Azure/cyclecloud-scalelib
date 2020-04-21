@@ -130,14 +130,17 @@ setup(
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     package_data={
-        "hpc-autoscale": [
+        "hpc": [
             "BUILD_NUMBER",
             "private-requirements.json",
             "../NOTICE",
             "../notices",
-        ]
+            "vm_sizes.json"
+        ],
+        "": ["vm_sizes.json", "../notices"]
     },
-    install_requires=["requests == 2.21.0", "typing_extensions", "frozendict"]
+    include_package_data=True,
+    install_requires=["requests == 2.21.0", "typing_extensions", "frozendict==1.2.0", "jsonpickle==1.4.1"]
     + ["urllib3==1.24.1"],  # noqa: W503
     tests_require=["pytest==3.2.3"],
     cmdclass={"test": PyTest, "format": Formatter, "types": TypeChecking},
