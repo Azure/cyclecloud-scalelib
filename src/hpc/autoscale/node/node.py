@@ -88,7 +88,6 @@ class Node(ABC):
 
     @required.setter
     def required(self, value: bool) -> None:
-        assert value
         self._allocated = value
 
     @property
