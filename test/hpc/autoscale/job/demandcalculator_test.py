@@ -206,6 +206,22 @@ def test_iterations_hypothesis(
         existing_nodes = list(demandi.new_nodes)
 
 
+def test_bug100(mixedbindings) -> None:
+    dcalc = _new_dc(mixedbindings)
+
+    # # 100 cores
+    dcalc.add_job(
+        Job(
+            "tc-10",
+            {"node.nodearray": "htc", "ncpus": 1, "exclusive": False},
+            iterations=10,
+        )
+    )
+    demand = dcalc.finish()
+
+    assert len(demand.new_nodes) == 3
+
+
 def _assert_success(result, bucket_names, index_start=1):
     result == str(result)
     assert "success" == result.status

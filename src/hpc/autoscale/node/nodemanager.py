@@ -68,6 +68,7 @@ class NodeManager:
         all_or_nothing: bool = False,
         assignment_id: Optional[str] = None,
     ) -> AllocationResult:
+
         if not isinstance(constraints, list):
             constraints = [constraints]
 
@@ -164,8 +165,6 @@ class NodeManager:
         remaining = slot_count
         allocated_nodes: List[Node] = []
 
-        # at_least_one = False
-
         while remaining > 0:
             alloc_result = self._allocate_nodes(
                 bucket, 1, constraints, allow_existing, assignment_id
@@ -177,6 +176,22 @@ class NodeManager:
             node = alloc_result.nodes[0]
             allocated_nodes.append(node)
             remaining -= alloc_result.total_slots
+
+            while remaining > 0:
+                per_node = minimum_space(constraints, node)
+
+                if per_node == 0:
+                    break
+
+                if per_node == -1:
+                    per_node = 1
+
+                per_node = min(remaining, per_node)
+
+                if node.decrement(constraints, iterations=per_node):
+                    remaining -= per_node
+                else:
+                    break
 
         return AllocationResult(
             "success", nodes=allocated_nodes, slots_allocated=slot_count - remaining

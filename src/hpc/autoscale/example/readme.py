@@ -55,7 +55,6 @@ def target_counts_demand() -> None:
             {"node.nodearray": "htc", "ncpus": 2, "exclusive": True},
             node_count=5,
         ),
-        colocated=True,
     )
 
     demand_result = dcalc.finish()

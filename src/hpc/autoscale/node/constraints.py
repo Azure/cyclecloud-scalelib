@@ -176,16 +176,18 @@ class ExclusiveNode(BaseNodeConstraint):
         self.is_exclusive = is_exclusive
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        if node.closed:
+            msg = "[name={} hostname={}]already has an exclusive job".format(
+                node.name, node.hostname
+            )
+            return SatisfiedResult("ExclusiveRequirementFailed", self, node, [msg],)
+
         if bool(node.assignments):
             if self.is_exclusive:
                 msg = "Job is exclusive and Node[name={} hostname={}] already has a match".format(
                     node.name, node.hostname
                 )
-            else:
-                msg = "[name={} hostname={}]already has an exclusive job".format(
-                    node.name, node.hostname
-                )
-            return SatisfiedResult("ExclusiveRequirementFailed", self, node, [msg],)
+                return SatisfiedResult("ExclusiveRequirementFailed", self, node, [msg],)
 
         return SatisfiedResult("success", self, node)
 
@@ -194,7 +196,8 @@ class ExclusiveNode(BaseNodeConstraint):
             raise RuntimeError(
                 "Can not call ExclusiveNode.do_decrement on a closed node!"
             )
-        node.closed = self.is_exclusive
+        if self.is_exclusive:
+            node.closed = True
         return True
 
     def minimum_space(self, node: "Node") -> int:

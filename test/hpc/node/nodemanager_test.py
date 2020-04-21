@@ -118,14 +118,13 @@ def test_multi_array_alloc(bindings: MockClusterBinding) -> None:
 
 
 def test_packing(node_mgr: NodeManager) -> None:
-    node_mgr.add_default_resource({}, "ncpus", 4)
-
     result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=2)
     assert result, str(result)
     assert len(result.nodes) == 1, result.nodes
     assert result.nodes[0].name == "htc-1"
     assert result.nodes[0].resources["ncpus"] == 4
     assert result.nodes[0].available["ncpus"] == 2, result.nodes[0].available["ncpus"]
+
     assert len(node_mgr.new_nodes) == 1, len(node_mgr.new_nodes)
     result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=4)
     assert result

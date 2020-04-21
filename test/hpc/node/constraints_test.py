@@ -7,8 +7,14 @@ from hpc.autoscale.node.constraints import (
     NodeResourceConstraint,
     Or,
     get_constraint,
+    get_constraints,
 )
-from hpc.autoscale.node.node import QUERYABLE_PROPERTIES, Node, UnmanagedNode
+from hpc.autoscale.node.node import (
+    QUERYABLE_PROPERTIES,
+    Node,
+    UnmanagedNode,
+    minimum_space,
+)
 
 
 def test_minimum_space():
@@ -104,6 +110,8 @@ def test_exclusive_node() -> None:
     except RuntimeError:
         pass
 
+    assert s.closed
+
     assert 0 == ctrue.minimum_space(s)
 
     cfalse = get_constraint({"exclusive": False})
@@ -152,3 +160,11 @@ def test_or() -> None:
     c = get_constraint({"node.vcpu_count": 2})
     assert -1 == c.minimum_space(SchedulerNode(""))
     assert c.do_decrement(SchedulerNode(""))
+
+
+def test_non_exclusive_mixed() -> None:
+    simple = get_constraints([{"ncpus": 1}])
+    complex = get_constraints([{"ncpus": 1, "exclusive": False}])
+    node = SchedulerNode("test", {"ncpus": 4})
+    assert minimum_space(simple, node) == 4
+    assert minimum_space(simple, node) == minimum_space(complex, node)
