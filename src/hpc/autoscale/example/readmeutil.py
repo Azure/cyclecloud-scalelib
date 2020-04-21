@@ -17,7 +17,8 @@ def example(func: Callable) -> Callable:
 
 def clone_dcalc(dcalc: DemandCalculator) -> DemandCalculator:
     scheduler_nodes = [
-        SchedulerNode(str(n.hostname), n.resources) for n in dcalc.get_compute_nodes()
+        SchedulerNode(str(n.hostname), dict(n.resources))
+        for n in dcalc.get_compute_nodes()
     ]
     return new_demand_calculator(
         {}, node_mgr=dcalc.node_mgr, existing_nodes=scheduler_nodes

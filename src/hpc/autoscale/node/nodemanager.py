@@ -100,7 +100,6 @@ class NodeManager:
                 for node in result.nodes:
                     allocated_nodes[node.name] = node
 
-                # allocated_nodes.extend([n for n in result.nodes if n not in allocated_nodes])
                 assert result.total_slots > 0
                 total_slots_allocated += result.total_slots
 
@@ -163,7 +162,7 @@ class NodeManager:
         assignment_id: Optional[str] = None,
     ) -> AllocationResult:
         remaining = slot_count
-        allocated_nodes: List[Node] = []
+        allocated_nodes: Dict[str, Node] = {}
 
         while remaining > 0:
             alloc_result = self._allocate_nodes(
@@ -172,9 +171,9 @@ class NodeManager:
             if not alloc_result:
                 return alloc_result
 
-            assert len(alloc_result.nodes) == 1
+            assert len(alloc_result.nodes) == 1, alloc_result.nodes
             node = alloc_result.nodes[0]
-            allocated_nodes.append(node)
+            allocated_nodes[node.name] = node
             remaining -= alloc_result.total_slots
 
             while remaining > 0:
@@ -188,13 +187,17 @@ class NodeManager:
 
                 per_node = min(remaining, per_node)
 
-                if node.decrement(constraints, iterations=per_node):
+                if node.decrement(
+                    constraints, iterations=per_node, assignment_id=assignment_id
+                ):
                     remaining -= per_node
                 else:
                     break
 
         return AllocationResult(
-            "success", nodes=allocated_nodes, slots_allocated=slot_count - remaining
+            "success",
+            nodes=list(allocated_nodes.values()),
+            slots_allocated=slot_count - remaining,
         )
 
     def _allocate_nodes(
@@ -215,14 +218,16 @@ class NodeManager:
             if min_space != -1:
                 assert min_space > 0, constraint
 
-        remaining = count
         assert count > 0
-        allocated_nodes = []
+        allocated_nodes: Dict[str, Node] = {}
         new_nodes = []
         slots_allocated = 0
         available_count_total = self._availabe_count(bucket, allow_existing)
 
-        if remaining > available_count_total:
+        def remaining() -> int:
+            return count - len(allocated_nodes)
+
+        if remaining() > available_count_total:
             return AllocationResult(
                 "NoCapacity",
                 reasons=[
@@ -241,11 +246,12 @@ class NodeManager:
                 match_result = node.decrement(constraints, assignment_id=assignment_id)
                 assert match_result
                 slots_allocated += match_result.total_slots
-                allocated_nodes.append(node)
-                remaining -= 1
+                allocated_nodes[node.name] = node
+                if remaining() <= 0:
+                    break
 
-        for _ in range(remaining):
-            assert remaining > 0
+        while remaining() > 0:
+
             node_name = self._next_node_name(bucket)
             new_node = node_from_bucket(
                 bucket,
@@ -262,16 +268,19 @@ class NodeManager:
             assert new_node.vcpu_count == bucket.vcpu_count
 
             min_space = minimum_space(constraints, new_node)
-            if min_space == -1:
-                min_space = remaining
+            if min_space == 0:
+                continue
+            elif min_space == -1:
+                min_space = remaining()
             else:
                 for constraint in constraints:
                     res = constraint.satisfied_by_node(new_node)
                     assert res, "{} {} {}".format(res, constraint, new_node.vcpu_count)
-            per_node = min(remaining, min_space)
+
+            per_node = min(remaining(), min_space)
 
             assert per_node > 0, "{} {} {} {}".format(
-                per_node, remaining, new_node.resources, constraints
+                per_node, remaining(), new_node.resources, constraints
             )
 
             match_result = new_node.decrement(constraints, per_node, assignment_id)
@@ -279,18 +288,21 @@ class NodeManager:
             slots_allocated += match_result.total_slots
 
             new_nodes.append(new_node)
-            allocated_nodes.append(new_node)
+
+            assert new_node.name not in allocated_nodes
+
+            allocated_nodes[new_node.name] = new_node
             if not new_node.exists:
                 bucket.decrement(1)
 
         bucket.nodes.extend(new_nodes)
         self.new_nodes.extend(new_nodes)
 
-        for node in allocated_nodes:
+        for node in allocated_nodes.values():
             node._allocated = True
 
         return AllocationResult(
-            "success", allocated_nodes, slots_allocated=slots_allocated
+            "success", list(allocated_nodes.values()), slots_allocated=slots_allocated
         )
 
     @apitrace
@@ -577,6 +589,15 @@ class NodeManager:
         self.add_default_resource({}, "ncpus", "node.vcpu_count")
         self.add_default_resource({}, "pcpus", "node.pcpu_count")
         self.add_default_resource({}, "ngpus", "node.gpu_count")
+        self.add_default_resource(
+            {}, "memmb", lambda node: node.memory.convert_to("m").value
+        )
+        self.add_default_resource(
+            {}, "memgb", lambda node: node.memory.convert_to("g").value
+        )
+        self.add_default_resource(
+            {}, "memtb", lambda node: node.memory.convert_to("t").value
+        )
 
     def example_node(self, location: str, vm_size: str) -> Node:
         aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)

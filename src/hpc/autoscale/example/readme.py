@@ -64,7 +64,7 @@ def target_counts_demand() -> None:
 
     print_demand(["name", "job_ids", "nodearray", "ncpus", "*ncpus"], demand_result)
 
-    assert len(demand_result.new_nodes) == 17
+    assert len(demand_result.new_nodes) == 18
 
 
 @withcontext
@@ -117,14 +117,7 @@ def target_counts_node_mgr() -> None:
     else:
         print("Failed! {}".format(result))
 
-    result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=10)
-
-    if result:
-        print("Allocated {} nodes".format(len(result.nodes)))
-    else:
-        print("Failed! {}".format(result))
-
-    result = node_mgr.allocate({"node.nodearray": "htc"}, core_count=8)
+    result = node_mgr.allocate({"node.nodearray": "htc", "memgb": 1}, slot_count=128)
 
     if result:
         print("Allocated {} nodes".format(len(result.nodes)))
@@ -195,9 +188,10 @@ def onprem_burst_node_mgr() -> None:
     )
 
     node_mgr = new_node_manager(CONFIG, existing_nodes=[onprem001, onprem002])
+    node_mgr.add_default_resource({"node.nodearray": "htc"}, "nodetype", "A")
 
     result = node_mgr.allocate({"nodetype": "A"}, node_count=5)
-
+    assert result
     if result:
         print(
             "Allocated {} nodes, {} are new".format(

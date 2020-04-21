@@ -285,6 +285,8 @@ class Node(ABC):
             )
 
         min_space = minimum_space(constraints, self)
+        assert isinstance(min_space, int)
+        assert isinstance(iterations, int)
 
         if min_space == -1:
             min_space = iterations

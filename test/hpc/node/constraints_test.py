@@ -168,3 +168,11 @@ def test_non_exclusive_mixed() -> None:
     node = SchedulerNode("test", {"ncpus": 4})
     assert minimum_space(simple, node) == 4
     assert minimum_space(simple, node) == minimum_space(complex, node)
+
+
+def test_memory() -> None:
+    c = get_constraints([{"memgb": 1}])
+    node = SchedulerNode("test", {"memgb": 4.0})
+    m = minimum_space(c, node)
+    assert isinstance(m, int)
+    assert m == 4

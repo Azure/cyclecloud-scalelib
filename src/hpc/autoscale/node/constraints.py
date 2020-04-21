@@ -158,7 +158,7 @@ class MinResourcePerNode(BaseNodeConstraint):
         if self.attr not in node.available:
             return 0
         available = node.available[self.attr]
-        return available // self.value
+        return int(available // self.value)
 
     def __str__(self) -> str:
         return "(Node.{} >= {})".format(self.attr, self.value)
