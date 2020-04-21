@@ -23,7 +23,7 @@ from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import create_bucket_limits, null_bucket_limits
 from hpc.autoscale.node.node import Node, UnmanagedNode, minimum_space
 from hpc.autoscale.results import AllocationResult, BootupResult
-from hpc.autoscale.util import partition
+from hpc.autoscale.util import partition, partition_single
 
 logger = logging.getLogger("cyclecloud.buckets")
 
@@ -241,7 +241,11 @@ class NodeManager:
             if node.closed:
                 continue
 
-            satisfied = functools.reduce(lambda a, b: a and b, [c.satisfied_by_node(node) for c in constraints])  # type: ignore
+            if constraints:
+                satisfied: bool = functools.reduce(lambda a, b: bool(a) and bool(b), [c.satisfied_by_node(node) for c in constraints])  # type: ignore
+            else:
+                satisfied = True
+
             if satisfied:
                 match_result = node.decrement(constraints, assignment_id=assignment_id)
                 assert match_result
@@ -583,7 +587,43 @@ class NodeManager:
         if not managed_nodes:
             logging.warn("No nodes to {}".format(op_name))
             return
+
         getattr(self.__cluster_bindings, op_name)(nodes=managed_nodes)
+
+        by_name = partition_single(nodes, lambda n: n.name)
+        cc_by_name = partition_single(
+            self.__cluster_bindings.get_nodes().nodes, lambda n: n["Name"]
+        )
+
+        by_bucket_id = partition_single(self.__node_buckets, lambda b: b.bucket_id)
+
+        for name, cc_node in cc_by_name.items():
+            if name not in by_name:
+                continue
+            node = by_name[name]
+            node.state = cc_node["Status"]
+
+            if node.state in ["Terminating"]:
+                if node.bucket_id not in by_bucket_id:
+                    logging.warning(
+                        "Unknown bucketid??? %s not in %s", node.bucket_id, by_bucket_id
+                    )
+                    continue
+
+                bucket = by_bucket_id[node.bucket_id]
+                nodes_list = bucket.nodes
+
+                if node not in nodes_list:
+
+                    logging.warning(
+                        (
+                            "Somehow node {} is not being tracked by bucket {}. "
+                            + "Did you try to shutdown/terminate/delete a node twice?"
+                        ).format(node, bucket)
+                    )
+                    continue
+
+                bucket.nodes.remove(node)
 
     def set_system_default_resources(self) -> None:
         self.add_default_resource({}, "ncpus", "node.vcpu_count")

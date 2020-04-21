@@ -179,6 +179,7 @@ class ClusterBinding(ClusterBindingInterface):
         http_response, result = self.clusters_module.shutdown_nodes(
             self.session, self.cluster_name, request
         )
+
         self._log_response(http_response, result)
         return result
 
@@ -221,7 +222,7 @@ class ClusterBinding(ClusterBindingInterface):
         return result
 
     def delete_nodes(self, nodes: List[Node]) -> NodeManagementResult:
-        raise RuntimeError()
+        return self.shutdown_nodes(nodes)
 
     def _log_response(self, s: ResponseStatus, r: Any) -> None:
         if logging.getLogger().getEffectiveLevel() > logging.DEBUG:
