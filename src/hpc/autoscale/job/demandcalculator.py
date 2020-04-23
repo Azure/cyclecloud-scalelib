@@ -15,7 +15,7 @@ from hpc.autoscale.node.nodehistory import (
     SQLiteNodeHistory,
 )
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
-from hpc.autoscale.results import AllocationResult, BootupResult, Result
+from hpc.autoscale.results import AllocationResult, BootupResult, DeleteResult, Result
 
 
 @hpcwrapclass
@@ -241,11 +241,11 @@ class DemandCalculator:
         return ret
 
     @apitrace
-    def delete(self, nodes: Optional[List[Node]] = None) -> None:
+    def delete(self, nodes: Optional[List[Node]] = None) -> DeleteResult:
         nodes = nodes if nodes is not None else self.get_demand().unmatched_nodes
         if not nodes:
             logging.info("No nodes to delete.")
-            return
+            return DeleteResult("success", OperationId(""), None)
 
         logging.debug("deleting %s", [n.name for n in nodes])
         return self.node_mgr.delete(nodes)

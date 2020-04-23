@@ -1,10 +1,11 @@
 import functools
 from copy import deepcopy
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, TypeVar, Union
 from uuid import uuid4
 
 from cyclecloud.model.ClusterStatusModule import ClusterStatus
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
+from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
 
 import hpc.autoscale.hpclogging as logging
@@ -29,13 +30,25 @@ from hpc.autoscale.node.limits import (
     null_bucket_limits,
 )
 from hpc.autoscale.node.node import Node, UnmanagedNode, minimum_space
-from hpc.autoscale.results import AllocationResult, BootupResult
+from hpc.autoscale.results import (
+    AllocationResult,
+    BootupResult,
+    DeallocateResult,
+    DeleteResult,
+    RemoveResult,
+    ShutdownResult,
+    StartResult,
+    TerminateResult,
+)
 from hpc.autoscale.util import partition, partition_single
 
 logger = logging.getLogger("cyclecloud.buckets")
 
 
 DefaultValueFunc = Callable[[Node], ht.ResourceTypeAtom]
+
+
+T = TypeVar("T")
 
 
 @hpcwrapclass
@@ -529,6 +542,7 @@ class NodeManager:
 
         constraints = constraintslib.get_constraints(selection)
 
+        default_value_expr = str(default_value)
         if not hasattr(default_value, "__call__"):
 
             def default_value_func(node: Node) -> ht.ResourceTypeAtom:
@@ -538,7 +552,9 @@ class NodeManager:
         else:
             default_value_func = default_value  # type: ignore
 
-        dr = _DefaultResource(constraints, resource_name, default_value_func)
+        dr = _DefaultResource(
+            constraints, resource_name, default_value_func, default_value_expr
+        )
         self.__default_resources.append(dr)
         self._apply_defaults_all()
 
@@ -557,57 +573,84 @@ class NodeManager:
             dr.apply_default(node)
 
     @apitrace
-    def deallocate_nodes(self, nodes: List[Node]) -> None:
-        self._nodes_operation(nodes, "deallocate_nodes")
+    def deallocate_nodes(self, nodes: List[Node]) -> DeallocateResult:
+        return self._nodes_operation(
+            nodes, self.__cluster_bindings.deallocate_nodes, DeallocateResult
+        )
 
     @apitrace
-    def delete(self, nodes: List[Node]) -> None:
-        self._nodes_operation(nodes, "delete_nodes")
+    def delete(self, nodes: List[Node]) -> DeleteResult:
+        return self._nodes_operation(
+            nodes, self.__cluster_bindings.delete_nodes, DeleteResult
+        )
 
     @apitrace
-    def remove_nodes(self, nodes: List[Node]) -> None:
-        self._nodes_operation(nodes, "remove_nodes")
+    def remove_nodes(self, nodes: List[Node]) -> RemoveResult:
+        return self._nodes_operation(
+            nodes, self.__cluster_bindings.shutdown_nodes, RemoveResult
+        )
 
     @apitrace
-    def shutdown_nodes(self, nodes: List[Node]) -> None:
-        self._nodes_operation(nodes, "shutdown_nodes")
+    def shutdown_nodes(self, nodes: List[Node]) -> ShutdownResult:
+        return self._nodes_operation(
+            nodes, self.__cluster_bindings.shutdown_nodes, ShutdownResult
+        )
 
     @apitrace
-    def start_nodes(self, nodes: List[Node]) -> None:
-        self._nodes_operation(nodes, "start_nodes")
+    def start_nodes(self, nodes: List[Node]) -> StartResult:
+        return self._nodes_operation(
+            nodes, self.__cluster_bindings.start_nodes, StartResult
+        )
 
     @apitrace
-    def terminate_nodes(self, nodes: List[Node]) -> None:
-        self._nodes_operation(nodes, "terminate_nodes")
+    def terminate_nodes(self, nodes: List[Node]) -> TerminateResult:
+        return self._nodes_operation(
+            nodes, self.__cluster_bindings.terminate_nodes, TerminateResult
+        )
 
-    def _nodes_operation(self, nodes: List[Node], op_name: str) -> None:
+    def _nodes_operation(
+        self,
+        nodes: List[Node],
+        function: Callable[[List[Node]], NodeManagementResult],
+        ctor: Callable[[str, ht.OperationId, Optional[ht.RequestId], List[Node]], T],
+    ) -> T:
         managed_nodes = [node for node in nodes if node.managed]
         unmanaged_node_names = [node.name for node in nodes if not node.managed]
+        op_name = function.__name__
 
         if unmanaged_node_names:
-            logging.warn(
+            logging.warning(
                 "The following nodes will not be {} because node.managed=false: {}".format(
                     op_name, unmanaged_node_names
                 )
             )
 
         if not managed_nodes:
-            logging.warn("No nodes to {}".format(op_name))
-            return
+            logging.warning("No nodes to {}".format(op_name))
+            return ctor("success", ht.OperationId(""), None, [])
 
-        getattr(self.__cluster_bindings, op_name)(nodes=managed_nodes)
+        result: NodeManagementResult = function(managed_nodes)
 
         by_name = partition_single(nodes, lambda n: n.name)
-        cc_by_name = partition_single(
-            self.__cluster_bindings.get_nodes().nodes, lambda n: n["Name"]
-        )
+        cc_by_name = partition_single(result.nodes, lambda n: n["Name"])
 
         by_bucket_id = partition_single(self.__node_buckets, lambda b: b.bucket_id)
+
+        affected_nodes: List[Node] = []
 
         for name, cc_node in cc_by_name.items():
             if name not in by_name:
                 continue
+
             node = by_name[name]
+            if node.state == cc_node["Status"]:
+                logging.warning("%s was unaffected by call %s", node, function.__name__)
+                continue
+
+            logging.debug(
+                "%s when from state %s to %s", node, node.state, cc_node["Status"]
+            )
+            affected_nodes.append(node)
             node.state = cc_node["Status"]
 
             if node.state in ["Terminating"]:
@@ -631,6 +674,10 @@ class NodeManager:
                     continue
 
                 bucket.nodes.remove(node)
+
+        return ctor(
+            "success", ht.OperationId(result.operation_id), None, affected_nodes
+        )
 
     def set_system_default_resources(self) -> None:
         self.add_default_resource({}, "ncpus", "node.vcpu_count")
@@ -965,10 +1012,12 @@ class _DefaultResource:
         selection: List[constraintslib.NodeConstraint],
         resource_name: str,
         default_value_function: DefaultValueFunc,
+        default_value_expr: str,
     ) -> None:
         self.selection = selection
         self.resource_name = resource_name
         self.default_value_function = default_value_function
+        self.default_value_expr = default_value_expr
 
     def apply_default(self, node: Node) -> None:
 
@@ -984,3 +1033,11 @@ class _DefaultResource:
         default_value = self.default_value_function(node)
         node._resources[self.resource_name] = default_value
         node.available[self.resource_name] = default_value
+
+    def __str__(self) -> str:
+        return "DefaultResource(select={}, name={}, value={})".format(
+            self.selection, self.resource_name, self.default_value_expr
+        )
+
+    def __repr__(self) -> str:
+        return str(self)

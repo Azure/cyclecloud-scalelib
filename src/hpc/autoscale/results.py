@@ -194,8 +194,7 @@ class SatisfiedResult(Result):
             )
 
 
-@hpcwrapclass
-class BootupResult(Result):
+class NodeOperationResult(Result):
     def __init__(
         self,
         status: str,
@@ -212,10 +211,49 @@ class BootupResult(Result):
 
     def __str__(self) -> str:
         reasons = " AND ".join(set(self.reasons))
+        name = self.__class__.__name__
         if self:
-            return "BootupResult(status={}, nodes={})".format(self.status, self.nodes)
+            return "{}(status={}, nodes={})".format(name, self.status, self.nodes)
         else:
-            return "BootupResult(status={}, reason={})".format(self.status, reasons)
+            return "{}(status={}, reason={})".format(name, self.status, reasons)
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
+@hpcwrapclass
+class BootupResult(NodeOperationResult):
+    ...
+
+
+@hpcwrapclass
+class DeallocateResult(NodeOperationResult):
+    ...
+
+
+@hpcwrapclass
+class DeleteResult(NodeOperationResult):
+    ...
+
+
+@hpcwrapclass
+class RemoveResult(NodeOperationResult):
+    ...
+
+
+@hpcwrapclass
+class ShutdownResult(NodeOperationResult):
+    ...
+
+
+@hpcwrapclass
+class StartResult(NodeOperationResult):
+    ...
+
+
+@hpcwrapclass
+class TerminateResult(NodeOperationResult):
+    ...
 
 
 class ResultsHandler(ABC):
