@@ -3,7 +3,9 @@ from copy import deepcopy
 from typing import Callable, Dict, List, Optional, Union
 from uuid import uuid4
 
+from cyclecloud.model.ClusterStatusModule import ClusterStatus
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
+from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
@@ -20,7 +22,12 @@ from hpc.autoscale.node.bucket import (
     node_from_bucket,
 )
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
-from hpc.autoscale.node.limits import create_bucket_limits, null_bucket_limits
+from hpc.autoscale.node.limits import (
+    BucketLimits,
+    _SharedLimit,
+    _SpotLimit,
+    null_bucket_limits,
+)
 from hpc.autoscale.node.node import Node, UnmanagedNode, minimum_space
 from hpc.autoscale.results import AllocationResult, BootupResult
 from hpc.autoscale.util import partition, partition_single
@@ -723,6 +730,23 @@ def new_node_manager(
     return ret
 
 
+def _cluster_limits(cluster_name: str, cluster_status: ClusterStatus) -> _SharedLimit:
+
+    cluster_active_cores = 0
+
+    for cc_node in cluster_status.nodes:
+        aux_info = vm_sizes.get_aux_vm_size_info(
+            cc_node["Region"], cc_node["MachineType"]
+        )
+        cluster_active_cores += aux_info.vcpu_count
+
+    return _SharedLimit(
+        "Cluster({})".format(cluster_name),
+        cluster_active_cores,  # noqa: E128
+        cluster_status.max_core_count,
+    )
+
+
 def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeManager:
     cluster_status = cluster_bindings.get_cluster_status(nodes=True)
     nodes_list = cluster_bindings.get_nodes()
@@ -730,10 +754,16 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
 
     buckets = []
 
-    bucket_limits = create_bucket_limits(cluster_bindings.cluster_name, cluster_status)
+    cluster_limit = _cluster_limits(cluster_bindings.cluster_name, cluster_status)
+
+    nodearray_limits: Dict[str, _SharedLimit] = {}
+    regional_limits: Dict[str, _SharedLimit] = {}
+    family_limits: Dict[str, _SharedLimit] = {}
 
     for nodearray_status in cluster_status.nodearrays:
         nodearray = nodearray_status.nodearray
+        region = nodearray["Region"]
+
         custom_resources = deepcopy(
             ht.ResourceDict(
                 nodearray.get("Configuration", {})
@@ -742,15 +772,51 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
             )
         )
 
+        nodearray_limits[nodearray_status.name] = _SharedLimit(
+            "NodeArray({})".format(nodearray_status.name),
+            0,
+            nodearray_status.max_core_count,  # noqa: E128,
+            nodearray_status.max_count,
+        )
+
         spot = nodearray.get("Interruptible", False)
 
         for bucket in nodearray_status.buckets:
-            # TODO move to a util func
-            placement_groups = set(
-                [nodearray.get("PlacementGroupId")]
-                + ([p.name for p in (bucket.placement_groups or [])])
+            aux_vm_info = vm_sizes.get_aux_vm_size_info(
+                region, bucket.definition.machine_type
             )
-            for pg in placement_groups:
+            assert isinstance(aux_vm_info, vm_sizes.AuxVMSizeInfo)
+            vm_family = aux_vm_info.vm_family
+
+            if region not in regional_limits:
+                regional_limits[region] = _SharedLimit(
+                    "Region({})".format(region),
+                    bucket.regional_consumed_core_count,
+                    bucket.regional_quota_core_count,
+                )
+
+            if vm_family not in family_limits:
+                family_limits[vm_family] = _SharedLimit(
+                    "VM Family({})".format(vm_family),
+                    bucket.family_consumed_core_count,
+                    bucket.family_quota_core_count,
+                )
+
+            placement_groups = partition_single(
+                bucket.placement_groups, lambda p: p.name
+            )
+
+            default_pg = nodearray_status.nodearray.get("PlacementGroupId")
+
+            if default_pg is None:
+                placement_groups[None] = None
+
+            elif default_pg not in placement_groups:
+                placement_groups[default_pg] = PlacementGroupStatus(
+                    active_core_count=0, active_count=0, name=default_pg
+                )
+
+            for pg_name, pg_status in placement_groups.items():
                 vm_size = bucket.definition.machine_type
                 location = nodearray["Region"]
                 subnet = nodearray["SubnetId"]
@@ -762,15 +828,57 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
 
                 bucket_id = bucket.bucket_id
 
-                pool_name = nodearray_status.name
+                nodearray_name = nodearray_status.name
 
                 # TODO the bucket has a list of node names
                 cc_node_records = [
                     n
                     for n in cluster_status.nodes
                     if n["Name"] in bucket.active_nodes
-                    and n.get("PlacementGroupId") == pg
+                    and n.get("PlacementGroupId") == pg_name
                 ]
+
+                active_cores = len(cc_node_records) * vcpu_count
+
+                nodearray_limits[nodearray_name]._consumed_core_count += active_cores
+
+                if pg_name:
+                    max_count = min(bucket.max_placement_group_size, bucket.max_count)
+                    max_core_count = max_count * vcpu_count
+                    active_count = len(cc_node_records)
+                    active_core_count = active_count * vcpu_count
+
+                    available_count = max_count - active_count
+                    available_core_count = max_core_count - active_core_count
+                else:
+                    max_count = bucket.max_count
+                    max_core_count = bucket.max_core_count
+                    active_count = bucket.active_count
+                    active_core_count = bucket.active_core_count
+                    available_count = bucket.available_count
+                    available_core_count = bucket.available_core_count
+
+                family_limit: Union[_SpotLimit, _SharedLimit] = family_limits[vm_family]
+                if nodearray.get("Interruptible"):
+                    # enabling spot/interruptible 0's out the family limit response
+                    # as the regional limit is supposed to be used in its place,
+                    # however that responsibility is on the caller and not the
+                    # REST api. For this library we handle that for them.
+                    family_limit = _SpotLimit(regional_limits[region])
+
+                bucket_limit = BucketLimits(
+                    vcpu_count,
+                    regional_limits[region],
+                    cluster_limit,
+                    nodearray_limits[nodearray_name],
+                    family_limit,
+                    active_core_count=active_core_count,
+                    active_count=active_count,
+                    available_core_count=available_core_count,
+                    available_count=available_count,
+                    max_core_count=max_core_count,
+                    max_count=max_count,
+                )
 
                 nodes = []
 
@@ -822,7 +930,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     )
 
                 node_def = NodeDefinition(
-                    nodearray=pool_name,
+                    nodearray=nodearray_name,
                     bucket_id=bucket_id,
                     vm_size=vm_size,
                     location=location,
@@ -830,24 +938,18 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     subnet=subnet,
                     vcpu_count=vcpu_count,
                     memory=bucket_memory,
-                    placement_group=pg,
+                    placement_group=pg_name,
                     resources=custom_resources,
-                )
-                key = (bucket.bucket_id, pg)
-                assert (
-                    key in bucket_limits
-                ), "No bucket limits found for bucket_id {} not in {}".format(
-                    key, bucket_limits.keys()
                 )
 
                 node_bucket = NodeBucket(
                     node_def,
-                    limits=bucket_limits[key],
+                    limits=bucket_limit,
                     max_placement_group_size=bucket.max_placement_group_size,
                     nodes=nodes,
                 )
                 logging.debug(
-                    "Found %s with limits %s", node_bucket, repr(bucket_limits[key])
+                    "Found %s with limits %s", node_bucket, repr(bucket_limit)
                 )
                 buckets.append(node_bucket)
 
