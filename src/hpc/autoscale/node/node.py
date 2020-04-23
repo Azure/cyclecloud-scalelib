@@ -212,6 +212,8 @@ class Node(ABC):
             Override attributes for the Cloud.Node attributes created in
             Cyclecloud
         """
+        if self.exists:
+            return frozendict(self.__node_attribute_overrides)
         return self.__node_attribute_overrides
 
     def clone(self) -> "Node":
