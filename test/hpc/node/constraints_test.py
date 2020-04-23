@@ -92,8 +92,24 @@ def test_exclusive_node() -> None:
         ExclusiveNode(True).to_dict() == get_constraint({"exclusive": True}).to_dict()
     )
     assert (
+        ExclusiveNode(True).to_dict() == get_constraint({"exclusive": "true"}).to_dict()
+    )
+    assert ExclusiveNode(True).to_dict() == get_constraint({"exclusive": 1}).to_dict()
+    assert (
+        ExclusiveNode(False).to_dict()
+        == get_constraint({"exclusive": "faLse"}).to_dict()
+    )
+    assert ExclusiveNode(False).to_dict() == get_constraint({"exclusive": 0}).to_dict()
+    assert (
         ExclusiveNode(False).to_dict() == get_constraint({"exclusive": False}).to_dict()
     )
+
+    try:
+        get_constraint({"exclusive": "asdf"})
+        assert False
+    except RuntimeError:
+        pass
+
     s = SchedulerNode("ip-123")
 
     ctrue = get_constraint({"exclusive": True})

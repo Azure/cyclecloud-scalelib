@@ -102,11 +102,11 @@ class MockClusterBinding(ClusterBindingInterface):
         max_count: int,
         available_count: int,
         family_consumed_core_count: Optional[int] = None,
-        family_quota_core_count: Optional[int] = None,
-        family_quota_count: Optional[int] = None,
+        family_quota_core_count: Optional[int] = 1_000_000,
+        family_quota_count: Optional[int] = 10_000,
         regional_consumed_core_count: Optional[int] = None,
-        regional_quota_core_count: Optional[int] = None,
-        regional_quota_count: Optional[int] = None,
+        regional_quota_core_count: Optional[int] = 1_000_000,
+        regional_quota_count: Optional[int] = 10_000,
         max_placement_group_size: int = 100,
         placement_groups: Optional[List[str]] = None,
     ) -> NodearrayBucketStatus:
@@ -120,10 +120,16 @@ class MockClusterBinding(ClusterBindingInterface):
             raise RuntimeError("Please call add_nodearray first.")
 
         nodearray_status = self.nodearrays[nodearray_name]
-
         location = nodearray_status.nodearray["Region"]
 
         aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
+
+        na_max_count = nodearray_status.max_count
+        na_max_core_count = nodearray_status.max_core_count
+        if na_max_count * aux_info.vcpu_count < na_max_core_count:
+            na_max_core_count = na_max_count * aux_info.vcpu_count
+        else:
+            na_max_count = na_max_core_count // aux_info.vcpu_count
 
         assert aux_info.vm_family != "unknown", vm_size
 
@@ -141,14 +147,12 @@ class MockClusterBinding(ClusterBindingInterface):
             family_consumed_core_count, bucket_status.active_count * vcpu_count
         )
 
-        bucket_status.family_quota_count = pick(family_quota_count, available_count)
+        bucket_status.family_quota_count = pick(family_quota_count, max_count)
         bucket_status.family_quota_core_count = pick(
             family_quota_core_count, bucket_status.family_quota_count * vcpu_count
         )
 
-        bucket_status.regional_quota_count = pick(
-            regional_quota_count, nodearray_status.max_count
-        )
+        bucket_status.regional_quota_count = pick(regional_quota_count, na_max_count)
         bucket_status.quota_count = bucket_status.family_quota_count
 
         bucket_status.active_core_count = bucket_status.active_count * vcpu_count
@@ -159,11 +163,22 @@ class MockClusterBinding(ClusterBindingInterface):
         bucket_status.available_core_count = bucket_status.available_count * vcpu_count
         bucket_status.max_core_count = bucket_status.max_count * vcpu_count
         bucket_status.regional_quota_core_count = pick(
-            regional_quota_core_count, nodearray_status.max_core_count
+            regional_quota_core_count, na_max_core_count
         )
         bucket_status.quota_core_count = bucket_status.family_quota_core_count
         bucket_status.max_placement_group_core_size = (
             bucket_status.max_placement_group_size * vcpu_count
+        )
+
+        assert bucket_status.active_core_count <= bucket_status.max_core_count
+        assert bucket_status.active_count <= bucket_status.max_count
+        assert (
+            bucket_status.family_consumed_core_count
+            <= bucket_status.family_quota_core_count
+        )
+        assert (
+            bucket_status.regional_consumed_core_count
+            <= bucket_status.regional_quota_core_count
         )
 
         bucket_status.definition = NodearrayBucketStatusDefinition()
@@ -189,6 +204,22 @@ class MockClusterBinding(ClusterBindingInterface):
         nodearray_status.buckets.append(bucket_status)
 
         return bucket_status
+
+    def _get_buckets(
+        self, location: str, vm_family: str
+    ) -> List[NodearrayBucketStatus]:
+        ret = []
+        for _, cluster_nodearray_status in self.nodearrays.items():
+
+            if not cluster_nodearray_status.nodearray.get("Region").lower() == location:
+                continue
+
+            for bucket in cluster_nodearray_status.buckets:
+                vm_size = bucket.definition.machine_type
+                aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
+                if aux_info.vm_family == vm_family:
+                    ret.append(bucket)
+        return ret
 
     def add_node(
         self,
@@ -229,6 +260,14 @@ class MockClusterBinding(ClusterBindingInterface):
         vm_size = VMSize(bucket.definition.machine_type)
 
         _update_bucket_counts(bucket, 1)
+        bucket.active_nodes.append(name)
+
+        if placement_group is not None:
+            placement_group = PlacementGroup(placement_group)
+            for pg_status in bucket.placement_groups:
+                if pg_status.name == placement_group:
+                    pg_status.active_count += 1
+                    pg_status.active_core_count += bucket.virtual_machine.vcpu_count
 
         self.nodes[name] = Node(
             node_id=DelayedNodeId(name, node_id=NodeId(str(uuid4()))),
@@ -246,12 +285,11 @@ class MockClusterBinding(ClusterBindingInterface):
             state=state,
             power_state=state,
             exists=True,
-            placement_group=PlacementGroup(placement_group)
-            if placement_group
-            else None,
+            placement_group=placement_group,
             managed=True,
             resources=resources,
         )
+
         return self.nodes[name]
 
     def create_nodes(self, new_nodes: List[Node]) -> NodeCreationResult:
@@ -260,6 +298,34 @@ class MockClusterBinding(ClusterBindingInterface):
                 node.name, list(self.nodes)
             )
             self.nodes[node.name] = node.clone()
+
+            for bucket in self._get_buckets(node.location, node.vm_family):
+                if bucket.bucket_id == node.bucket_id:
+                    bucket.active_nodes.append(node.name)
+                bucket.active_core_count += node.vcpu_count
+                bucket.available_core_count -= node.vcpu_count
+                bucket.active_count = bucket.active_core_count // node.vcpu_count
+                bucket.available_count = bucket.available_core_count // node.vcpu_count
+
+                bucket.family_consumed_core_count += node.vcpu_count
+                bucket.consumed_core_count += node.vcpu_count
+                bucket.regional_consumed_core_count += node.vcpu_count
+
+        for nodearray in self.nodearrays.values():
+            active_count = sum([len(b.active_nodes) for b in nodearray.buckets])
+            active_core_count = sum(
+                [
+                    len(b.active_nodes) * b.virtual_machine.vcpu_count
+                    for b in nodearray.buckets
+                ]
+            )
+            available_count = nodearray.max_count - active_count
+            available_core_count = nodearray.max_core_count - active_core_count
+            for bucket in nodearray.buckets:
+                bucket.available_count = min(bucket.available_count, available_count)
+                bucket.available_core_count = min(
+                    bucket.available_core_count, available_core_count
+                )
 
         result = NodeCreationResult()
         result.sets = []
@@ -271,8 +337,13 @@ class MockClusterBinding(ClusterBindingInterface):
 
         result.operation_id = OperationId(str(uuid.uuid4()))
 
+        cloned_nodes = [n.clone() for n in new_nodes]
+        for n in new_nodes:
+            # TODO add node statuses as constants / util functions.
+            n.state = NodeStatus("Allocating")
+
         self.operations[result.operation_id] = MockNodeManagementResult(
-            result.operation_id, new_nodes
+            result.operation_id, cloned_nodes
         )
 
         return result
@@ -317,7 +388,7 @@ class MockClusterBinding(ClusterBindingInterface):
         response.nodearrays = list(self.nodearrays.values())
         # TODO RDH nodes by bucket
         if nodes:
-            response.nodes = [_node_to_ccnode(n) for n in self.nodes.values()]
+            response.nodes = self.get_nodes().nodes
 
         return response
 
@@ -387,6 +458,12 @@ class MockClusterBinding(ClusterBindingInterface):
         total_node_count: Optional[int] = None,
     ) -> None:
         raise NotImplementedError()
+
+    def __str__(self) -> str:
+        return "MockBindings()"
+
+    def __repr__(self) -> str:
+        return str(self)
 
 
 NodeRecord = Dict[str, Any]

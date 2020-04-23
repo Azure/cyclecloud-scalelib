@@ -434,6 +434,18 @@ def new_job_constraint(
     attr: str, value: Union[ResourceType, Constraint, list], in_alias: bool = False
 ) -> NodeConstraint:
 
+    if attr == "exclusive":
+        if isinstance(value, str):
+            if value.lower() not in ["true", "false"]:
+                raise RuntimeError("Unexpected value for exclusive: {}".format(value))
+            value = value.lower() == "true"
+        elif isinstance(value, int):
+            value = bool(value)
+        if not isinstance(value, bool):
+
+            raise RuntimeError("Unexpected value for exclusive: {}".format(value))
+        return ExclusiveNode(is_exclusive=value)
+
     if attr == "not":
         not_cons = get_constraint(value)
         job_cons = new_job_constraint("_", not_cons)
@@ -449,11 +461,6 @@ def new_job_constraint(
         return NodeResourceConstraint(attr, value)
 
     elif isinstance(value, bool):
-        # TODO - not sure if this is the way to handle this.
-
-        if attr == "exclusive":
-            return ExclusiveNode(value)
-
         return NodeResourceConstraint(attr, value)
 
     elif isinstance(value, list):

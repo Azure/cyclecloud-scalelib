@@ -4,6 +4,7 @@ from typing import Callable, Dict, List, Optional, TypeVar, Union
 from uuid import uuid4
 
 from cyclecloud.model.ClusterStatusModule import ClusterStatus
+from cyclecloud.model.NodearrayBucketStatusModule import NodearrayBucketStatus
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
@@ -54,6 +55,14 @@ T = TypeVar("T")
 @hpcwrapclass
 class NodeManager:
     """
+    TODO add round robin / scatter shot allocation strategy
+    (goes to this ^ when no capacity)
+    long term requests
+
+    priority
+    scatter
+    adaptive (when no capacity, switch to prio)
+
     """
 
     def __init__(
@@ -433,7 +442,9 @@ class NodeManager:
         for cc_node in node_list.nodes:
             name = cc_node["Name"]
             if name in by_name:
-                ret.append(by_name[name][0])
+                node = by_name[name][0]
+                node.state = cc_node["Status"]
+                ret.append(node)
 
         return ret
 
@@ -789,8 +800,8 @@ def _cluster_limits(cluster_name: str, cluster_status: ClusterStatus) -> _Shared
 
     return _SharedLimit(
         "Cluster({})".format(cluster_name),
-        cluster_active_cores,  # noqa: E128
-        cluster_status.max_core_count,
+        cluster_active_cores,
+        cluster_status.max_core_count,  # noqa: E128
     )
 
 
@@ -802,6 +813,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
     buckets = []
 
     cluster_limit = _cluster_limits(cluster_bindings.cluster_name, cluster_status)
+    cc_nodes_by_template = partition(cluster_status.nodes, lambda n: n["Template"])
 
     nodearray_limits: Dict[str, _SharedLimit] = {}
     regional_limits: Dict[str, _SharedLimit] = {}
@@ -818,17 +830,28 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                 .get("resources", {})
             )
         )
+        active_na_core_count = 0
+        active_na_count = 0
+        for cc_node in cc_nodes_by_template.get(nodearray_status.name, []):
+            aux_vm_info = vm_sizes.get_aux_vm_size_info(
+                cc_node["Region"], cc_node["MachineType"]
+            )
+            active_na_count += 1
+            active_na_core_count += aux_vm_info.vcpu_count
 
         nodearray_limits[nodearray_status.name] = _SharedLimit(
             "NodeArray({})".format(nodearray_status.name),
-            0,
+            active_na_core_count,
             nodearray_status.max_core_count,  # noqa: E128,
+            active_na_count,
             nodearray_status.max_count,
         )
 
         spot = nodearray.get("Interruptible", False)
 
         for bucket in nodearray_status.buckets:
+            vcpu_count = bucket.virtual_machine.vcpu_count
+
             aux_vm_info = vm_sizes.get_aux_vm_size_info(
                 region, bucket.definition.machine_type
             )
@@ -864,10 +887,19 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                 )
 
             for pg_name, pg_status in placement_groups.items():
+
+                placement_group_limit = None
+                if pg_name:
+                    placement_group_limit = _SharedLimit(
+                        "PlacementGroup({})".format(pg_name),
+                        consumed_core_count=pg_status.active_core_count,
+                        max_core_count=bucket.max_placement_group_size * vcpu_count,
+                    )
+
                 vm_size = bucket.definition.machine_type
                 location = nodearray["Region"]
                 subnet = nodearray["SubnetId"]
-                vcpu_count = bucket.virtual_machine.vcpu_count
+
                 bucket_memory_gb = nodearray.get("Memory") or (
                     bucket.virtual_machine.memory
                 )
@@ -885,26 +917,6 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     and n.get("PlacementGroupId") == pg_name
                 ]
 
-                active_cores = len(cc_node_records) * vcpu_count
-
-                nodearray_limits[nodearray_name]._consumed_core_count += active_cores
-
-                if pg_name:
-                    max_count = min(bucket.max_placement_group_size, bucket.max_count)
-                    max_core_count = max_count * vcpu_count
-                    active_count = len(cc_node_records)
-                    active_core_count = active_count * vcpu_count
-
-                    available_count = max_count - active_count
-                    available_core_count = max_core_count - active_core_count
-                else:
-                    max_count = bucket.max_count
-                    max_core_count = bucket.max_core_count
-                    active_count = bucket.active_count
-                    active_core_count = bucket.active_core_count
-                    available_count = bucket.available_count
-                    available_core_count = bucket.available_core_count
-
                 family_limit: Union[_SpotLimit, _SharedLimit] = family_limits[vm_family]
                 if nodearray.get("Interruptible"):
                     # enabling spot/interruptible 0's out the family limit response
@@ -919,62 +931,19 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     cluster_limit,
                     nodearray_limits[nodearray_name],
                     family_limit,
-                    active_core_count=active_core_count,
-                    active_count=active_count,
-                    available_core_count=available_core_count,
-                    available_count=available_count,
-                    max_core_count=max_core_count,
-                    max_count=max_count,
+                    placement_group_limit,
+                    active_core_count=bucket.active_core_count,
+                    active_count=bucket.active_count,
+                    available_core_count=bucket.available_core_count,
+                    available_count=bucket.available_count,
+                    max_core_count=bucket.max_core_count,
+                    max_count=bucket.max_count,
                 )
 
                 nodes = []
 
                 for cc_node_rec in cc_node_records:
-                    node_id = ht.NodeId(cc_node_rec["NodeId"])
-                    node_name = ht.NodeName(cc_node_rec["Name"])
-                    nodearray_name = cc_node_rec["Template"]
-                    vm_size_node = cc_node_rec["MachineType"]
-                    hostname = cc_node_rec.get("Hostname")
-                    private_ip = cc_node_rec.get("PrivateIp")
-                    vcpu_count = (
-                        cc_node_rec.get("CoreCount")
-                        or bucket.virtual_machine.vcpu_count
-                    )
-                    node_memory_gb = cc_node_rec.get("Memory") or (
-                        bucket.virtual_machine.memory
-                    )
-                    node_memory = ht.Memory(node_memory_gb, "g")
-                    placement_group = cc_node_rec.get("PlacementGroupId")
-                    infiniband = bool(placement_group)
-                    state = cc_node_rec.get("Status")
-                    resources = deepcopy(
-                        cc_node_rec.get("Configuration", {})
-                        .get("autoscale", {})
-                        .get("resources", {})
-                    )
-
-                    nodes.append(
-                        Node(
-                            node_id=DelayedNodeId(node_name, node_id=node_id),
-                            name=node_name,
-                            nodearray=nodearray_name,
-                            bucket_id=bucket_id,
-                            vm_size=vm_size_node,
-                            hostname=hostname,
-                            private_ip=private_ip,
-                            location=location,
-                            spot=spot,
-                            vcpu_count=vcpu_count,
-                            memory=node_memory,
-                            infiniband=infiniband,
-                            state=state,
-                            power_state=state,
-                            exists=True,
-                            placement_group=placement_group,
-                            managed=True,
-                            resources=resources,
-                        )
-                    )
+                    nodes.append(_node_from_cc_node(cc_node_rec, bucket))
 
                 node_def = NodeDefinition(
                     nodearray=nodearray_name,
@@ -995,6 +964,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     max_placement_group_size=bucket.max_placement_group_size,
                     nodes=nodes,
                 )
+
                 logging.debug(
                     "Found %s with limits %s", node_bucket, repr(bucket_limit)
                 )
@@ -1004,6 +974,47 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
     for name in all_node_names:
         ret._node_names.add(name)
     return ret
+
+
+def _node_from_cc_node(cc_node_rec: dict, bucket: NodearrayBucketStatus) -> Node:
+    node_id = ht.NodeId(cc_node_rec["NodeId"])
+    node_name = ht.NodeName(cc_node_rec["Name"])
+    nodearray_name = cc_node_rec["Template"]
+    vm_size_node = cc_node_rec["MachineType"]
+    hostname = cc_node_rec.get("Hostname")
+    private_ip = cc_node_rec.get("PrivateIp")
+    vcpu_count = cc_node_rec.get("CoreCount") or bucket.virtual_machine.vcpu_count
+    node_memory_gb = cc_node_rec.get("Memory") or (bucket.virtual_machine.memory)
+
+    node_memory = ht.Memory(node_memory_gb, "g")
+    placement_group = cc_node_rec.get("PlacementGroupId")
+    infiniband = bool(placement_group)
+
+    state = ht.NodeStatus(str(cc_node_rec.get("Status")))
+    resources = deepcopy(
+        cc_node_rec.get("Configuration", {}).get("autoscale", {}).get("resources", {})
+    )
+
+    return Node(
+        node_id=DelayedNodeId(node_name, node_id=node_id),
+        name=node_name,
+        nodearray=nodearray_name,
+        bucket_id=bucket.bucket_id,
+        vm_size=vm_size_node,
+        hostname=hostname,
+        private_ip=private_ip,
+        location=cc_node_rec["Region"],
+        spot=cc_node_rec.get("Interruptible", False),
+        vcpu_count=vcpu_count,
+        memory=node_memory,
+        infiniband=infiniband,
+        state=state,
+        power_state=state,
+        exists=True,
+        placement_group=placement_group,
+        managed=True,
+        resources=resources,
+    )
 
 
 class _DefaultResource:

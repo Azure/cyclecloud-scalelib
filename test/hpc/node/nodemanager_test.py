@@ -13,7 +13,7 @@ from hpc.autoscale.results import (
     register_result_handler,
     unregister_all_result_handlers,
 )
-from hpc.autoscale.util import partition
+from hpc.autoscale.util import partition, partition_single
 
 
 def setup_function(function: Any) -> None:
@@ -38,7 +38,11 @@ def _bindings() -> MockClusterBinding:
         max_count=20,
         available_count=10,
         family_consumed_core_count=0,
-        family_quota_count=20,
+        family_quota_core_count=80,
+        family_quota_count=80 // 4,
+        regional_consumed_core_count=0,
+        regional_quota_core_count=80,
+        regional_quota_count=80 // 4,
     )
 
     bindings.add_nodearray("hpc", {"nodetype": "B", "pcpus": 4})
@@ -48,7 +52,11 @@ def _bindings() -> MockClusterBinding:
         max_count=20,
         available_count=10,
         family_consumed_core_count=0,
-        family_quota_count=20,
+        family_quota_core_count=80,
+        family_quota_count=80 // 8,
+        regional_consumed_core_count=0,
+        regional_quota_core_count=80,
+        regional_quota_count=80 // 8,
     )
 
     return bindings
@@ -463,7 +471,7 @@ def test_top_level_limits(node_mgr: NodeManager) -> None:
     assert node_mgr.cluster_consumed_core_count == 0
     assert ["westus2"] == node_mgr.get_locations()
     assert node_mgr.get_regional_consumed_core_count("westus2") == 0
-    assert node_mgr.get_regional_max_core_count("westus2") == 1_000_000
+    assert node_mgr.get_regional_max_core_count("westus2") == 80
 
     assert node_mgr.allocate({"node.vcpu_count": 4}, node_count=1)
     assert node_mgr.cluster_consumed_core_count == 4
@@ -483,6 +491,126 @@ def test_config_based_default_resources(bindings) -> None:
     node_mgr = new_node_manager(config)
     for b in node_mgr.get_buckets():
         assert b.resources["blah"] == b.pcpu_count
+
+
+def test_overscaling_error() -> None:
+    bindings = MockClusterBinding()
+    bindings.add_nodearray("htc", {})
+
+    bindings.add_bucket("htc", "Standard_D16s_v3", 10, 10)
+    bindings.add_bucket("htc", "Standard_E16_v3", 10, 1)
+    bindings.add_bucket("htc", "Standard_E2s_v3", max_count=80, available_count=4)
+
+    node_mgr = _node_mgr(bindings)
+    result = node_mgr.allocate({"ncpus": 1}, slot_count=10, assignment_id="slots")
+    assert result
+
+    result = node_mgr.allocate(
+        {"exclusive": True, "node.vm_size": "Standard_D16s_v3"},
+        node_count=10,
+        assignment_id="nodes",
+    )
+    assert result
+
+    by_size = partition(node_mgr.new_nodes, lambda b: b.vm_size)
+
+    assert len(by_size["Standard_E2s_v3"]) == 4
+    assert len(by_size["Standard_E16_v3"]) == 1
+    assert len(by_size["Standard_D16s_v3"]) == 10
+
+    for node in node_mgr.get_nodes():
+        print(node.name, node.vm_size, node.assignments)
+
+    node_mgr.bootup()
+
+    # recreate it - the bindings 'remembers' that we already created nodes
+    node_mgr = _node_mgr(bindings)
+    assert len(node_mgr.get_nodes()) == 15
+
+    result = node_mgr.allocate({"ncpus": 1}, slot_count=100, assignment_id="slots")
+    assert result
+
+    result = node_mgr.allocate(
+        {"exclusive": True, "node.vm_size": "Standard_D16s_v3"},
+        node_count=10,
+        assignment_id="nodes",
+    )
+    assert result
+    print()
+    print()
+    for node in node_mgr.get_nodes():
+        print(node.name, node.vm_size, node.assignments)
+
+    assert len(node_mgr.new_nodes) == 0
+    assert len(node_mgr.get_nodes()) == 15
+
+    by_size = partition(node_mgr.get_nodes(), lambda b: b.vm_size)
+
+    assert len(by_size["Standard_E2s_v3"]) == 4
+    assert len(by_size["Standard_E16_v3"]) == 1
+    assert len(by_size["Standard_D16s_v3"]) == 10
+
+
+def test_mock_bindings2() -> None:
+    bindings = MockClusterBinding()
+    bindings.add_nodearray("w", {}, location="westus2", max_count=8)
+    bindings.add_bucket(
+        "w",
+        "Standard_E2_v3",
+        max_count=80,
+        available_count=8,
+        family_consumed_core_count=72 * 2,
+        family_quota_core_count=160,
+        family_quota_count=80,
+    )
+    bindings.add_bucket(
+        "w",
+        "Standard_E4_v3",
+        max_count=40,
+        available_count=4,
+        family_consumed_core_count=72 * 2,
+        family_quota_core_count=160,
+        family_quota_count=80,
+    )
+    bindings.add_bucket("w", "Standard_D8s_v3", max_count=80, available_count=8)
+
+    bindings.add_nodearray("e", {}, location="eastus")
+    bindings.add_bucket("e", "Standard_E2_v3", max_count=20, available_count=4)
+    node_mgr = _node_mgr(bindings)
+    by_size = partition_single(
+        node_mgr.get_buckets(), lambda b: (b.location, b.vm_size)
+    )
+
+    assert by_size[("westus2", "Standard_E2_v3")].available_count == 8
+    assert by_size[("westus2", "Standard_E2_v3")].limits.nodearray_available_count == 8
+    assert by_size[("westus2", "Standard_E2_v3")].limits.family_max_count == 80
+    assert by_size[("westus2", "Standard_E4_v3")].available_count == 4
+    assert by_size[("westus2", "Standard_D8s_v3")].available_count == 8
+    assert by_size[("eastus", "Standard_E2_v3")].available_count == 4
+
+    result = node_mgr.allocate(
+        {
+            "node.vm_size": "Standard_E4_v3",
+            "exclusive": True,
+            "node.location": "westus2",
+        },
+        node_count=1,
+    )
+
+    assert result, "\n".join(result.reasons)
+
+    assert by_size[("westus2", "Standard_E2_v3")].limits.nodearray_available_count == 7
+    assert by_size[("westus2", "Standard_E2_v3")].available_count == 6
+    assert by_size[("westus2", "Standard_E4_v3")].available_count == 3
+    assert by_size[("westus2", "Standard_D8s_v3")].available_count == 7
+    assert by_size[("eastus", "Standard_E2_v3")].available_count == 4
+
+
+def test_mock_bindings3() -> None:
+    bindings = MockClusterBinding()
+    bindings.add_nodearray("w", {}, location="westus2", max_count=8)
+    bindings.add_bucket("w", "Standard_E2_v3", max_count=80, available_count=8)
+    _node_mgr(bindings)
 
 
 if __name__ == "__main__":

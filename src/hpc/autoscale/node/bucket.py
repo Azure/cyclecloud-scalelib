@@ -123,12 +123,19 @@ class NodeBucket:
 
     @property
     def available_count(self) -> int:
+        # non-pg buckets return -1
+        pg_available = self.limits.placement_group_available_count
+
+        if pg_available < 0:
+            pg_available = 2 ** 32
+
         return min(
             self.limits.available_count,
             self.limits.regional_available_count,
             self.limits.cluster_available_count,
             self.limits.nodearray_available_count,
             self.limits.family_available_count,
+            pg_available,
         )
 
     @available_count.setter
@@ -225,6 +232,7 @@ def bucket_candidates(
 
     satisfactory_buckets = []
     allocation_failures = []
+
     for bucket in candidates:
         reasons: List[Result] = []
         is_unsatisfied = False
@@ -243,6 +251,7 @@ def bucket_candidates(
             allocation_failures.extend(reasons)
         else:
             satisfactory_buckets.append((tuple(satisfaction_scores), bucket))
+
     if satisfactory_buckets:
         ret = [
             bucket
