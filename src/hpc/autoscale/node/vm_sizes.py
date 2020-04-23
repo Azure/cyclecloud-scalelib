@@ -68,17 +68,24 @@ class AuxVMSizeInfo:
         return self.__capabilities
 
 
+__AUX_CACHE = {}
+
+
 def get_aux_vm_size_info(location: str, vm_size: str) -> AuxVMSizeInfo:
-    by_name = VM_SIZES.get(location)
+    key = (location, vm_size)
+    if key not in __AUX_CACHE:
+        by_name = VM_SIZES.get(location)
 
-    if not by_name:
-        return AuxVMSizeInfo({"family": "unknown"})
+        if not by_name:
+            return AuxVMSizeInfo({"family": "unknown"})
 
-    vm_aux_info = by_name.get(vm_size)
-    if not vm_aux_info:
-        return AuxVMSizeInfo({"family": "unknown"})
+        vm_aux_info = by_name.get(vm_size)
+        if not vm_aux_info:
+            return AuxVMSizeInfo({"family": "unknown"})
 
-    return AuxVMSizeInfo(vm_aux_info)
+        __AUX_CACHE[key] = AuxVMSizeInfo(vm_aux_info)
+
+    return __AUX_CACHE[key]
 
 
 def main() -> None:
