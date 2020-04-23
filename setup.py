@@ -1,8 +1,9 @@
 # test: ignore
 import os
 import re
+import sys
 from subprocess import check_call
-from typing import List
+from typing import Any, List
 
 from setuptools import find_packages, setup
 from setuptools.command.test import Command
@@ -16,6 +17,8 @@ with open("src/version.py") as f:
 
 
 class PyTest(TestCommand):
+    skip_hypothesis = True
+
     def finalize_options(self) -> None:
         TestCommand.finalize_options(self)
         import os
@@ -39,10 +42,11 @@ class PyTest(TestCommand):
         if errno != 0:
             sys.exit(errno)
 
-        os.environ["HPC_RUNTIME_CHECKS"] = "false"
-        errno = pytest.main(self.test_args + ["-k", "hypothesis"])
-        if errno != 0:
-            sys.exit(errno)
+        if not PyTest.skip_hypothesis:
+            os.environ["HPC_RUNTIME_CHECKS"] = "false"
+            errno = pytest.main(self.test_args + ["-k", "hypothesis"])
+            if errno != 0:
+                sys.exit(errno)
 
         check_call(
             ["black", "--check", "src", "test"],
@@ -84,6 +88,41 @@ class Formatter(Command):
             cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), "test"),
         )
         run_type_checking()
+
+
+class InitCommitHook(Command):
+    user_options: List[str] = []
+
+    def initialize_options(self) -> None:
+        pass
+
+    def finalize_options(self) -> None:
+        pass
+
+    def run(self) -> None:
+        activate_script = os.path.join(os.path.dirname(sys.executable), "activate")
+        if not os.path.exists(activate_script):
+            print("Run this command after activating your venv!")
+            sys.exit(1)
+
+        pre_commit = os.path.join(
+            os.path.dirname(__file__), ".git", "hooks", "pre-commit"
+        )
+        if os.path.exists(pre_commit):
+            print(pre_commit, "exists already. Please remove it and run it again.")
+            sys.exit(1)
+
+        with open(".git/hooks/pre-commit", "w") as fw:
+            fw.write("#!/bin/sh\n")
+            fw.write("source {}\n".format(activate_script))
+            fw.write("python setup.py commithook")
+        check_call(["chmod", "+x", pre_commit])
+
+
+class PreCommitHook(PyTest):
+    def __init__(self, dist: Any, **kw: Any) -> None:
+        super().__init__(dist, **kw)
+        PyTest.skip_hypothesis = True
 
 
 def run_type_checking() -> None:
@@ -135,15 +174,26 @@ setup(
             "private-requirements.json",
             "../NOTICE",
             "../notices",
-            "vm_sizes.json"
+            "vm_sizes.json",
         ],
-        "": ["vm_sizes.json", "../notices"]
+        "": ["vm_sizes.json", "../notices"],
     },
     include_package_data=True,
-    install_requires=["requests == 2.21.0", "typing_extensions", "frozendict==1.2.0", "jsonpickle==1.4.1"]
+    install_requires=[
+        "requests == 2.21.0",
+        "typing_extensions",
+        "frozendict==1.2.0",
+        "jsonpickle==1.4.1",
+    ]
     + ["urllib3==1.24.1"],  # noqa: W503
     tests_require=["pytest==3.2.3"],
-    cmdclass={"test": PyTest, "format": Formatter, "types": TypeChecking},
+    cmdclass={
+        "test": PyTest,
+        "format": Formatter,
+        "types": TypeChecking,
+        "commithook": PreCommitHook,
+        "initcommithook": InitCommitHook,
+    },
     url="http://www.microsoft.com",
-    maintainer="Azure CycleCloud"
+    maintainer="Azure CycleCloud",
 )
