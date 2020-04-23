@@ -171,14 +171,19 @@ def initialize_logging(config: Optional[Dict[str, Any]] = None) -> None:
     logging_section = config.get("logging", {})
     logging_config_file = logging_section.get("config_file")
 
+    def errprint(msg: str) -> None:
+        print(msg, file=sys.stderr)
+
     if logging_config_file:
         try:
-            with open(logging_config_file,'r') as f:
-                pass                
+            with open(logging_config_file, "r"):
+                pass
         except FileNotFoundError:
-            print("Logging conf file {} does not exist!".format(logging_config_file))
-        except:
-            print("Failed to open logging conf file {}!".format(logging_config_file))
+            errprint("Logging conf file {} does not exist!".format(logging_config_file))
+        except Exception as e:
+            errprint(
+                "Failed to open logging conf file {}! {}".format(logging_config_file, e)
+            )
         else:
             logging.config.fileConfig(logging_config_file)
     elif logging_section.get("config"):
