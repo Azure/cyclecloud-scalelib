@@ -337,7 +337,9 @@ class Not(BaseNodeConstraint):
 
 @hpcwrapclass
 class NodePropertyConstraint(BaseNodeConstraint):
-    def __init__(self, attr: str, *values: ht.ResourceTypeAtom) -> None:
+    def __init__(
+        self, attr: str, *values: typing.Union[None, ht.ResourceTypeAtom]
+    ) -> None:
         self.attr = attr
         from hpc.autoscale.node.node import QUERYABLE_PROPERTIES
 

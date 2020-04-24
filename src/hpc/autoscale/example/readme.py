@@ -275,7 +275,7 @@ def scaling_down_demand() -> None:
 @withcontext
 def manual_node_mgmt() -> None:
     node_mgr = new_node_manager(CONFIG)
-    assert (len(node_mgr.get_nodes())) == 1
+
     assert node_mgr.allocate({}, node_count=2)
     if node_mgr.new_nodes:
         node_mgr.bootup()
@@ -283,8 +283,9 @@ def manual_node_mgmt() -> None:
     node1, node2 = node_mgr.get_nodes()
 
     assert node1 in node_mgr.get_nodes()
-    node_mgr.delete([node1])
-    assert node1 not in node_mgr.get_nodes()
+    res = node_mgr.delete([node1])
+    print(res)
+    assert node1 not in node_mgr.get_nodes(), node_mgr.get_nodes()
 
 
 class MyCustomMemoryRatioConstraint(BaseNodeConstraint):

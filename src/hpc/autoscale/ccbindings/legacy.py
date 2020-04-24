@@ -43,7 +43,9 @@ class ClusterBinding(ClusterBindingInterface):
         self.__cluster_name = cluster_name
         self.session = session
         self.client = client
-        self.clusters_module = clusters_module or cyclecloud.api.clusters
+        self.clusters_module: cyclecloud.api.clusters = cyclecloud.api.clusters
+        if clusters_module:
+            self.clusters_module = clusters_module  # type: ignore
 
     @property
     def cluster_name(self) -> ht.ClusterName:
@@ -255,7 +257,7 @@ class ClusterBinding(ClusterBindingInterface):
         hostnames: Optional[List[ht.Hostname]] = None,
         ip_addresses: Optional[List[ht.IpAddress]] = None,
         custom_filter: str = None,
-    ) -> NodeManagementResult:
+    ) -> NodeManagementRequest:
 
         args = [
             a

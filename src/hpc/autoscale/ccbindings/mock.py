@@ -19,7 +19,9 @@ from cyclecloud.model.NodearrayBucketStatusVirtualMachineModule import (
 )
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeCreationResultSetModule import NodeCreationResultSet
+from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
+from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
 
 import hpc.autoscale.hpclogging as logging
@@ -45,6 +47,7 @@ from hpc.autoscale.node.node import Node
 from hpc.autoscale.util import partition
 
 logger = logging.getLogger("cyclecloud.clustersapi")
+NodeRecord = Dict[str, Any]
 
 
 @hpcwrapclass
@@ -342,6 +345,7 @@ class MockClusterBinding(ClusterBindingInterface):
             # TODO add node statuses as constants / util functions.
             n.state = NodeStatus("Allocating")
 
+        NodeManagementResult()
         self.operations[result.operation_id] = MockNodeManagementResult(
             result.operation_id, cloned_nodes
         )
@@ -396,14 +400,14 @@ class MockClusterBinding(ClusterBindingInterface):
         self,
         operation_id: Optional[OperationId] = None,
         request_id: Optional[RequestId] = None,
-    ) -> "MockNodeManagementResult":
+    ) -> NodeList:
 
         # TODO what is the actual error?
         if not operation_id:
-            all_nodes: List[Node] = []
+            all_nodes: List[Dict] = []
             for op in self.operations.values():
-                all_nodes.extend(op._nodes)
-            return MockNodeManagementResult(OperationId(""), all_nodes)
+                all_nodes.extend(self._mgmt_nodes_to_ccnode(op.nodes))
+            return NodeList(nodes=all_nodes)
 
         if operation_id not in self.operations:
             raise RuntimeError(
@@ -413,7 +417,10 @@ class MockClusterBinding(ClusterBindingInterface):
             )
         assert operation_id
         assert operation_id in self.operations
-        return self.operations[operation_id]
+
+        mgmt_result = self.operations[operation_id]
+        cc_nodes = [_node_to_ccnode(self.nodes[n.name]) for n in mgmt_result.nodes]
+        return NodeList(nodes=cc_nodes, operation_id=operation_id)
 
     def remove_nodes(
         self,
@@ -459,14 +466,16 @@ class MockClusterBinding(ClusterBindingInterface):
     ) -> None:
         raise NotImplementedError()
 
+    def _mgmt_nodes_to_ccnode(
+        self, mgmt_nodes: List[NodeManagementResultNode]
+    ) -> List[NodeRecord]:
+        return [_node_to_ccnode(self.nodes[n.name]) for n in mgmt_nodes]
+
     def __str__(self) -> str:
         return "MockBindings()"
 
     def __repr__(self) -> str:
         return str(self)
-
-
-NodeRecord = Dict[str, Any]
 
 
 @hpcwrapclass
@@ -475,11 +484,21 @@ class MockNodeManagementResult:
         self.operation_id = operation_id
         if nodes:
             assert isinstance(nodes[0], Node)
+
         self._nodes = nodes
 
     @property
-    def nodes(self) -> List[NodeRecord]:
-        return list([_node_to_ccnode(n) for n in self._nodes])
+    def nodes(self) -> List[NodeManagementResultNode]:
+        return list(
+            [
+                NodeManagementResultNode(
+                    name=n.name,
+                    id=n.delayed_node_id.node_id,
+                    status="Error" if n.state == "Failure" else "OK",
+                )
+                for n in self._nodes
+            ]
+        )
 
 
 def _node_to_ccnode(n: Node) -> NodeRecord:

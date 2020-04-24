@@ -15,7 +15,7 @@ from hpc.autoscale.results import MatchResult
 
 # state is added by default because it also has a setter
 # property and most tools get confused by this
-QUERYABLE_PROPERTIES: List[str] = ["state"]
+QUERYABLE_PROPERTIES: List[str] = ["state", "exusts"]
 
 
 def nodeproperty(function: Callable) -> property:
@@ -152,9 +152,13 @@ class Node(ABC):
     def state(self, value: ht.NodeStatus) -> None:
         self.__state = value
 
-    @nodeproperty
+    @property
     def exists(self) -> bool:
         return self.__exists
+
+    @exists.setter
+    def exists(self, value: bool) -> None:
+        self.__exists = value
 
     @nodeproperty
     def placement_group(self) -> Optional[ht.PlacementGroup]:

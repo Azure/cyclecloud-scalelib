@@ -434,17 +434,38 @@ class NodeManager:
 
     @apitrace
     def get_nodes_by_operation(self, operation_id: ht.OperationId) -> List[Node]:
-        node_list = self.__cluster_bindings.get_nodes(operation_id=operation_id)
-        by_name = partition(self.get_nodes(), lambda n: n.name)
+        relevant_node_list = self.__cluster_bindings.get_nodes(
+            operation_id=operation_id
+        )
+        relevant_node_names = [n["Name"] for n in relevant_node_list.nodes]
+        updated_cluster_status = self.__cluster_bindings.get_cluster_status(True)
+
+        updated_cc_nodes = partition_single(
+            updated_cluster_status.nodes, lambda n: n["Name"]
+        )
+
+        nodes_by_name = partition_single(self.get_nodes(), lambda n: n.name)
 
         ret = []
 
-        for cc_node in node_list.nodes:
-            name = cc_node["Name"]
-            if name in by_name:
-                node = by_name[name][0]
-                node.state = cc_node["Status"]
-                ret.append(node)
+        for name in relevant_node_names:
+            if name in nodes_by_name:
+                node = nodes_by_name[name]
+                if name not in updated_cc_nodes:
+                    logging.warning("Node %s no longer exists.", name)
+                    node.exists = False
+                    node.state = ht.NodeStatus("Off")
+                else:
+                    cc_node = updated_cc_nodes[name]
+                    node.state = ht.NodeStatus(cc_node["Status"])
+                    if node.delayed_node_id.node_id:
+                        assert node.delayed_node_id.node_id == cc_node["NodeId"]
+                    else:
+                        logging.info(
+                            "Found nodeid for %s -> %s", node, cc_node["NodeId"]
+                        )
+                        node.delayed_node_id.node_id = cc_node["NodeId"]
+                    ret.append(node)
 
         return ret
 
@@ -464,27 +485,20 @@ class NodeManager:
             if creation_set.message:
                 logging.warn(result.message)
 
-        created_nodes = self.__cluster_bindings.get_nodes(
-            operation_id=result.operation_id
-        )
+        created_nodes = self.get_nodes_by_operation(result.operation_id)
 
-        new_node_mappings = {}
-        for node in created_nodes.nodes:
-            new_node_mappings[node["Name"]] = node
+        new_node_mappings: Dict[str, Node] = partition_single(
+            created_nodes, lambda n: n.name
+        )
 
         started_nodes = []
         for offset, node in enumerate(nodes):
             node.delayed_node_id.operation_id = result.operation_id
             node.delayed_node_id.operation_offset = offset
             if node.name in new_node_mappings:
-                cc_node = new_node_mappings[node.name]
-                node.state = cc_node["Status"]
-                node.status = cc_node["Status"]
-                node.delayed_node_id.node_id = cc_node["NodeId"]
                 started_nodes.append(node)
             else:
-                node.state = "Unknown"
-                node.status = "Unknown"
+                node.state = ht.NodeStatus("Unknown")
 
         return BootupResult("success", result.operation_id, request_id, started_nodes)
 
@@ -643,52 +657,55 @@ class NodeManager:
         result: NodeManagementResult = function(managed_nodes)
 
         by_name = partition_single(nodes, lambda n: n.name)
-        cc_by_name = partition_single(result.nodes, lambda n: n["Name"])
-
-        by_bucket_id = partition_single(self.__node_buckets, lambda b: b.bucket_id)
+        cc_by_name = partition_single(result.nodes, lambda n: n.name)
 
         affected_nodes: List[Node] = []
 
+        # force the node.state to be updated
+        self.get_nodes_by_operation(result.operation_id)
+
         for name, cc_node in cc_by_name.items():
+
             if name not in by_name:
                 continue
 
             node = by_name[name]
-            if node.state == cc_node["Status"]:
+            if cc_node.status != "OK":
                 logging.warning("%s was unaffected by call %s", node, function.__name__)
                 continue
 
-            logging.debug(
-                "%s when from state %s to %s", node, node.state, cc_node["Status"]
-            )
             affected_nodes.append(node)
-            node.state = cc_node["Status"]
 
-            if node.state in ["Terminating"]:
-                if node.bucket_id not in by_bucket_id:
-                    logging.warning(
-                        "Unknown bucketid??? %s not in %s", node.bucket_id, by_bucket_id
-                    )
-                    continue
-
-                bucket = by_bucket_id[node.bucket_id]
-                nodes_list = bucket.nodes
-
-                if node not in nodes_list:
-
-                    logging.warning(
-                        (
-                            "Somehow node {} is not being tracked by bucket {}. "
-                            + "Did you try to shutdown/terminate/delete a node twice?"
-                        ).format(node, bucket)
-                    )
-                    continue
-
-                bucket.nodes.remove(node)
+            if node.state in ["Terminating", "Off"]:
+                self._remove_node_internally(node)
 
         return ctor(
             "success", ht.OperationId(result.operation_id), None, affected_nodes
         )
+
+    def _remove_node_internally(self, node: Node) -> None:
+        by_bucket_id = partition_single(self.__node_buckets, lambda b: b.bucket_id)
+
+        if node.bucket_id not in by_bucket_id:
+            logging.warning(
+                "Unknown bucketid??? %s not in %s", node.bucket_id, by_bucket_id
+            )
+            return
+
+        bucket = by_bucket_id[node.bucket_id]
+        nodes_list = bucket.nodes
+
+        if node not in nodes_list:
+
+            logging.warning(
+                (
+                    "Somehow node {} is not being tracked by bucket {}. "
+                    + "Did you try to shutdown/terminate/delete a node twice?"
+                ).format(node, bucket)
+            )
+            return
+
+        bucket.nodes.remove(node)
 
     def set_system_default_resources(self) -> None:
         self.add_default_resource({}, "ncpus", "node.vcpu_count")
@@ -792,10 +809,13 @@ def _cluster_limits(cluster_name: str, cluster_status: ClusterStatus) -> _Shared
 
     cluster_active_cores = 0
 
+    nodearray_regions = {}
+    for nodearray_status in cluster_status.nodearrays:
+        nodearray_regions[nodearray_status.name] = nodearray_status.nodearray["Region"]
+
     for cc_node in cluster_status.nodes:
-        aux_info = vm_sizes.get_aux_vm_size_info(
-            cc_node["Region"], cc_node["MachineType"]
-        )
+        region = nodearray_regions[cc_node["Template"]]
+        aux_info = vm_sizes.get_aux_vm_size_info(region, cc_node["MachineType"])
         cluster_active_cores += aux_info.vcpu_count
 
     return _SharedLimit(
@@ -833,9 +853,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
         active_na_core_count = 0
         active_na_count = 0
         for cc_node in cc_nodes_by_template.get(nodearray_status.name, []):
-            aux_vm_info = vm_sizes.get_aux_vm_size_info(
-                cc_node["Region"], cc_node["MachineType"]
-            )
+            aux_vm_info = vm_sizes.get_aux_vm_size_info(region, cc_node["MachineType"])
             active_na_count += 1
             active_na_core_count += aux_vm_info.vcpu_count
 
@@ -943,7 +961,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                 nodes = []
 
                 for cc_node_rec in cc_node_records:
-                    nodes.append(_node_from_cc_node(cc_node_rec, bucket))
+                    nodes.append(_node_from_cc_node(cc_node_rec, bucket, region))
 
                 node_def = NodeDefinition(
                     nodearray=nodearray_name,
@@ -976,7 +994,9 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
     return ret
 
 
-def _node_from_cc_node(cc_node_rec: dict, bucket: NodearrayBucketStatus) -> Node:
+def _node_from_cc_node(
+    cc_node_rec: dict, bucket: NodearrayBucketStatus, region: ht.Location
+) -> Node:
     node_id = ht.NodeId(cc_node_rec["NodeId"])
     node_name = ht.NodeName(cc_node_rec["Name"])
     nodearray_name = cc_node_rec["Template"]
@@ -1003,7 +1023,7 @@ def _node_from_cc_node(cc_node_rec: dict, bucket: NodearrayBucketStatus) -> Node
         vm_size=vm_size_node,
         hostname=hostname,
         private_ip=private_ip,
-        location=cc_node_rec["Region"],
+        location=region,
         spot=cc_node_rec.get("Interruptible", False),
         vcpu_count=vcpu_count,
         memory=node_memory,

@@ -1,0 +1,2 @@
+PROJ_DIR=/Users/ryhamel/code/byos
+PYTHONPATH=${PROJ_DIR}/src:${PROJ_DIR}/test
