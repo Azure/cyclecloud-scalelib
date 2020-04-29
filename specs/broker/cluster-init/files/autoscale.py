@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import socket
+import pdb
 
 from hpc.autoscale.job import demandcalculator
 from hpc.autoscale.job.job import Job
@@ -20,6 +21,12 @@ class celery_driver():
 
 def c_strip(_host):
     return _host.split("@")[1]
+
+def job_buffer(n=1):
+    jobs = []
+    for i in range(n):
+        jobs.append(Job(name="pad-%s" % i, constraints={"ncpus":1}))
+    return jobs
 
 def celery_status():
     from celery import Celery
@@ -48,8 +55,7 @@ def celery_status():
     celery_d.scheduler_nodes = [SchedulerNode(hostname=x) for x in list(nodes)]
     return celery_d
 
-def auto():
-
+def setup():
     logging.basicConfig(
         format="%(asctime)-15s: %(levelname)s %(message)s",
         stream=sys.stderr,
@@ -59,25 +65,35 @@ def auto():
     CONFIG = {
         "cluster_name": "celery2",
         "url": "https://127.0.0.1:37140",
-        "username": "mirequa",
-        "password": "cycl3R0cks!",
+        "username": "user",
+        "password": "password",
     }
 
+def auto():
+    setup()
+
+    MIN_CORE_COUNT = 4
+    WARM_BUFFER = 2
+
+    # Get hosts / tasks
     celery_d = celery_status()
 
-    node_mgr = new_node_manager(CONFIG)
-    demand_calculator = demandcalculator.new_demand_calculator(CONFIG, 
+    dcalc = demandcalculator.new_demand_calculator(CONFIG, 
                     existing_nodes=celery_d.scheduler_nodes, 
                     node_history=SQLiteNodeHistory())
-    demand_calculator.add_jobs(celery_d.jobs)
 
-    # Define consumable resource "ncpus" initial value is vcpu_count
-    #node_mgr.add_default_resource({}, "ncpus", "node.vcpu_count")
+    dcalc.add_jobs(celery_d.jobs)
+    n_jobs = len(celery_d.jobs)
+    n_add_jobs = max(n_jobs + WARM_BUFFER, max(n_jobs, MIN_CORE_COUNT))
+    if n_add_jobs > 0:
+        # RIGHT-SIZE based on Min Count and Buffer
+        # It's possible that the padded jobs will float around extending the timer 
+        # but it seems like they're placed in some kind of normal order that's
+        # preserved across autoscale runs
+        print("add padding of %d jobs, to existing %d" % (n_add_jobs, n_jobs))
+        dcalc.add_jobs(job_buffer(n_add_jobs))
 
-    #  [bucket.vcpu_count for bucket in node_mgr.get_buckets()]
-    #demand_calculator.add_job(Job("x1", {"ncpus": 1}, iterations=10))
-    # result = node_mgr.allocate({"node.nodearray": "worker", "ncpus": 1}, slot_count=2)
-    demand_result = demand_calculator.finish()
+    demand_result = dcalc.finish()
     output_columns = [
     "name",
     "hostname",
@@ -88,14 +104,13 @@ def auto():
     "vcpu_count",
     "state"
     ]
-    print("jobs=%s" % celery_d.jobs)
     
     print_demand(output_columns, demand_result)
-    demand_calculator.bootup()
-    delete_result = demand_calculator.find_unmatched_for(at_least=180)
+    dcalc.bootup()
+    delete_result = dcalc.find_unmatched_for(at_least=180)
     if delete_result:
         try:
-            demand_calculator.delete(delete_result)
+            dcalc.delete(delete_result)
         except Exception as e:
             _exit_code = 1
             logging.warning("Deletion failed, will retry on next iteration: %s", e)

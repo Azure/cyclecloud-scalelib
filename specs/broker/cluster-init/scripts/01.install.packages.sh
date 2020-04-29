@@ -13,3 +13,4 @@ if ! [ -f "$FILE" ]; then
 fi
 
 pip install $CYCLECLOUD_SPEC_PATH/files/autoscale.tgz
+cp $CYCLECLOUD_SPEC_PATH/files/add_task.py /root/
