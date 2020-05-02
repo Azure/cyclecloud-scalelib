@@ -476,6 +476,13 @@ class NodeManager:
         request_id: Optional[ht.RequestId] = None,
     ) -> BootupResult:
         nodes = nodes or self.new_nodes
+        if not nodes:
+            return BootupResult(
+                "success",
+                ht.OperationId(""),
+                request_id,
+                reasons=["No new nodes required or created."],
+            )
         result: NodeCreationResult = self.__cluster_bindings.create_nodes(nodes)
 
         for s in result.sets:
