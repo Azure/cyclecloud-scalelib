@@ -3,7 +3,9 @@ from typing import Any, List
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as s
+from hypothesis.strategies import SearchStrategy
 
+from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
 from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.node.node import Node, UnmanagedNode
@@ -376,15 +378,37 @@ def test_default_resources() -> None:
     assert by_nodetype.get("B")[0].resources["vcpus"] == 8
 
 
+def vmindices() -> SearchStrategy[ht.VMSize]:
+    class VMIndexStrategy(SearchStrategy):
+        """A strategy for providing integers in some interval with inclusive
+        endpoints."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.vms = list(vm_sizes.VM_SIZES["southcentralus"].keys())
+
+        def __repr__(self) -> str:
+            return "VMIndexStrategy()"
+
+        def do_draw(self, data: Any) -> ht.VMSize:
+            import hypothesis.internal.conjecture.utils as d
+
+            idx = d.integer_range(data, 0, len(self.vms) - 1)
+            return self.vms[idx]
+
+    return VMIndexStrategy()
+
+
+@given(vmindices())
+def test_hypo(vm: ht.VMSize) -> None:
+    # just making sure vmindices() is working as a strategy
+    assert vm_sizes.get_aux_vm_size_info("southcentralus", vm)
+
+
 @given(
     s.integers(1, 3),
     s.integers(1, 3),
-    s.lists(
-        s.integers(0, len(vm_sizes.VM_SIZES["southcentralus"]) - 1),
-        min_size=9,
-        max_size=9,
-        unique=True,
-    ),
+    s.lists(vmindices(), min_size=9, max_size=9, unique=True,),
     s.lists(s.integers(1, 25), min_size=1, max_size=10,),
     s.lists(s.integers(1, 32), min_size=20, max_size=20,),
     s.lists(s.booleans(), min_size=20, max_size=20,),
@@ -395,7 +419,7 @@ def test_default_resources() -> None:
 def test_slot_count_hypothesis(
     num_arrays: int,
     num_buckets: int,
-    vm_indices: List[int],
+    vm_size_choices: List[ht.VMSize],
     magnitudes: List[int],
     ncpus_per_job: List[int],
     slots_or_nodes: List[bool],
@@ -407,13 +431,12 @@ def test_slot_count_hypothesis(
     # use vm_indices to figure out which vms to pick
     def next_node_mgr(existing_nodes: List[Node]) -> NodeManager:
         bindings = MockClusterBinding()
-        for_region = list(vm_sizes.VM_SIZES["southcentralus"].keys())
 
         for n in range(num_arrays):
             nodearray = "nodearray{}".format(n)
             bindings.add_nodearray(nodearray, {}, location="southcentralus")
             for b in range(num_buckets):
-                vm_size = for_region[vm_indices[n * num_buckets + b]]
+                vm_size = vm_size_choices[n * num_buckets + b]
                 bindings.add_bucket(
                     nodearray, vm_size, max_count=10, available_count=10,
                 )
@@ -611,6 +634,22 @@ def test_mock_bindings3() -> None:
     bindings.add_nodearray("w", {}, location="westus2", max_count=8)
     bindings.add_bucket("w", "Standard_E2_v3", max_count=80, available_count=8)
     _node_mgr(bindings)
+
+
+def test_delete_internally(bindings: MockClusterBinding) -> None:
+    bindings.add_node("htc-1", "htc")
+    node_mgr = _node_mgr(bindings)
+    assert len(node_mgr.get_nodes()) == 1
+    node = node_mgr.get_nodes()[0]
+    assert node.name == "htc-1"
+    result = node_mgr.delete([node])
+    assert result
+
+    assert len(result.nodes) == 1
+    assert result.nodes[0].name == "htc-1"
+    assert result.nodes[0].state == "Terminating"
+
+    assert len(node_mgr.get_nodes()) == 0
 
 
 if __name__ == "__main__":

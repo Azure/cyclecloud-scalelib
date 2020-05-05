@@ -7,6 +7,7 @@ from cyclecloud.model.ClusterStatusModule import ClusterStatus
 from cyclecloud.model.NodearrayBucketStatusModule import NodearrayBucketStatus
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
+from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
 
 import hpc.autoscale.hpclogging as logging
@@ -664,20 +665,22 @@ class NodeManager:
         result: NodeManagementResult = function(managed_nodes)
 
         by_name = partition_single(nodes, lambda n: n.name)
-        cc_by_name = partition_single(result.nodes, lambda n: n.name)
+        mgmt_by_name: Dict[ht.NodeName, NodeManagementResultNode]
+        mgmt_by_name = partition_single(result.nodes, lambda n: n.name)
 
         affected_nodes: List[Node] = []
 
         # force the node.state to be updated
         self.get_nodes_by_operation(result.operation_id)
 
-        for name, cc_node in cc_by_name.items():
+        for name, mgmt_node in mgmt_by_name.items():
+            assert isinstance(mgmt_node, NodeManagementResultNode)
 
             if name not in by_name:
                 continue
 
             node = by_name[name]
-            if cc_node.status != "OK":
+            if mgmt_node.status != "OK":
                 logging.warning("%s was unaffected by call %s", node, function.__name__)
                 continue
 
@@ -691,15 +694,21 @@ class NodeManager:
         )
 
     def _remove_node_internally(self, node: Node) -> None:
-        by_bucket_id = partition_single(self.__node_buckets, lambda b: b.bucket_id)
+        by_bucket_id_and_pg = partition_single(
+            self.__node_buckets, lambda b: (b.bucket_id, b.placement_group)
+        )
 
-        if node.bucket_id not in by_bucket_id:
+        key = (node.bucket_id, node.placement_group)
+
+        if key not in by_bucket_id_and_pg:
             logging.warning(
-                "Unknown bucketid??? %s not in %s", node.bucket_id, by_bucket_id
+                "Unknown bucketid/placement_group??? %s not in %s",
+                key,
+                by_bucket_id_and_pg,
             )
             return
 
-        bucket = by_bucket_id[node.bucket_id]
+        bucket = by_bucket_id_and_pg[key]
         nodes_list = bucket.nodes
 
         if node not in nodes_list:

@@ -1,3 +1,4 @@
+import re
 from abc import ABC
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -15,7 +16,7 @@ from hpc.autoscale.results import MatchResult
 
 # state is added by default because it also has a setter
 # property and most tools get confused by this
-QUERYABLE_PROPERTIES: List[str] = ["state", "exusts"]
+QUERYABLE_PROPERTIES: List[str] = ["state", "exists", "placement_group"]
 
 
 def nodeproperty(function: Callable) -> property:
@@ -63,12 +64,14 @@ class Node(ABC):
 
         self.__state = state
         self.__exists = exists
-        self.__placement_group = placement_group
+        self.__placement_group = None
+        # call the setter for extra validation
+        self.placement_group = placement_group
         self.__power_state = power_state
         self.__managed = managed
         self.__version = "7.9"
         self.__node_id = node_id
-        self._allocated = False
+        self._allocated: bool = False
         self.__closed = False
         self._node_index: Optional[int] = None
         if "-" in name:
@@ -160,9 +163,36 @@ class Node(ABC):
     def exists(self, value: bool) -> None:
         self.__exists = value
 
-    @nodeproperty
+    @property
     def placement_group(self) -> Optional[ht.PlacementGroup]:
         return self.__placement_group
+
+    @placement_group.setter
+    def placement_group(self, value: Optional[ht.PlacementGroup]) -> None:
+        if isinstance(value, str) and not value:
+            value = None
+
+        if self.__placement_group and value != self.__placement_group:
+            if self.exists:
+                raise RuntimeError(
+                    "Can not change the placement group of an existing node: {} old={} new={}".format(
+                        self, self.__placement_group, value
+                    )
+                )
+        if value:
+            if not re.match("^[a-zA-Z0-9_-]+$", value):
+                raise RuntimeError(
+                    "Invalid placement_group - must only contain letters, numbers, '-' or '_'"
+                )
+        self.__placement_group = value
+
+    def set_placement_group_escaped(
+        self, value: Optional[ht.PlacementGroup]
+    ) -> Optional[ht.PlacementGroup]:
+        if value:
+            value = ht.PlacementGroup(re.sub("[^a-zA-z0-9-_]", "_", value))
+        self.placement_group = value
+        return self.placement_group
 
     @property
     def resources(self) -> ht.ResourceDict:

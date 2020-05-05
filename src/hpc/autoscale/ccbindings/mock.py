@@ -292,6 +292,8 @@ class MockClusterBinding(ClusterBindingInterface):
             managed=True,
             resources=resources,
         )
+        op_id = OperationId(str(uuid4()))
+        self.operations[op_id] = MockNodeManagementResult(op_id, [self.nodes[name]])
 
         return self.nodes[name]
 
@@ -345,7 +347,6 @@ class MockClusterBinding(ClusterBindingInterface):
             # TODO add node statuses as constants / util functions.
             n.state = NodeStatus("Allocating")
 
-        NodeManagementResult()
         self.operations[result.operation_id] = MockNodeManagementResult(
             result.operation_id, cloned_nodes
         )
@@ -361,12 +362,18 @@ class MockClusterBinding(ClusterBindingInterface):
         ip_addresses: Optional[List[IpAddress]] = None,
         custom_filter: str = None,
     ) -> NodeManagementResult:
-        assert names
-        result = NodeManagementResult()
-        result.nodes = []
+        if not names:
+            assert nodes
+            names = [n.name for n in nodes]
+            nodes = None
+
+        result_nodes: List[Node] = []
         for name in names:
             if name in self.nodes:
-                result.nodes.append(self.nodes.pop(name))
+                node = self.nodes[name]
+                node.state = NodeStatus("Terminating")
+                result_nodes.append(node)
+        result = MockNodeManagementResult(OperationId(str(uuid.uuid4())), result_nodes)
         result.operation_id = OperationId(str(uuid.uuid4()))
         self.operations[result.operation_id] = result
         return result
@@ -404,9 +411,7 @@ class MockClusterBinding(ClusterBindingInterface):
 
         # TODO what is the actual error?
         if not operation_id:
-            all_nodes: List[Dict] = []
-            for op in self.operations.values():
-                all_nodes.extend(self._mgmt_nodes_to_ccnode(op.nodes))
+            all_nodes = _nodes_to_ccnode(list(self.nodes.values()))
             return NodeList(nodes=all_nodes)
 
         if operation_id not in self.operations:
@@ -419,7 +424,11 @@ class MockClusterBinding(ClusterBindingInterface):
         assert operation_id in self.operations
 
         mgmt_result = self.operations[operation_id]
-        cc_nodes = [_node_to_ccnode(self.nodes[n.name]) for n in mgmt_result.nodes]
+        cc_nodes = [
+            _node_to_ccnode(self.nodes[n.name])
+            for n in mgmt_result.nodes
+            if n.name in self.nodes
+        ]
         return NodeList(nodes=cc_nodes, operation_id=operation_id)
 
     def remove_nodes(
@@ -456,7 +465,7 @@ class MockClusterBinding(ClusterBindingInterface):
         raise NotImplementedError()
 
     def delete_nodes(self, nodes: List[Node]) -> NodeManagementResult:
-        raise NotImplementedError()
+        return self.shutdown_nodes(nodes)
 
     def scale(
         self,
@@ -466,11 +475,6 @@ class MockClusterBinding(ClusterBindingInterface):
     ) -> None:
         raise NotImplementedError()
 
-    def _mgmt_nodes_to_ccnode(
-        self, mgmt_nodes: List[NodeManagementResultNode]
-    ) -> List[NodeRecord]:
-        return [_node_to_ccnode(self.nodes[n.name]) for n in mgmt_nodes]
-
     def __str__(self) -> str:
         return "MockBindings()"
 
@@ -479,17 +483,14 @@ class MockClusterBinding(ClusterBindingInterface):
 
 
 @hpcwrapclass
-class MockNodeManagementResult:
+class MockNodeManagementResult(NodeManagementResult):
     def __init__(self, operation_id: OperationId, nodes: List[Node]) -> None:
-        self.operation_id = operation_id
+
         if nodes:
             assert isinstance(nodes[0], Node)
 
         self._nodes = nodes
-
-    @property
-    def nodes(self) -> List[NodeManagementResultNode]:
-        return list(
+        mgmt_nodes = list(
             [
                 NodeManagementResultNode(
                     name=n.name,
@@ -499,6 +500,7 @@ class MockNodeManagementResult:
                 for n in self._nodes
             ]
         )
+        NodeManagementResult.__init__(self, nodes=mgmt_nodes, operation_id=operation_id)
 
 
 def _node_to_ccnode(n: Node) -> NodeRecord:
@@ -520,6 +522,10 @@ def _node_to_ccnode(n: Node) -> NodeRecord:
             "Configuration": {"autoscale": {"resources": deepcopy(n.resources)}}
         },
     }
+
+
+def _nodes_to_ccnode(nodes: List[Node]) -> List[NodeRecord]:
+    return [_node_to_ccnode(n) for n in nodes]
 
 
 def _update_bucket_counts(bucket: NodearrayBucketStatus, num_nodes: int) -> None:
