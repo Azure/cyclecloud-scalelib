@@ -357,7 +357,7 @@ class NodePropertyConstraint(BaseNodeConstraint):
         target = getattr(node, self.attr)
 
         if target not in self.values:
-            assert target != "htc"
+
             if len(self.values) > 1:
                 msg = "Property[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
                     self.attr, target, self.values, node.name, self.attr,

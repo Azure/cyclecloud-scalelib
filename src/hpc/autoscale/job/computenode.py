@@ -1,5 +1,7 @@
+import socket
 import typing
 
+from hpc.autoscale import hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
@@ -10,6 +12,14 @@ from hpc.autoscale.node.node import Node
 class SchedulerNode(Node):
     def __init__(self, hostname: str, resources: typing.Optional[dict] = None) -> None:
         resources = resources or ht.ResourceDict({})
+        try:
+            private_ip: typing.Optional[ht.IpAddress] = ht.IpAddress(
+                socket.gethostbyname(hostname)
+            )
+        except Exception as e:
+            logging.warning("Could not find private ip for %s: %s", hostname, e)
+            private_ip = None
+
         Node.__init__(
             self,
             node_id=DelayedNodeId(ht.NodeName(hostname)),
@@ -17,7 +27,7 @@ class SchedulerNode(Node):
             nodearray=ht.NodeArrayName("unknown"),
             bucket_id=ht.BucketId("unknown"),
             hostname=ht.Hostname(hostname),
-            private_ip=None,
+            private_ip=private_ip,
             vm_size=ht.VMSize("unknown"),
             location=ht.Location("unknown"),
             spot=False,

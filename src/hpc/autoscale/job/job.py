@@ -1,5 +1,5 @@
 import typing
-from typing import Any, List, NewType, Optional, Union
+from typing import Any, Dict, List, NewType, Optional, Union
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.codeanalysis import hpcwrapclass
@@ -59,6 +59,7 @@ class Job:
         self.__node_count = node_count
         self.__nodes_remaining = node_count
         self.__colocated = colocated
+        self.__metadata: Dict[str, Any] = {}
 
         if constraints is None:
             constraints = []
@@ -137,6 +138,10 @@ class Job:
         from hpc.autoscale.node import bucket
 
         return bucket.bucket_candidates(candidates, self._constraints)
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        return self.__metadata
 
     def __str__(self) -> str:
         if self.executing_hostnames:
