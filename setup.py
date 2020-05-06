@@ -1,6 +1,7 @@
 # test: ignore
 import os
 import re
+import shutil
 import sys
 from subprocess import check_call
 from typing import Any, List
@@ -49,7 +50,7 @@ class PyTest(TestCommand):
                 sys.exit(errno)
 
         check_call(
-            ["black", "--check", "src", "test"],
+            ["black", "--check", "src", "test", "util"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
         )
         check_call(
@@ -59,6 +60,10 @@ class PyTest(TestCommand):
         check_call(
             ["isort", "-c"],
             cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), "test"),
+        )
+        check_call(
+            ["isort", "-c"],
+            cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), "util"),
         )
 
         run_type_checking()
@@ -77,7 +82,8 @@ class Formatter(Command):
 
     def run(self) -> None:
         check_call(
-            ["black", "src", "test"], cwd=os.path.dirname(os.path.abspath(__file__)),
+            ["black", "src", "test", "util"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
         )
         check_call(
             ["isort", "-y"],
@@ -86,6 +92,10 @@ class Formatter(Command):
         check_call(
             ["isort", "-y"],
             cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), "test"),
+        )
+        check_call(
+            ["isort", "-y"],
+            cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), "util"),
         )
         run_type_checking()
 
@@ -125,26 +135,29 @@ class PreCommitHook(PyTest):
         PyTest.skip_hypothesis = True
 
 
+class ResourceFiles(Command):
+    user_options: List[str] = []
+
+    def initialize_options(self) -> None:
+        pass
+
+    def finalize_options(self) -> None:
+        pass
+
+    def run(self) -> None:
+        check_call([sys.executable, "util/create_vm_sizes.py"])
+        shutil.move("new_vm_sizes.json", "src/hpc/autoscale/node/vm_sizes.json")
+
+
 def run_type_checking() -> None:
     check_call(
-        [
-            "mypy",
-            "--ignore-missing-imports",
-            "--follow-imports=silent",
-            "--show-column-numbers",
-            "--disallow-untyped-defs",
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "test"),
-        ]
+        ["mypy", os.path.join(os.path.dirname(os.path.abspath(__file__)), "test")]
     )
     check_call(
-        [
-            "mypy",
-            "--ignore-missing-imports",
-            "--follow-imports=silent",
-            "--show-column-numbers",
-            "--disallow-untyped-defs",
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"),
-        ]
+        ["mypy", os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")]
+    )
+    check_call(
+        ["mypy", os.path.join(os.path.dirname(os.path.abspath(__file__)), "util")]
     )
 
     check_call(["flake8", "--ignore=F405,E501,W503", "src", "test", "setup.py"])
@@ -193,6 +206,7 @@ setup(
         "types": TypeChecking,
         "commithook": PreCommitHook,
         "initcommithook": InitCommitHook,
+        "resourcefiles": ResourceFiles,
     },
     url="http://www.microsoft.com",
     maintainer="Azure CycleCloud",
