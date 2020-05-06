@@ -23,6 +23,7 @@ from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
+from frozendict import frozendict
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
@@ -75,6 +76,7 @@ class MockClusterBinding(ClusterBindingInterface):
         max_core_count: int = 1_000_000,
         max_count: int = 100_000,
         spot: bool = False,
+        software_configuration: Dict = {},
     ) -> ClusterNodearrayStatus:
         nodearray_status = ClusterNodearrayStatus()
         nodearray_status.buckets = []
@@ -89,6 +91,9 @@ class MockClusterBinding(ClusterBindingInterface):
             "Configuration": {"autoscale": {"resources": resources}},
             "Interruptible": spot,
         }
+
+        nodearray_status.nodearray["Configuration"].update(software_configuration)
+
         for attr in dir(nodearray_status):
             if attr[0].isalpha() and "count" in attr:
                 assert (
@@ -291,6 +296,9 @@ class MockClusterBinding(ClusterBindingInterface):
             placement_group=placement_group,
             managed=True,
             resources=resources,
+            software_configuration=frozendict(
+                nodearray_record.get("Configuration", {})
+            ),
         )
         op_id = OperationId(str(uuid4()))
         self.operations[op_id] = MockNodeManagementResult(op_id, [self.nodes[name]])

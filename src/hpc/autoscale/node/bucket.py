@@ -2,6 +2,8 @@ import typing
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
+import frozendict
+
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import util
 from hpc.autoscale.codeanalysis import hpcwrapclass
@@ -32,6 +34,7 @@ class NodeDefinition:
         memory: ht.Memory,
         placement_group: Optional[ht.PlacementGroup],
         resources: ht.ResourceDict,
+        software_configuration: frozendict,
     ) -> None:
         assert nodearray is not None
         self.nodearray = nodearray
@@ -55,6 +58,8 @@ class NodeDefinition:
         self.placement_group = placement_group
         assert resources is not None
         self.resources = deepcopy(resources)
+        assert software_configuration is not None
+        self.software_configuration = software_configuration
 
     def __str__(self) -> str:
         attr_exprs: List[str] = []
@@ -113,6 +118,7 @@ class NodeBucket:
             placement_group=definition.placement_group,
             managed=False,
             resources=self.resources,
+            software_configuration=definition.software_configuration,
         )
 
     def decrement(self, count: int = 1) -> None:
@@ -211,6 +217,10 @@ class NodeBucket:
     def example_node(self) -> "Node":
         return self.__example
 
+    @property
+    def software_configuration(self) -> Dict:
+        return self.__definition.software_configuration
+
     def __str__(self) -> str:
         if self.placement_group:
             return "NodeBucket({}, pg={}, size={})".format(
@@ -296,4 +306,5 @@ def node_from_bucket(
         placement_group=placement_group,
         managed=True,
         resources=ht.ResourceDict(bucket.resources),
+        software_configuration=bucket.software_configuration,
     )

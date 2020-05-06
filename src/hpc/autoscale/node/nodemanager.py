@@ -9,6 +9,7 @@ from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
+from frozendict import frozendict
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
@@ -413,6 +414,7 @@ class NodeManager:
                 memory=a_node.memory,
                 placement_group=None,
                 resources=deepcopy(a_node.resources),
+                software_configuration=frozendict(a_node.software_configuration),
             )
 
             limits = null_bucket_limits(len(nodes_list), a_node.vcpu_count)
@@ -759,6 +761,7 @@ class NodeManager:
             placement_group=None,
             managed=False,
             resources=ht.ResourceDict({}),
+            software_configuration=frozendict({}),
         )
         self._apply_defaults(node)
         return node
@@ -990,6 +993,9 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     memory=bucket_memory,
                     placement_group=pg_name,
                     resources=custom_resources,
+                    software_configuration=frozendict(
+                        nodearray.get("Configuration", {})
+                    ),
                 )
 
                 node_bucket = NodeBucket(
@@ -1031,6 +1037,8 @@ def _node_from_cc_node(
         cc_node_rec.get("Configuration", {}).get("autoscale", {}).get("resources", {})
     )
 
+    software_configuration = frozendict(cc_node_rec.get("Configuration", {}))
+
     return Node(
         node_id=DelayedNodeId(node_name, node_id=node_id),
         name=node_name,
@@ -1050,6 +1058,7 @@ def _node_from_cc_node(
         placement_group=placement_group,
         managed=True,
         resources=resources,
+        software_configuration=software_configuration,
     )
 
 

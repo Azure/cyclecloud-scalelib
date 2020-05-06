@@ -45,6 +45,7 @@ class Node(ABC):
         placement_group: Optional[ht.PlacementGroup],
         managed: bool,
         resources: ht.ResourceDict,
+        software_configuration: frozendict,
     ) -> None:
         self.__name = name
         self.__nodearray = nodearray
@@ -84,6 +85,7 @@ class Node(ABC):
         self.__assignments: Set[str] = set()
 
         self.__aux_vm_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
+        self.__software_configuration = software_configuration
 
     @property
     def required(self) -> bool:
@@ -270,6 +272,7 @@ class Node(ABC):
             placement_group=self.placement_group,
             managed=self.managed,
             resources=ht.ResourceDict(deepcopy(self._resources)),
+            software_configuration=self.software_configuration,
         )
         ret.available.update(self.available)
         return ret
@@ -347,6 +350,16 @@ class Node(ABC):
     def assignments(self) -> Set[str]:
         return self.__assignments
 
+    @property
+    def software_configuration(self) -> frozendict:
+        overrides = self.node_attribute_overrides
+        if overrides and overrides.get("Configuration"):
+            ret: Dict = {}
+            ret.update(self.__software_configuration)
+            ret.update(overrides["Configuration"])
+            return frozendict(ret)
+        return self.__software_configuration
+
     def update(self, snode: "Node") -> None:
         for attr, new_value in snode.available.items():
             current_value = self.available.get(attr)
@@ -406,6 +419,7 @@ class UnmanagedNode(Node):
             placement_group=placement_group,
             managed=False,
             resources=ht.ResourceDict(resources),
+            software_configuration=frozendict({}),
         )
         assert self.exists
 
