@@ -559,17 +559,28 @@ class NodeManager:
         if isinstance(default_value, str):
             if default_value.startswith("node."):
                 attr = default_value[len("node.") :]  # noqa: E203
-                acceptable = [x for x in dir(Node) if x[0].isalpha() and x[0].islower()]
-                if attr not in dir(Node):
-                    msg = "Invalid node.attribute '{}'. Expected one of {}".format(
-                        attr, acceptable
-                    )
-                    raise RuntimeError(msg)
 
-                def get_from_base_node(node: Node) -> ht.ResourceTypeAtom:
-                    return getattr(node, attr)
+                if attr.startswith("resources."):
+                    target = attr[len("resources.") :]  # noqa: E203
 
-                default_value = get_from_base_node
+                    def get_from_node_resources(node: Node) -> ht.ResourceTypeAtom:
+                        return node.resources.get(target) or ""
+
+                    default_value = get_from_node_resources
+                else:
+                    acceptable = [
+                        x for x in dir(Node) if x[0].isalpha() and x[0].islower()
+                    ]
+                    if attr not in dir(Node):
+                        msg = "Invalid node.attribute '{}'. Expected one of {}".format(
+                            attr, acceptable
+                        )
+                        raise RuntimeError(msg)
+
+                    def get_from_base_node(node: Node) -> ht.ResourceTypeAtom:
+                        return getattr(node, attr)
+
+                    default_value = get_from_base_node
 
         if not isinstance(selection, list):
             # TODO add runtime type checking

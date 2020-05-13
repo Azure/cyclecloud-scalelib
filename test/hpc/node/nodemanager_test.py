@@ -652,5 +652,11 @@ def test_delete_internally(bindings: MockClusterBinding) -> None:
     assert len(node_mgr.get_nodes()) == 0
 
 
+def test_node_resources_alias(node_mgr: NodeManager) -> None:
+    node_mgr.add_default_resource({}, "memgb_alias", "node.resources.memgb")
+    b = node_mgr.get_buckets()[0]
+    assert b.resources["memgb_alias"] == b.resources["memgb"]
+
+
 if __name__ == "__main__":
     test_slot_count_hypothesis()
