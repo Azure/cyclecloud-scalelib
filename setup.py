@@ -1,6 +1,5 @@
 # test: ignore
 import os
-import re
 import shutil
 import sys
 from subprocess import check_call
@@ -10,11 +9,8 @@ from setuptools import find_packages, setup
 from setuptools.command.test import Command
 from setuptools.command.test import test as TestCommand  # noqa: N812
 
-with open("src/version.py") as f:
-    _version_line = f.readlines()[0]
-    _match = re.match(r'__version__ = "(\d+\.\d+\.\d+)-SNAPSHOT"', _version_line)
-    assert _match is not None
-    __version__ = _match.group(1)
+
+__version__ = "0.1.0"
 
 
 class PyTest(TestCommand):
