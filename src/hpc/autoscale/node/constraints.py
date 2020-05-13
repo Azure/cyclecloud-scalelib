@@ -1,6 +1,6 @@
 import typing
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import hpc  # noqa: F401
 import hpc.autoscale.hpclogging as logging
@@ -436,6 +436,9 @@ def new_job_constraint(
     attr: str, value: Union[ResourceType, Constraint, list], in_alias: bool = False
 ) -> NodeConstraint:
 
+    if attr in _CUSTOM_PARSERS:
+        return _CUSTOM_PARSERS[attr]({attr: value})
+
     if attr == "exclusive":
         if isinstance(value, str):
             if value.lower() not in ["true", "false"]:
@@ -494,12 +497,9 @@ def new_job_constraint(
         raise RuntimeError("None is not an allowed value. For attr {}".format(attr))
 
     else:
-
         raise RuntimeError(
             "Not handled - attr {} of type {} - {}".format(attr, type(value), value)
         )
-
-    assert False
 
 
 @hpcwrap
@@ -525,6 +525,7 @@ def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConst
         if isinstance(constraint_expression, NodeConstraint):
             constraints.append(constraint_expression)
         elif isinstance(constraint_expression, list):
+            # TODO... what?
             pass
         else:
             for attr, value in constraint_expression.items():
@@ -536,4 +537,12 @@ def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConst
     return constraints
 
 
-_COMPLETE = True
+_CUSTOM_PARSERS: Dict[str, Callable[[Dict], NodeConstraint]] = {}
+
+
+def register_parser(
+    custom_attribute: str, parser: Callable[[Dict], NodeConstraint]
+) -> None:
+    assert isinstance(custom_attribute, str)
+    assert hasattr(parser, "__call__")
+    _CUSTOM_PARSERS[custom_attribute] = parser

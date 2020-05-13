@@ -1,5 +1,8 @@
+from typing import Dict
+
 from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.node.constraints import (
+    BaseNodeConstraint,
     ExclusiveNode,
     InAPlacementGroup,
     MinResourcePerNode,
@@ -8,6 +11,7 @@ from hpc.autoscale.node.constraints import (
     Or,
     get_constraint,
     get_constraints,
+    register_parser,
 )
 from hpc.autoscale.node.node import (
     QUERYABLE_PROPERTIES,
@@ -15,6 +19,7 @@ from hpc.autoscale.node.node import (
     UnmanagedNode,
     minimum_space,
 )
+from hpc.autoscale.results import SatisfiedResult
 
 
 def test_minimum_space():
@@ -192,3 +197,32 @@ def test_memory() -> None:
     m = minimum_space(c, node)
     assert isinstance(m, int)
     assert m == 4
+
+
+def test_register_parser() -> None:
+    class SimpleConstraint(BaseNodeConstraint):
+        def __init__(self, name: str = "defaultname") -> None:
+            self.name = name
+
+        def satisfied_by_node(self, node: Node) -> SatisfiedResult:
+            return SatisfiedResult("success")
+
+        def to_dict(self) -> Dict:
+            return {"custom-parser": self.name}
+
+        @staticmethod
+        def from_dict(d: Dict) -> "SimpleConstraint":
+            assert "custom-parser" in d
+            return SimpleConstraint(d["custom-parser"])
+
+        def __str__(self) -> str:
+            return "SimpleConstraint({})".format(self.name)
+
+        def __eq__(self, other: object) -> bool:
+            if not isinstance(other, SimpleConstraint):
+                return False
+            return self.name == other.name
+
+    register_parser("custom-parser", SimpleConstraint.from_dict)
+
+    assert get_constraints([{"custom-parser": "a"}]) == [SimpleConstraint("a")]
