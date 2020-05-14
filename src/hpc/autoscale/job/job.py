@@ -154,12 +154,23 @@ class Job:
     def to_dict(self) -> dict:
         return {
             "name": self.name,
+            "constraints": [jc.to_dict() for jc in self._constraints],
             "iterations": self.iterations,
             "node-count": self.node_count,
             "colocated": self.__colocated,
-            "constraints": [jc.to_dict() for jc in self._constraints],
+            "packing-strategy": self.__packing_strategy,
+            "executing-hostnames": self.__executing_hostnames,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Job":
-        return cls(d["name"], d["task-count"], d["constraints"])
+
+        return Job(
+            name=d["name"],
+            constraints=d["constraints"],
+            iterations=d.get("iterations", 1),
+            node_count=d.get("node-count", 1),
+            colocated=d.get("colocated", False),
+            packing_strategy=d.get("packing-strategy"),
+            executing_hostnames=d.get("executing-hostnames"),
+        )
