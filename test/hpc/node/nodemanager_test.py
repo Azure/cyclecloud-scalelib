@@ -33,7 +33,11 @@ def bindings() -> MockClusterBinding:
 
 def _bindings() -> MockClusterBinding:
     bindings = MockClusterBinding("clusty")
-    bindings.add_nodearray("htc", {"nodetype": "A", "pcpus": 2})
+    bindings.add_nodearray(
+        "htc",
+        {"nodetype": "A", "pcpus": 2},
+        software_configuration={"custom_int": 100, "custom_str": "abc"},
+    )
     bindings.add_bucket(
         "htc",
         "Standard_F4s",
@@ -656,6 +660,14 @@ def test_node_resources_alias(node_mgr: NodeManager) -> None:
     node_mgr.add_default_resource({}, "memgb_alias", "node.resources.memgb")
     b = node_mgr.get_buckets()[0]
     assert b.resources["memgb_alias"] == b.resources["memgb"]
+
+
+def test_node_software_configuration_alias(node_mgr: NodeManager) -> None:
+    node_mgr.add_default_resource(
+        {}, "int_alias", "node.software_configuration.custom_int"
+    )
+    b = node_mgr.get_buckets()[0]
+    assert b.resources["int_alias"] == b.software_configuration["custom_int"]
 
 
 if __name__ == "__main__":

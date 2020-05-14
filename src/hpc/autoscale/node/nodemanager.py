@@ -561,12 +561,44 @@ class NodeManager:
                 attr = default_value[len("node.") :]  # noqa: E203
 
                 if attr.startswith("resources."):
-                    target = attr[len("resources.") :]  # noqa: E203
+                    alias = attr[len("resources.") :]  # noqa: E203
 
                     def get_from_node_resources(node: Node) -> ht.ResourceTypeAtom:
-                        return node.resources.get(target) or ""
+                        value = node.resources.get(alias)
+                        if value is None:
+                            msg: str = (
+                                "Could not define default resource name=%s with alias=%s"
+                                + " for node/bucket %s because the node/bucket did not define %s as a resource"
+                            )
+                            logging.warning(
+                                msg, attr, alias, node, alias,
+                            )
+                            value = ""
+
+                        return value
 
                     default_value = get_from_node_resources
+                elif attr.startswith("software_configuration."):
+                    alias = attr[len("software_configuration.") :]  # noqa: E203
+
+                    def get_from_node_software_configuration(
+                        node: Node,
+                    ) -> ht.ResourceTypeAtom:
+                        value = node.software_configuration.get(alias)
+                        if value is None:
+                            msg: str = (
+                                "Could not define default resource name=%s with alias=%s"
+                                + " for node/bucket %s because the node/bucket did not define %s"
+                                + " in its software_configuration"
+                            )
+                            logging.warning(
+                                msg, attr, alias, node, alias,
+                            )
+                            value = ""
+
+                        return value
+
+                    default_value = get_from_node_software_configuration
                 else:
                     acceptable = [
                         x for x in dir(Node) if x[0].isalpha() and x[0].islower()
@@ -808,6 +840,9 @@ def new_node_manager(
     ret = _new_node_manager_79(new_cluster_bindings(config))
     existing_nodes = existing_nodes or []
 
+    if not disable_default_resources:
+        ret.set_system_default_resources()
+
     for entry in config.get("default_resources", []):
         if set(["select", "name", "value"]) != set(entry.keys()):
             raise RuntimeError(
@@ -828,9 +863,6 @@ def new_node_manager(
             )
 
         ret.add_default_resource(entry["select"], entry["name"], entry["value"])
-
-    if not disable_default_resources:
-        ret.set_system_default_resources()
 
     return ret
 
