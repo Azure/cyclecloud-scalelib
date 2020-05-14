@@ -38,6 +38,7 @@ warn = logging.warn
 error = logging.error
 exception = logging.exception
 critical = logging.critical
+log = logging.log
 
 
 def fine(msg: str, *args: Any) -> None:
@@ -164,7 +165,14 @@ def apitrace(
     return apitrace_wrapper
 
 
+__INITIALIZED = False
+
+
 def initialize_logging(config: Optional[Dict[str, Any]] = None) -> None:
+    global __INITIALIZED
+    if __INITIALIZED:
+        return
+
     if config is None:
         config = {}
 
@@ -198,3 +206,5 @@ def initialize_logging(config: Optional[Dict[str, Any]] = None) -> None:
                 format="%(asctime)s %(levelname)s: %(message)s",
                 level=DEBUG,
             )
+
+    __INITIALIZED = True
