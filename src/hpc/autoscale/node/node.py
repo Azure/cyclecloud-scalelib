@@ -364,11 +364,22 @@ class Node(ABC):
         for attr, new_value in snode.available.items():
             current_value = self.available.get(attr)
             if current_value != new_value:
-                logging.warning(
-                    "Updating %s.%s: %s->%s", self, attr, current_value, new_value,
+                level = (
+                    logging.FINE
+                    if current_value is None or snode.assignments
+                    else logging.WARNING
+                )
+                logging.log(
+                    level,
+                    "Updating %s.%s: %s->%s",
+                    self,
+                    attr,
+                    current_value,
+                    new_value,
                 )
         self.available.update(snode.available)
-        self.required = self.required or snode.required
+        # TODO RDH test coverage
+        self.required = self.required or snode.required or bool(snode.assignments)
         self.__assignments.update(snode.assignments)
 
     def __str__(self) -> str:
