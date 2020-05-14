@@ -88,7 +88,15 @@ class DemandPrinter:
             columns.remove("name")
             columns.insert(0, "name")
 
-        for node in demand_result.matched_nodes + demand_result.unmatched_nodes:
+        # sort by private ip or the node name
+        ordered_nodes = sorted(
+            demand_result.compute_nodes,
+            key=lambda n: tuple(map(int, n.private_ip.split(".")))
+            if n.private_ip
+            else tuple([2 ** 31] + [ord(l) for l in n.name]),
+        )
+
+        for node in ordered_nodes:
             row: List[str] = []
             rows.append(row)
             for column in columns:
@@ -127,6 +135,8 @@ class DemandPrinter:
                     value = ",".join(value)
                 elif value is None:
                     value = ""
+                elif isinstance(value, float):
+                    value = "{:.1f}".format(value)
                 elif not isinstance(value, str):
                     value = str(value)
                 row.append(value)
