@@ -364,7 +364,7 @@ class NodePropertyConstraint(BaseNodeConstraint):
                 )
             else:
                 msg = "Property[name={} value={}] != node[name={} {}={}]".format(
-                    self.attr, target, node.name, self.attr, self.values[0]
+                    self.attr, self.values[0], node.name, self.attr, target
                 )
 
             return SatisfiedResult("InvalidOption", self, node, [msg],)
