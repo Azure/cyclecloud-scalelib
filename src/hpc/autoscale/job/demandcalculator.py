@@ -1,5 +1,5 @@
 import json
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.codeanalysis import hpcwrapclass
@@ -36,9 +36,11 @@ class DemandCalculator:
         assert isinstance(node_mgr, NodeManager)
         self.node_mgr = node_mgr
         self.node_history = node_history
-        self.__scheduler_nodes = dict(
-            [(node.hostname, node) for node in self.node_mgr.get_nodes()]
-        )
+        self.__scheduler_nodes: Dict[str, Node] = {}
+
+        for node in self.node_mgr.get_nodes():
+            assert node.hostname_or_uuid not in self.__scheduler_nodes
+            self.__scheduler_nodes[node.hostname_or_uuid] = node
         self.__set_buffer_delayed_invocations: List[Tuple[Any, ...]] = []
 
     @apitrace
@@ -191,7 +193,7 @@ class DemandCalculator:
 
             job.iterations_remaining -= result.total_slots
             for node in result.nodes:
-                self.__scheduler_nodes[node.hostname] = node
+                self.__scheduler_nodes[node.hostname_or_uuid] = node
             allocated_nodes_out.extend(result.nodes)
 
         return None
@@ -214,9 +216,6 @@ class DemandCalculator:
         required_nodes = [
             snode for snode in self.__scheduler_nodes.values() if snode.required
         ]
-
-        for node in self.node_mgr.get_new_nodes():
-            assert node.required
 
         unrequired_nodes = [
             snode for snode in self.__scheduler_nodes.values() if not snode.required
@@ -268,10 +267,10 @@ class DemandCalculator:
                     "Found new node[hostname=%s] that does not exist in CycleCloud",
                     new_snode.hostname,
                 )
-                self.__scheduler_nodes[new_snode.hostname] = new_snode
+                self.__scheduler_nodes[new_snode.hostname_or_uuid] = new_snode
                 # TODO inform bucket catalog?
             else:
-                old_snode = self.__scheduler_nodes[new_snode.hostname]
+                old_snode = self.__scheduler_nodes[new_snode.hostname_or_uuid]
                 logging.fine(
                     "Found existing CycleCloud node[hostname=%s]", new_snode.hostname,
                 )
