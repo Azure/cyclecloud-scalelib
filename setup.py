@@ -173,7 +173,7 @@ class TypeChecking(Command):
 
 
 setup(
-    name="autoscale",
+    name="cyclecloud-scalelib",
     version=__version__,
     packages=find_packages(where="src"),
     package_dir={"": "src"},

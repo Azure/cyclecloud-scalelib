@@ -145,7 +145,7 @@ class Memory:
             return False
 
         other = Memory.value_of(other)
-        # TODO we are comparing bytes here, so it will likely by tiny
+        # FYI we are comparing bytes here, so it will likely be tiny
         return abs(float(self) - float(other)) < 10 ** -10
 
     def __gt__(self, other: MemoryValue) -> bool:
@@ -158,4 +158,7 @@ class Memory:
         return "{}{}".format(self.value, self.magnitude)
 
     def __repr__(self) -> str:
+        return str(self)
+
+    def to_json(self) -> str:
         return str(self)

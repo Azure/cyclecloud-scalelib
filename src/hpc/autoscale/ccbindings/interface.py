@@ -24,10 +24,6 @@ from hpc.autoscale.node import node
 
 
 class ClusterBindingInterface(ABC):
-    """
-    TODO this should be broken up by v7 v8 apis?
-    """
-
     @abstractproperty
     def cluster_name(self) -> ClusterName:
         ...

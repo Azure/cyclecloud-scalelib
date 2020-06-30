@@ -5,9 +5,10 @@ import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpclogging import apitrace
 from hpc.autoscale.hpctypes import OperationId
-from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demand import DemandResult
 from hpc.autoscale.job.job import Job, PackingStrategy
+from hpc.autoscale.job.nodequeue import NodeQueue
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import (
     NodeHistory,
@@ -16,6 +17,7 @@ from hpc.autoscale.node.nodehistory import (
 )
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
 from hpc.autoscale.results import AllocationResult, BootupResult, DeleteResult, Result
+from hpc.autoscale.util import partition_single
 
 
 @hpcwrapclass
@@ -31,17 +33,24 @@ class DemandCalculator:
     """
 
     def __init__(
-        self, node_mgr: NodeManager, node_history: NodeHistory = NullNodeHistory(),
+        self,
+        node_mgr: NodeManager,
+        node_history: NodeHistory = NullNodeHistory(),
+        node_queue: Optional[NodeQueue] = None,
     ) -> None:
         assert isinstance(node_mgr, NodeManager)
         self.node_mgr = node_mgr
         self.node_history = node_history
-        self.__scheduler_nodes: Dict[str, Node] = {}
 
-        for node in self.node_mgr.get_nodes():
-            assert node.hostname_or_uuid not in self.__scheduler_nodes
-            self.__scheduler_nodes[node.hostname_or_uuid] = node
+        if node_queue is None:
+            node_queue = NodeQueue()
+
+        self.__scheduler_nodes_queue: NodeQueue = node_queue
+        for node in self.node_mgr.get_non_failed_nodes():
+            self.__scheduler_nodes_queue.push(node)
         self.__set_buffer_delayed_invocations: List[Tuple[Any, ...]] = []
+
+        self.node_history.decorate(list(self.__scheduler_nodes_queue))
 
     @apitrace
     def add_jobs(self, jobs: List[Job]) -> None:
@@ -52,6 +61,7 @@ class DemandCalculator:
     def add_job(self, job: Job) -> None:
         assert isinstance(job, Job)
         self._add_job(job)
+        self.__scheduler_nodes_queue.update()
 
     def _add_job(self, job: Job) -> Result:
 
@@ -107,13 +117,18 @@ class DemandCalculator:
         slots_to_allocate = job.iterations_remaining
         assert job.iterations_remaining > 0
 
-        for snode in self.__scheduler_nodes.values():
+        for snode in self.__scheduler_nodes_queue:
             # TODO
             if snode.state == "Failed":
                 continue
 
             if snode.closed:
                 continue
+
+            bailout_result = self.__scheduler_nodes_queue.early_bailout(snode)
+            if not bailout_result:
+                logging.warning("Bailing out early - %s", bailout_result)
+                break
 
             node_added = False
 
@@ -193,20 +208,23 @@ class DemandCalculator:
 
             job.iterations_remaining -= result.total_slots
             for node in result.nodes:
-                self.__scheduler_nodes[node.hostname_or_uuid] = node
+                self.__scheduler_nodes_queue.push(node)
             allocated_nodes_out.extend(result.nodes)
 
         return None
 
     def get_compute_nodes(self) -> List[Node]:
-        return list(self.__scheduler_nodes.values())
+        return list(self.__scheduler_nodes_queue)
 
     @apitrace
     def finish(self) -> DemandResult:
         # for nodearray, vm_size, count, placement_group_id in self.__set_buffer_delayed_invocations:
         #     self.__set_buffer(nodearray, vm_size, count, placement_group_id)
-        self.node_history.update(self.__scheduler_nodes.values())
         return self.get_demand()
+
+    @apitrace
+    def update_history(self) -> None:
+        self.node_history.update(list(self.__scheduler_nodes_queue))
 
     @apitrace
     def get_demand(self) -> DemandResult:
@@ -214,15 +232,18 @@ class DemandCalculator:
 
     def _get_demand(self) -> DemandResult:
         required_nodes = [
-            snode for snode in self.__scheduler_nodes.values() if snode.required
+            snode for snode in self.__scheduler_nodes_queue if snode.required
         ]
 
         unrequired_nodes = [
-            snode for snode in self.__scheduler_nodes.values() if not snode.required
+            snode for snode in self.__scheduler_nodes_queue if not snode.required
         ]
 
         return DemandResult(
-            list(self.node_mgr.get_new_nodes()), required_nodes, unrequired_nodes,
+            list(self.node_mgr.get_new_nodes()),
+            required_nodes,
+            unrequired_nodes,
+            self.node_mgr.get_failed_nodes(),
         )
 
     @apitrace
@@ -232,11 +253,36 @@ class DemandCalculator:
         unmatched_nodes = unmatched_nodes or self.get_demand().unmatched_nodes
         by_hostname = dict([(n.hostname, n) for n in unmatched_nodes])
         ret = []
-        for hostname, idle_time in self.node_history.find_unmatched(
+        for node_id, hostname, idle_time in self.node_history.find_unmatched(
             for_at_least=at_least
         ):
             if hostname in by_hostname and idle_time > at_least:
                 ret.append(by_hostname[hostname])
+        return ret
+
+    @apitrace
+    def find_booting(
+        self, at_least: float = 1800, booting_nodes: Optional[List[Node]] = None,
+    ) -> List[Node]:
+        if not booting_nodes:
+            booting_nodes = [
+                n for n in self.node_mgr.get_nodes() if n.state != "Started"
+            ]
+
+        booting_nodes = [n for n in booting_nodes if n.exists]
+
+        by_id = partition_single(booting_nodes, lambda n: n.delayed_node_id.node_id)
+
+        ret = []
+        for node_id, hostname, create_time in self.node_history.find_booting(
+            for_at_least=at_least
+        ):
+            if not node_id:
+                continue
+
+            if node_id in by_id:
+                ret.append(by_id[node_id])
+
         return ret
 
     @apitrace
@@ -261,16 +307,21 @@ class DemandCalculator:
 
     @apitrace
     def update_scheduler_nodes(self, scheduler_nodes: List[SchedulerNode]) -> None:
+
+        by_hostname: Dict[str, Node] = partition_single(
+            self.__scheduler_nodes_queue, lambda n: n.hostname_or_uuid  # type: ignore
+        )
         for new_snode in scheduler_nodes:
-            if new_snode.hostname not in self.__scheduler_nodes:
+            if new_snode.hostname not in by_hostname:
                 logging.debug(
                     "Found new node[hostname=%s] that does not exist in CycleCloud",
                     new_snode.hostname,
                 )
-                self.__scheduler_nodes[new_snode.hostname_or_uuid] = new_snode
+                by_hostname[new_snode.hostname] = new_snode
+                self.__scheduler_nodes_queue.push(new_snode)
                 # TODO inform bucket catalog?
             else:
-                old_snode = self.__scheduler_nodes[new_snode.hostname_or_uuid]
+                old_snode = by_hostname[new_snode.hostname_or_uuid]
                 logging.fine(
                     "Found existing CycleCloud node[hostname=%s]", new_snode.hostname,
                 )
@@ -293,6 +344,26 @@ class DemandCalculator:
     def __repr__(self) -> str:
         return str(self)
 
+    def to_dict(self) -> Dict:
+        ret = {}
+        for attr_name in dir(self):
+            if not (
+                attr_name[0].isalpha() or attr_name.startswith("_DemandCalculator")
+            ):
+                continue
+
+            attr = getattr(self, attr_name)
+            if "__call__" not in dir(attr):
+                attr_expr = attr_name.replace("_DemandCalculator", "")
+
+                if hasattr(attr, "to_dict"):
+                    attr_value = attr.to_dict()
+                else:
+                    attr_value = str(attr)
+
+                ret[attr_expr] = attr_value
+        return ret
+
 
 @apitrace
 def new_demand_calculator(
@@ -301,6 +372,7 @@ def new_demand_calculator(
     node_mgr: Optional[NodeManager] = None,
     node_history: Optional[NodeHistory] = None,
     disable_default_resources: bool = False,
+    node_queue: Optional[NodeQueue] = None,
 ) -> DemandCalculator:
 
     if isinstance(config, str):
@@ -326,6 +398,6 @@ def new_demand_calculator(
 
     node_history = node_history or SQLiteNodeHistory()
 
-    dc = DemandCalculator(node_mgr, node_history)
+    dc = DemandCalculator(node_mgr, node_history, node_queue)
     dc.update_scheduler_nodes(existing_nodes)
     return dc

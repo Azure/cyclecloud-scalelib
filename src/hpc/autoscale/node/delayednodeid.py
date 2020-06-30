@@ -57,3 +57,6 @@ class DelayedNodeId:
         return DelayedNodeId(
             self.name, self.node_id, self.operation_id, self.operation_offset
         )
+
+    def to_json(self) -> str:
+        return self.node_id or ""

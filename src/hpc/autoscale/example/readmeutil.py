@@ -1,8 +1,8 @@
 import inspect
 from typing import Any, Callable
 
-from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demandcalculator import DemandCalculator, new_demand_calculator
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.results import (
     DefaultContextHandler,
     register_result_handler,

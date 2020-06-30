@@ -47,6 +47,12 @@ class NodeConstraint(ABC):
     def __repr__(self) -> str:
         return str(self)
 
+    def __eq__(self, other: object) -> bool:
+        if not hasattr(other, "to_dict"):
+            return False
+
+        return self.to_dict() == getattr(other, "to_dict")()
+
 
 class BaseNodeConstraint(NodeConstraint):
     def satisfied_by_bucket(self, bucket: "NodeBucket") -> SatisfiedResult:

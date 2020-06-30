@@ -256,6 +256,24 @@ class TerminateResult(NodeOperationResult):
     ...
 
 
+@hpcwrapclass
+class EarlyBailoutResult(Result):
+    def __init__(
+        self, status: str, node: Optional["Node"] = None, reasons: Reasons = None,
+    ) -> None:
+        Result.__init__(self, status, reasons)
+        self.node = node
+        fire_result_handlers(self)
+
+    def __str__(self) -> str:
+        if self:
+            return "EarlyBailoutResult(status={})".format(self.status)
+        else:
+            return "EarlyBailoutResult(status={}, reason={})".format(
+                self.status, self.reasons
+            )
+
+
 class ResultsHandler(ABC):
     @abstractmethod
     def __call__(self, result: Result) -> None:

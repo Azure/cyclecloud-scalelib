@@ -5,14 +5,15 @@ import typing
 from abc import ABC, abstractmethod
 
 import hpc.autoscale.hpclogging as logging
-from hpc.autoscale.hpctypes import Hostname
+from hpc.autoscale.hpctypes import Hostname, NodeId
 from hpc.autoscale.node.node import Node
+from hpc.autoscale.util import partition_single
 
 # TODO RDH reset
-SQLITE_VERSION = "0.0.2"
+SQLITE_VERSION = "0.0.4"
 
 
-NodeHistoryResult = typing.List[typing.Tuple[Hostname, float]]
+NodeHistoryResult = typing.List[typing.Tuple[NodeId, Hostname, float]]
 
 
 class NodeHistory(ABC):
@@ -24,6 +25,13 @@ class NodeHistory(ABC):
     def find_unmatched(self, for_at_least: float = 300) -> NodeHistoryResult:
         pass
 
+    @abstractmethod
+    def find_booting(self, for_at_least: float = 1800) -> NodeHistoryResult:
+        pass
+
+    def decorate(self, nodes: typing.List[Node]) -> None:
+        pass
+
 
 class NullNodeHistory(NodeHistory):
     def __init__(self) -> None:
@@ -33,7 +41,18 @@ class NullNodeHistory(NodeHistory):
         self.nodes = list(nodes)
 
     def find_unmatched(self, for_at_least: float = 300) -> NodeHistoryResult:
-        return [(n.hostname_required, 0) for n in self.nodes]
+        return [
+            (n.delayed_node_id.node_id, n.hostname_required, 0)
+            for n in self.nodes
+            if n.delayed_node_id.node_id
+        ]
+
+    def find_booting(self, for_at_least: float = 1800) -> NodeHistoryResult:
+        return [
+            (n.delayed_node_id.node_id, n.hostname_required, 0)
+            for n in self.nodes
+            if n.delayed_node_id.node_id
+        ]
 
 
 def initialize_db(path: str) -> sqlite3.Connection:
@@ -63,7 +82,9 @@ def initialize_db(path: str) -> sqlite3.Connection:
 
     try:
         conn.execute(
-            "CREATE TABLE nodes (hostname TEXT PRIMARY KEY, last_match_time REAL)"
+            """CREATE TABLE nodes (node_id TEXT PRIMARY KEY, hostname TEXT,
+                                   last_match_time REAL, create_time REAL,
+                                   delete_time REAL)"""
         )
     except sqlite3.OperationalError as e:
         if "table nodes already exists" not in e.args:
@@ -74,52 +95,147 @@ def initialize_db(path: str) -> sqlite3.Connection:
 
 class SQLiteNodeHistory(NodeHistory):
     def __init__(self, path: str = "nodehistory.db") -> None:
+        self.path = path
         self.conn = initialize_db(path)
 
+    def now(self) -> float:
+        return datetime.datetime.utcnow().timestamp()
+
     def update(self, nodes: typing.Iterable[Node]) -> None:
-        now = datetime.datetime.utcnow().timestamp()
-        node_match_times = dict(
-            list(self.conn.execute("SELECT hostname, last_match_time from nodes"))
+        now = self.now()
+
+        rows = list(
+            self._execute(
+                """SELECT node_id, hostname, last_match_time,
+                          create_time from nodes where delete_time IS NULL"""
+            )
         )
-        to_delete = set(node_match_times.keys()) - set([h.hostname for h in nodes])
+
+        rows_by_id = partition_single(rows, lambda r: r[0])
+
+        nodes_by_id: typing.Dict[typing.Optional[NodeId], Node] = partition_single(
+            list(nodes), lambda n: n.delayed_node_id.node_id,
+        )
+
+        to_delete = set(rows_by_id.keys()) - set(nodes_by_id.keys())
 
         for node in nodes:
-            if node.hostname not in node_match_times:
-                # first time we see it, just put an entry
-                node_match_times[node.hostname] = now
-            if node.required:
-                node_match_times[node.hostname] = now
+            node_id = node.delayed_node_id.node_id
 
-        if node_match_times:
-            values_expr = ",".join(
-                [
-                    "('{}', {})".format(hostname, match_time)
-                    for hostname, match_time in node_match_times.items()
-                ]
-            )
-            stmt = "INSERT OR REPLACE INTO nodes (hostname, last_match_time) VALUES {}".format(
+            if node_id not in rows_by_id:
+                print("{} not in {}".format(node_id, rows_by_id.keys()))
+                # first time we see it, just put an entry
+                rows_by_id[node_id] = tuple([node_id, node.hostname, now, now])
+
+            if node.required:
+                rec = list(rows_by_id[node_id])
+                rec[-2] = now
+                rows_by_id[node_id] = tuple(rec)
+
+        if rows_by_id:
+            exprs = []
+            for row in rows_by_id.values():
+                node_id, hostname, match_time, create_time = row
+                expr = "('{}', '{}', {}, {}, NULL)".format(
+                    node_id, hostname, match_time, create_time
+                )
+                exprs.append(expr)
+
+            values_expr = ",".join(exprs)
+
+            stmt = "INSERT OR REPLACE INTO nodes (node_id, hostname, last_match_time, create_time, delete_time) VALUES {}".format(
                 values_expr
             )
-            logging.fine(stmt)
-            self.conn.execute(stmt)
+            self._execute(stmt)
 
         if to_delete:
             to_delete_expr = " OR ".join(
-                ['hostname="{}"'.format(hostname) for hostname in to_delete]
+                ['node_id="{}"'.format(node_id) for node_id in to_delete]
             )
-            stmt = "DELETE FROM nodes where {}".format(to_delete_expr)
+            now = datetime.datetime.utcnow().timestamp()
+            self._execute(
+                "UPDATE nodes set delete_time={} where {}".format(now, to_delete_expr)
+            )
 
-            self.conn.execute(stmt)
+        self.retire_records(commit=True)
 
-        self.conn.commit()
+    def retire_records(
+        self, timeout: int = (7 * 24 * 60 * 60), commit: bool = True
+    ) -> None:
+        retire_omega = self.now() - timeout
+        cursor = self._execute(
+            """DELETE from nodes where delete_time is not null AND delete_time < {} AND delete_time > 0""".format(
+                retire_omega
+            )
+        )
+        deleted = list(cursor)
+        logging.info(
+            "Deleted %s nodes - %s", len(deleted), [(d[0], d[1]) for d in deleted]
+        )
+        if commit:
+            self.conn.commit()
 
     def find_unmatched(self, for_at_least: float = 300) -> NodeHistoryResult:
         now = datetime.datetime.utcnow().timestamp()
         omega = now - for_at_least
         return list(
-            self.conn.execute(
-                "SELECT hostname, last_match_time from nodes where last_match_time < {}".format(
+            self._execute(
+                "SELECT node_id, hostname, last_match_time from nodes where last_match_time < {}".format(
                     omega
                 )
             )
         )
+
+    def find_booting(self, for_at_least: float = 1800) -> NodeHistoryResult:
+        now = datetime.datetime.utcnow().timestamp()
+        omega = now - for_at_least
+        return list(
+            self._execute(
+                "SELECT node_id, hostname, create_time from nodes where create_time < {}".format(
+                    omega
+                )
+            )
+        )
+
+    def decorate(self, nodes: typing.List[Node]) -> None:
+        if not nodes:
+            nodes = []
+
+        nodes = [n for n in nodes if n.exists]
+        equalities = [
+            " (node_id == '{}') ".format(n.delayed_node_id.node_id) for n in nodes
+        ]
+
+        if not equalities:
+            return
+
+        stmt = "select node_id, last_match_time, create_time, delete_time from nodes where {}".format(
+            "{}".format(" OR ".join(equalities))
+        )
+
+        rows = self._execute(stmt)
+        rows_by_id = partition_single(list(rows), lambda r: r[0])
+
+        for node in nodes:
+            node_id = node.delayed_node_id.node_id
+
+            # should be impossible because we already filtered by exists
+            if not node_id:
+                logging.warning(
+                    "Null node_id for node %s. Leaving create/last_match/delete times as null.",
+                    node,
+                )
+                continue
+
+            if node_id in rows_by_id:
+                node_id, last_match_time, create_time, delete_time = rows_by_id[node_id]
+                node.create_time = create_time
+                node.last_match_time = last_match_time
+                node.delete_time = delete_time
+
+    def _execute(self, stmt: str) -> sqlite3.Cursor:
+        logging.debug(stmt)
+        return self.conn.execute(stmt)
+
+    def __repr__(self) -> str:
+        return "SQLiteNodeHistory({})".format(self.path)

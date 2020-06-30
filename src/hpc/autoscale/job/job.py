@@ -139,6 +139,12 @@ class Job:
 
         return bucket.bucket_candidates(candidates, self._constraints)
 
+    def add_constraint(self, constraint: typing.Any) -> None:
+        if not isinstance(constraint, list):
+            constraint = [constraint]
+        parsed_cons = get_constraints(constraint)
+        self._constraints.extend(parsed_cons)
+
     @property
     def metadata(self) -> Dict[str, Any]:
         return self.__metadata
@@ -156,16 +162,18 @@ class Job:
             "name": self.name,
             "constraints": [jc.to_dict() for jc in self._constraints],
             "iterations": self.iterations,
+            "iterations-remaining": self.iterations_remaining,
             "node-count": self.node_count,
             "colocated": self.__colocated,
             "packing-strategy": self.__packing_strategy,
             "executing-hostnames": self.__executing_hostnames,
+            "metadata": self.metadata,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Job":
 
-        return Job(
+        job = Job(
             name=d["name"],
             constraints=d["constraints"],
             iterations=d.get("iterations", 1),
@@ -174,3 +182,9 @@ class Job:
             packing_strategy=d.get("packing-strategy"),
             executing_hostnames=d.get("executing-hostnames"),
         )
+        if "iterations-remaining" in d:
+            job.iterations_remaining = d["iterations-remaining"]
+
+        job.metadata.update(d.get("metadata", {}))
+
+        return job

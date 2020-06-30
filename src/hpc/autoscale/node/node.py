@@ -4,9 +4,8 @@ from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
-from frozendict import frozendict
-
 import hpc.autoscale.hpclogging as logging
+from frozendict import frozendict
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.codeanalysis import hpcwrap
 from hpc.autoscale.node import vm_sizes
@@ -16,7 +15,14 @@ from hpc.autoscale.results import MatchResult
 
 # state is added by default because it also has a setter
 # property and most tools get confused by this
-QUERYABLE_PROPERTIES: List[str] = ["state", "exists", "placement_group"]
+QUERYABLE_PROPERTIES: List[str] = [
+    "state",
+    "exists",
+    "placement_group",
+    "create_time",
+    "last_match_time",
+    "delete_time",
+]
 
 
 def nodeproperty(function: Callable) -> property:
@@ -87,6 +93,8 @@ class Node(ABC):
         self.__aux_vm_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
         self.__software_configuration = software_configuration
 
+        self.__create_time = self.__last_match_time = self.__delete_time = 0.0
+
     @property
     def required(self) -> bool:
         return self._allocated
@@ -95,7 +103,7 @@ class Node(ABC):
     def required(self, value: bool) -> None:
         self._allocated = value
 
-    @property
+    @nodeproperty
     def name(self) -> ht.NodeName:
         return self.__name
 
@@ -256,6 +264,30 @@ class Node(ABC):
             return frozendict(self.__node_attribute_overrides)
         return self.__node_attribute_overrides
 
+    @property
+    def create_time(self) -> float:
+        return self.__create_time
+
+    @create_time.setter
+    def create_time(self, value: float) -> None:
+        self.__create_time = value
+
+    @property
+    def last_match_time(self) -> float:
+        return self.__last_match_time
+
+    @last_match_time.setter
+    def last_match_time(self, value: float) -> None:
+        self.__last_match_time = value
+
+    @property
+    def delete_time(self) -> float:
+        return self.__delete_time
+
+    @delete_time.setter
+    def delete_time(self, value: float) -> None:
+        self.__delete_time = value
+
     def clone(self) -> "Node":
         ret = Node(
             node_id=self.__node_id.clone(),
@@ -388,11 +420,17 @@ class Node(ABC):
 
     def __str__(self) -> str:
         hostname = self.hostname if self.exists else "..."
+        node_id = self.delayed_node_id.node_id
+        if node_id:
+            return "Node({}, {}, {})".format(self.name, hostname, node_id)
         return "Node({}, {})".format(self.name, hostname)
 
     def __repr__(self) -> str:
         hostname = self.hostname if self.exists else "..."
         return "Node({}, {}, {})".format(self.name, hostname, self.available)
+
+    def __lt__(self, node: Any) -> int:
+        return node.hostname_or_uuid < self.hostname_or_uuid
 
 
 class UnmanagedNode(Node):

@@ -4,10 +4,15 @@ import json
 import sys
 from typing import Any, List, Optional, Set, TextIO, Tuple
 
+from typing_extensions import Literal
+
+import frozendict
 from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpctypes import Hostname
 from hpc.autoscale.job.demand import DemandResult
 from hpc.autoscale.node.node import Node
+
+OutputFormat = Literal["json", "table", "table_headerless"]
 
 
 @hpcwrapclass
@@ -16,7 +21,7 @@ class DemandPrinter:
         self,
         column_names: Optional[List[str]] = None,
         stream: Optional[TextIO] = None,
-        json: bool = False,
+        output_format: OutputFormat = "table",
     ) -> None:
         column_names_list: List[str] = []
         if column_names:
@@ -34,7 +39,7 @@ class DemandPrinter:
         self.column_names = [x.lower() for x in column_names_list]
 
         self.stream = stream or sys.stdout
-        self.json = json
+        self.output_format = output_format
 
     def _calc_width(self, columns: List[str], rows: List[List[str]]) -> Tuple[int, ...]:
         maxes = [len(c) for c in columns]
@@ -71,6 +76,8 @@ class DemandPrinter:
                 demand_result.compute_nodes if demand_result else []
             )
 
+        columns = [c for c in columns if c != "hostname_required"]
+
         widths = self._calc_width(columns, [])
         formats = " ".join(["{:%d}" % x for x in widths])
         assert len(widths) == len(columns), "{} != {}".format(len(widths), len(columns))
@@ -79,10 +86,18 @@ class DemandPrinter:
     def print_demand(self, demand_result: DemandResult) -> None:
         rows = []
         columns = self.column_names
-        if columns == "all":
+        if not columns:
             columns = self._get_all_columns(demand_result.compute_nodes)
 
-        columns = [c for c in columns if c not in ["available", "node"]]
+        if self.output_format == "json":
+            columns = [c for c in columns if c not in ["hostname_required"]]
+        else:
+            columns = [
+                c
+                for c in columns
+                if c not in ["available", "node", "hostname_required"]
+            ]
+
         columns = ["job_ids" if c == "assigned_job_ids" else c for c in columns]
         if "name" in columns:
             columns.remove("name")
@@ -116,6 +131,8 @@ class DemandPrinter:
                         else:
                             hostname = Hostname("tbd")
                     value = hostname
+                elif column == "hostname_required":
+                    continue
                 elif column == "job_ids":
                     value = node.assignments
                 elif hasattr(node, column):
@@ -129,32 +146,48 @@ class DemandPrinter:
                 if value is None:
                     value = self.__defaults.get(column)
 
-                if isinstance(value, list):
-                    value = ",".join(value)
-                elif isinstance(value, set):
-                    value = ",".join(value)
-                elif value is None:
-                    value = ""
-                elif isinstance(value, float):
-                    value = "{:.1f}".format(value)
-                elif not isinstance(value, str):
-                    value = str(value)
+                # convert sets to lists, as sets are not json serializable
+                if isinstance(value, set):
+                    value = list(value)
+
+                # for json, we support lists, null, numbers etc.
+                # for table* we will output a string for every value.
+                if self.output_format != "json":
+                    if isinstance(value, list):
+                        value = ",".join(value)
+                    elif isinstance(value, set):
+                        value = ",".join(value)
+                    elif value is None:
+                        value = ""
+                    elif isinstance(value, float):
+                        value = "{:.1f}".format(value)
+                    elif not isinstance(value, str):
+                        value = str(value)
+
+                else:
+                    if hasattr(value, "to_json"):
+                        value = value.to_json()
+                    elif isinstance(value, frozendict.frozendict):
+                        value = dict(value)
+
                 row.append(value)
 
-        widths = self._calc_width(columns, rows)
-        formats = " ".join(["{:%d}" % x for x in widths])
-        if self.json:
+        if self.output_format == "json":
             json.dump(
                 [dict(zip(columns, row)) for row in rows], self.stream, indent=2,
             )
         else:
-            print(formats.format(*[c.upper() for c in columns]), file=self.stream)
+            widths = self._calc_width(columns, rows)
+            formats = " ".join(["{:%d}" % x for x in widths])
+            if self.output_format == "table":
+                print(formats.format(*[c.upper() for c in columns]), file=self.stream)
+
             for row in rows:
                 print(formats.format(*[str(r) for r in row]), file=self.stream)
 
     def __str__(self) -> str:
-        return "DemandPrinter(columns={}, json={}, stream={})".format(
-            str(self.column_names), self.json, self.stream
+        return "DemandPrinter(columns={}, output_format={}, stream={})".format(
+            str(self.column_names), self.output_format, self.stream
         )
 
     def __repr__(self) -> str:
@@ -162,15 +195,19 @@ class DemandPrinter:
 
 
 def print_columns(
-    demand_result: DemandResult, stream: Optional[TextIO] = None, json: bool = False,
+    demand_result: DemandResult,
+    stream: Optional[TextIO] = None,
+    output_format: OutputFormat = "table",
 ) -> None:
-    DemandPrinter(None, stream=stream, json=json).print_columns(demand_result)
+    printer = DemandPrinter(None, stream=stream, output_format=output_format)
+    printer.print_columns(demand_result)
 
 
 def print_demand(
     columns: List[str],
     demand_result: DemandResult,
     stream: Optional[TextIO] = None,
-    json: bool = False,
+    output_format: OutputFormat = "table",
 ) -> None:
-    DemandPrinter(columns, stream=stream, json=json).print_demand(demand_result)
+    printer = DemandPrinter(columns, stream=stream, output_format=output_format)
+    printer.print_demand(demand_result)

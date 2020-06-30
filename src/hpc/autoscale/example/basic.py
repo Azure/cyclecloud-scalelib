@@ -5,10 +5,10 @@ from typing import List
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.job import demandprinter
-from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demand import DemandResult
 from hpc.autoscale.job.demandcalculator import new_demand_calculator
 from hpc.autoscale.job.job import Job
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node.node import Node
 
 _exit_code = 0

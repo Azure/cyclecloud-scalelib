@@ -9,9 +9,9 @@ from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
-from frozendict import frozendict
 
 import hpc.autoscale.hpclogging as logging
+from frozendict import frozendict
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings import new_cluster_bindings
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
@@ -429,6 +429,18 @@ class NodeManager:
             ret.extend(node_bucket.nodes)
         return ret
 
+    def get_non_failed_nodes(self) -> List[Node]:
+        ret: List[Node] = []
+        for node_bucket in self.__node_buckets:
+            ret.extend([n for n in node_bucket.nodes if n.state != "Failed"])
+        return ret
+
+    def get_failed_nodes(self) -> List[Node]:
+        ret: List[Node] = []
+        for node_bucket in self.__node_buckets:
+            ret.extend([n for n in node_bucket.nodes if n.state == "Failed"])
+        return ret
+
     def get_new_nodes(self) -> List[Node]:
         return self.new_nodes
 
@@ -609,10 +621,7 @@ class NodeManager:
                         )
                         raise RuntimeError(msg)
 
-                    def get_from_base_node(node: Node) -> ht.ResourceTypeAtom:
-                        return getattr(node, attr)
-
-                    default_value = get_from_base_node
+                    default_value = GetFromBaseNode(attr)
 
         if not isinstance(selection, list):
             # TODO add runtime type checking
@@ -772,15 +781,9 @@ class NodeManager:
         self.add_default_resource({}, "ncpus", "node.vcpu_count")
         self.add_default_resource({}, "pcpus", "node.pcpu_count")
         self.add_default_resource({}, "ngpus", "node.gpu_count")
-        self.add_default_resource(
-            {}, "memmb", lambda node: node.memory.convert_to("m").value
-        )
-        self.add_default_resource(
-            {}, "memgb", lambda node: node.memory.convert_to("g").value
-        )
-        self.add_default_resource(
-            {}, "memtb", lambda node: node.memory.convert_to("t").value
-        )
+        self.add_default_resource({}, "memmb", MemoryDefault("m"))
+        self.add_default_resource({}, "memgb", MemoryDefault("g"))
+        self.add_default_resource({}, "memtb", MemoryDefault("t"))
 
     def example_node(self, location: str, vm_size: str) -> Node:
         aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
@@ -826,6 +829,46 @@ class NodeManager:
 
     def __repr__(self) -> str:
         return str(self)
+
+    def to_dict(self) -> Dict:
+        ret = {}
+        for attr_name in dir(self):
+            if not (attr_name[0].isalpha() or attr_name.startswith("_NodeManager")):
+                continue
+
+            attr = getattr(self, attr_name)
+            if "__call__" not in dir(attr):
+                attr_expr = attr_name.replace("_NodeManager", "")
+
+                if hasattr(attr, "to_dict"):
+                    attr_value = attr.to_dict()
+                else:
+                    attr_value = str(attr)
+
+                ret[attr_expr] = attr_value
+        return ret
+
+
+class GetFromBaseNode:
+    def __init__(self, attr: str) -> None:
+        self.attr = attr
+
+    def __call__(self, node: Node) -> ht.ResourceTypeAtom:
+        return getattr(node, self.attr)
+
+    def __repr__(self) -> str:
+        return "node.{}".format(self.attr)
+
+
+class MemoryDefault:
+    def __init__(self, mag: ht.MemoryMagnitude):
+        self.mag = mag
+
+    def __call__(self, node: Node) -> ht.ResourceTypeAtom:
+        return node.memory.convert_to(self.mag).value
+
+    def __repr__(self) -> str:
+        return "node.memory[{}]".format(self.mag)
 
 
 @apitrace

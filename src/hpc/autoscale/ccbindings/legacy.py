@@ -330,5 +330,7 @@ def _get_session(config: Dict) -> requests.sessions.Session:
                     raise
     except ImportError:
         raise
-    # TODO
-    raise AssertionError("Please contact support.")
+
+    raise AssertionError(
+        "Could not connect to CycleCloud. Please see the log for more details."
+    )

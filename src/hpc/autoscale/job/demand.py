@@ -15,15 +15,17 @@ class DemandResult:
         new_nodes: List[Node],
         matched_nodes: List[Node],
         unmatched_nodes: List[Node],
+        failed_nodes: List[Node],
     ) -> None:
         self.new_nodes = new_nodes
         self.matched_nodes = matched_nodes
         self.unmatched_nodes = unmatched_nodes
-        self.compute_nodes = matched_nodes + unmatched_nodes
+        self.failed_nodes = failed_nodes
+        self.compute_nodes = matched_nodes + unmatched_nodes + failed_nodes
 
     def __str__(self) -> str:
-        return "DemandResult(new_nodes={}, matched={}, unmatched={})".format(
-            self.new_nodes, self.matched_nodes, self.unmatched_nodes
+        return "DemandResult(new_nodes={}, matched={}, unmatched={}, failed={})".format(
+            self.new_nodes, self.matched_nodes, self.unmatched_nodes, self.failed_nodes
         )
 
     def __repr__(self) -> str:

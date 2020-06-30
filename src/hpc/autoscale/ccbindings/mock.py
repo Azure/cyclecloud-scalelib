@@ -23,9 +23,9 @@ from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
-from frozendict import frozendict
 
 import hpc.autoscale.hpclogging as logging
+from frozendict import frozendict
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
 from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpctypes import (
