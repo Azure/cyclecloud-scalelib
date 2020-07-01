@@ -14,7 +14,7 @@ The instructions below assume that:
 * you have python 3 available on your system
 * you have access to an Azure CycleCloud installation
 
-Before attempting to build the project, obtain a copy of the Azure CycleCloud Python Client library.   You can get the distribution from the `/opt/cycle_server/tools/cyclecloud-api.tar.gz` in your Azure CycleCloud installation or you can download the tarball from the CycleCloud UI following the instructions [here](https://docs.microsoft.com/en-us/azure/cyclecloud/python-api?view=cyclecloud-8).  
+Before attempting to build the project, obtain a copy of the Azure CycleCloud Python Client library.   You can get the wheel distribution from the `/opt/cycle_server/tools/` directory in your Azure CycleCloud installation or you can download the wheel from the CycleCloud UI following the instructions [here](https://docs.microsoft.com/en-us/azure/cyclecloud/python-api?view=cyclecloud-8).  
 
 The instructions below assume that you have copied the cyclecloud-api.tar.gz to your working directory.
 
@@ -22,16 +22,23 @@ The instructions below assume that you have copied the cyclecloud-api.tar.gz to 
 
 ```bash
     # If Cyclecloud is installed on the current machine:
-    # cp /opt/cycle_server/tools/cyclecloud-api.tar.gz .
+    # cp /opt/cycle_server/tools/cyclecloud_api*.whl .
 
-    virtualenv ~/.virtualenvs/autoscale
-    source ~/.virtualenvs/autoscale/bin/activate
-    pip install ./dev-requirements.txt
-    pip install ./cyclecloud-api.tar.gz
+    python3 -m venv ~/.virtualenvs/autoscale/
+    . ~/.virtualenvs/autoscale/bin/activate
+    pip install -r ./dev-requirements.txt
+    pip install ./cyclecloud_api*.whl
     python setup.py build
+```
 
-    # use the following to type check / reformat code
-    python setup.py types / python setup.py format
+## Testing the project:
+
+The project includes several helpers for contributors to validate, test and format changes to the code.
+
+```bash
+    # OPTIONAL: use the following to type check / reformat code
+    python setup.py types
+    python setup.py format
     python setup.py test
 ```
 
