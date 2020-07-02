@@ -3,7 +3,7 @@
 #
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import cyclecloud.api.clusters
 import requests
@@ -31,6 +31,21 @@ from hpc.autoscale.util import partition
 logger = logging.getLogger("cyclecloud.clustersapi")
 
 
+class ReadOnlyModeException(RuntimeError):
+    pass
+
+
+def notreadonly(method: Callable) -> Callable:
+    def readonlywrapper(*args: Any) -> Optional[Any]:
+        if args[0].read_only:
+            raise ReadOnlyModeException(
+                "Can not call {} in read only mode.".format(method.__name__)
+            )
+        return method(*args)
+
+    return readonlywrapper
+
+
 @hpcwrapclass
 class ClusterBinding(ClusterBindingInterface):
     def __init__(
@@ -39,6 +54,7 @@ class ClusterBinding(ClusterBindingInterface):
         session: Any,
         client: Any,
         clusters_module: Any = None,
+        read_only: bool = False,
     ) -> None:
         self.__cluster_name = cluster_name
         self.session = session
@@ -46,12 +62,14 @@ class ClusterBinding(ClusterBindingInterface):
         self.clusters_module: cyclecloud.api.clusters = cyclecloud.api.clusters
         if clusters_module:
             self.clusters_module = clusters_module  # type: ignore
+        self.read_only = read_only
 
     @property
     def cluster_name(self) -> ht.ClusterName:
         return self.__cluster_name
 
     @hpcwrap
+    @notreadonly
     def create_nodes(self, nodes: List[Node]) -> NodeCreationResult:
         creation_request = NodeCreationRequest()
         creation_request.sets = []
@@ -91,6 +109,7 @@ class ClusterBinding(ClusterBindingInterface):
 
         return result
 
+    @notreadonly
     def deallocate_nodes(
         self,
         nodes: Optional[List[Node]] = None,
@@ -129,6 +148,7 @@ class ClusterBinding(ClusterBindingInterface):
         self._log_response(http_response, result)
         return result
 
+    @notreadonly
     def remove_nodes(
         self,
         nodes: Optional[List[Node]] = None,
@@ -148,6 +168,7 @@ class ClusterBinding(ClusterBindingInterface):
         self._log_response(http_response, result)
         return result
 
+    @notreadonly
     def scale(
         self,
         nodearray: ht.NodeArrayName,
@@ -165,6 +186,7 @@ class ClusterBinding(ClusterBindingInterface):
         self._log_response(http_response, result)
         return result
 
+    @notreadonly
     def shutdown_nodes(
         self,
         nodes: Optional[List[Node]] = None,
@@ -185,6 +207,7 @@ class ClusterBinding(ClusterBindingInterface):
         self._log_response(http_response, result)
         return result
 
+    @notreadonly
     def start_nodes(
         self,
         nodes: Optional[List[Node]] = None,
@@ -204,6 +227,7 @@ class ClusterBinding(ClusterBindingInterface):
         self._log_response(http_response, result)
         return result
 
+    @notreadonly
     def terminate_nodes(
         self,
         nodes: Optional[List[Node]] = None,
@@ -223,6 +247,7 @@ class ClusterBinding(ClusterBindingInterface):
         self._log_response(http_response, result)
         return result
 
+    @notreadonly
     def delete_nodes(self, nodes: List[Node]) -> NodeManagementResult:
         return self.shutdown_nodes(nodes)
 
@@ -249,6 +274,7 @@ class ClusterBinding(ClusterBindingInterface):
             "[%s] Full response: Status=%s -> %s", caller, s.status_code, as_json,
         )
 
+    @notreadonly
     def _node_management_request(
         self,
         nodes: Optional[List[Node]] = None,

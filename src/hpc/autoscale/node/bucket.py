@@ -3,6 +3,7 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 import frozendict
+
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import util
 from hpc.autoscale.codeanalysis import hpcwrapclass

@@ -445,6 +445,9 @@ def new_job_constraint(
     if attr in _CUSTOM_PARSERS:
         return _CUSTOM_PARSERS[attr]({attr: value})
 
+    if isinstance(value, NodeConstraint):
+        return value
+
     if attr == "exclusive":
         if isinstance(value, str):
             if value.lower() not in ["true", "false"]:
@@ -511,7 +514,10 @@ def new_job_constraint(
 @hpcwrap
 def get_constraint(constraint_expression: Constraint) -> NodeConstraint:
     ret = get_constraints([constraint_expression])
-    assert len(ret) == 1
+    assert len(ret) == 1, "Expression=%s len(ret)==%s" % (
+        constraint_expression,
+        len(ret),
+    )
     return ret[0]
 
 

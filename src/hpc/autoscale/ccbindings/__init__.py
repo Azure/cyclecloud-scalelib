@@ -12,4 +12,10 @@ def new_cluster_bindings(config: dict,) -> ClusterBindingInterface:
     config["verify_certificates"] = config.get("verify_certificates") or False
     client = Client(config)
     cluster = client.clusters.get(cluster_name)
-    return legacy.ClusterBinding(cluster.name, cluster._client.session, cluster._client)
+    read_only: bool = config.get("read_only", False)
+    if read_only is None:
+        read_only = False
+
+    return legacy.ClusterBinding(
+        cluster.name, cluster._client.session, cluster._client, read_only=read_only
+    )

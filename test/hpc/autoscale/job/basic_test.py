@@ -125,7 +125,7 @@ class SubTest:
         ), "duplicate job id"
         driver = BasicDriver(self.jobs, self.scheduler_nodes)
 
-        config = {"_mock_bindings": self.mock_bindings}
+        config = {"_mock_bindings": self.mock_bindings, "lock_file": None}
 
         demand_result = autoscale_driver(config, driver)
 

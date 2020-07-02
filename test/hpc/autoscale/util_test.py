@@ -1,4 +1,13 @@
-from hpc.autoscale.util import partition, partition_single
+import os
+import tempfile
+
+from hpc.autoscale.util import (
+    NullSingletonLock,
+    SingletonFileLock,
+    new_singleton_lock,
+    partition,
+    partition_single,
+)
 
 
 def test_partition_single() -> None:
@@ -13,10 +22,8 @@ def test_partition_single() -> None:
         partition_single(objs, lambda x: None)
         assert False
     except RuntimeError as e:
-        assert (
-            str(e)
-            == "Could not partition list into single values - key=None values=[{'id': 1}, {'id': 2}, {'id': 3}]"
-        )
+        expected = "Could not partition list into single values - key=None values=[{'id': 1}, {'id': 2}, {'id': 3}]"
+        assert str(e) == expected
 
 
 def test_partition() -> None:
@@ -31,3 +38,16 @@ def test_partition() -> None:
     assert set(["A", None]) == set(by_name.keys())
     assert by_name["A"] == [objs[0]]
     assert by_name[None] == [objs[1], objs[2]]
+
+
+def test_new_singleton_lock() -> None:
+    assert isinstance(new_singleton_lock({"lock_file": None}), NullSingletonLock)
+    lock_file = tempfile.mktemp()
+    singleton_lock = new_singleton_lock({"lock_file": lock_file})
+    assert isinstance(singleton_lock, SingletonFileLock)
+    assert os.path.exists(lock_file)
+    expected = str(os.getpid())
+    with open(lock_file) as fr:
+        assert expected == fr.read()
+    singleton_lock.unlock()
+    os.remove(lock_file)

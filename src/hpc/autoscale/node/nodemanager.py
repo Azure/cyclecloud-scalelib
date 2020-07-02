@@ -9,9 +9,9 @@ from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
+from frozendict import frozendict
 
 import hpc.autoscale.hpclogging as logging
-from frozendict import frozendict
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings import new_cluster_bindings
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
@@ -239,6 +239,12 @@ class NodeManager:
         allow_existing: bool = False,
         assignment_id: Optional[str] = None,
     ) -> AllocationResult:
+
+        if not allow_existing and bucket.available_count < 1:
+            return AllocationResult(
+                "OutOfCapacity",
+                reasons=["No more capacity for bucket {}".format(bucket)],
+            )
 
         for constraint in constraints:
             sat_result = constraint.satisfied_by_bucket(bucket)

@@ -17,7 +17,12 @@ from hpc.autoscale.node.nodehistory import (
 )
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
 from hpc.autoscale.results import AllocationResult, BootupResult, DeleteResult, Result
-from hpc.autoscale.util import partition_single
+from hpc.autoscale.util import (
+    NullSingletonLock,
+    SingletonLock,
+    new_singleton_lock,
+    partition_single,
+)
 
 
 @hpcwrapclass
@@ -37,6 +42,7 @@ class DemandCalculator:
         node_mgr: NodeManager,
         node_history: NodeHistory = NullNodeHistory(),
         node_queue: Optional[NodeQueue] = None,
+        singleton_lock: Optional[SingletonLock] = None,
     ) -> None:
         assert isinstance(node_mgr, NodeManager)
         self.node_mgr = node_mgr
@@ -51,6 +57,10 @@ class DemandCalculator:
         self.__set_buffer_delayed_invocations: List[Tuple[Any, ...]] = []
 
         self.node_history.decorate(list(self.__scheduler_nodes_queue))
+
+        if not singleton_lock:
+            singleton_lock = new_singleton_lock({})
+        self.__singleton_lock = singleton_lock
 
     @apitrace
     def add_jobs(self, jobs: List[Job]) -> None:
@@ -373,6 +383,7 @@ def new_demand_calculator(
     node_history: Optional[NodeHistory] = None,
     disable_default_resources: bool = False,
     node_queue: Optional[NodeQueue] = None,
+    singleton_lock: Optional[SingletonLock] = NullSingletonLock(),
 ) -> DemandCalculator:
 
     if isinstance(config, str):
@@ -398,6 +409,9 @@ def new_demand_calculator(
 
     node_history = node_history or SQLiteNodeHistory()
 
-    dc = DemandCalculator(node_mgr, node_history, node_queue)
+    if singleton_lock is None:
+        singleton_lock = new_singleton_lock(config_dict)
+
+    dc = DemandCalculator(node_mgr, node_history, node_queue, singleton_lock)
     dc.update_scheduler_nodes(existing_nodes)
     return dc

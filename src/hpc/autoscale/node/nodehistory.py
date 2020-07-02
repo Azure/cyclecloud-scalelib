@@ -1,4 +1,5 @@
 import datetime
+import os
 import shutil
 import sqlite3
 import typing
@@ -55,8 +56,14 @@ class NullNodeHistory(NodeHistory):
         ]
 
 
-def initialize_db(path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+def initialize_db(path: str, read_only: bool) -> sqlite3.Connection:
+    if read_only:
+        path = os.path.abspath(path)
+        file_uri = "file://{}?mode=ro".format(path)
+        conn = sqlite3.connect(file_uri, uri=True)
+    else:
+        conn = sqlite3.connect(path)
+
     try:
         conn.execute("CREATE TABLE metadata (version)")
     except sqlite3.OperationalError as e:
@@ -78,7 +85,7 @@ def initialize_db(path: str) -> sqlite3.Connection:
         new_path = "{}.{}".format(path, version)
         print("Invalid version - moving to {}".format(new_path))
         shutil.move(path, new_path)
-        return initialize_db(path)
+        return initialize_db(path, read_only)
 
     try:
         conn.execute(
@@ -94,14 +101,18 @@ def initialize_db(path: str) -> sqlite3.Connection:
 
 
 class SQLiteNodeHistory(NodeHistory):
-    def __init__(self, path: str = "nodehistory.db") -> None:
+    def __init__(self, path: str = "nodehistory.db", read_only: bool = False) -> None:
         self.path = path
-        self.conn = initialize_db(path)
+        self.conn = initialize_db(path, read_only)
+        self.read_only = read_only
 
     def now(self) -> float:
         return datetime.datetime.utcnow().timestamp()
 
     def update(self, nodes: typing.Iterable[Node]) -> None:
+        if self.read_only:
+            return
+
         now = self.now()
 
         rows = list(
@@ -162,6 +173,9 @@ class SQLiteNodeHistory(NodeHistory):
     def retire_records(
         self, timeout: int = (7 * 24 * 60 * 60), commit: bool = True
     ) -> None:
+        if self.read_only:
+            return
+
         retire_omega = self.now() - timeout
         cursor = self._execute(
             """DELETE from nodes where delete_time is not null AND delete_time < {} AND delete_time > 0""".format(
@@ -238,4 +252,4 @@ class SQLiteNodeHistory(NodeHistory):
         return self.conn.execute(stmt)
 
     def __repr__(self) -> str:
-        return "SQLiteNodeHistory({})".format(self.path)
+        return "SQLiteNodeHistory({}, read_only={})".format(self.path, self.read_only)

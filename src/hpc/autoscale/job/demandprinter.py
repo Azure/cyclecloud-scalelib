@@ -4,9 +4,9 @@ import json
 import sys
 from typing import Any, List, Optional, Set, TextIO, Tuple
 
+import frozendict
 from typing_extensions import Literal
 
-import frozendict
 from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpctypes import Hostname
 from hpc.autoscale.job.demand import DemandResult
