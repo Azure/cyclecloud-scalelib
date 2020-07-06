@@ -261,13 +261,13 @@ class DemandCalculator:
         self, at_least: float = 300, unmatched_nodes: Optional[List[Node]] = None,
     ) -> List[Node]:
         unmatched_nodes = unmatched_nodes or self.get_demand().unmatched_nodes
-        by_hostname = dict([(n.hostname, n) for n in unmatched_nodes])
+        by_id = dict([(n.delayed_node_id.node_id, n) for n in unmatched_nodes])
         ret = []
         for node_id, hostname, idle_time in self.node_history.find_unmatched(
             for_at_least=at_least
         ):
-            if hostname in by_hostname and idle_time > at_least:
-                ret.append(by_hostname[hostname])
+            if node_id and node_id in by_id and idle_time > at_least:
+                ret.append(by_id[node_id])
         return ret
 
     @apitrace

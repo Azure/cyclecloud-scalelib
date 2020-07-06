@@ -21,7 +21,10 @@ class DemandResult:
         self.matched_nodes = matched_nodes
         self.unmatched_nodes = unmatched_nodes
         self.failed_nodes = failed_nodes
-        self.compute_nodes = matched_nodes + unmatched_nodes + failed_nodes
+        self.compute_nodes = matched_nodes + unmatched_nodes
+        for node in self.failed_nodes:
+            if node not in self.compute_nodes:
+                self.compute_nodes.append(node)
 
     def __str__(self) -> str:
         return "DemandResult(new_nodes={}, matched={}, unmatched={}, failed={})".format(

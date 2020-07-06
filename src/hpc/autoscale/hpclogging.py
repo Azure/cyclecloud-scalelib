@@ -4,49 +4,59 @@ import logging.config
 import os
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import jsonpickle
 
-CRITICAL = logging.CRITICAL
-FATAL = logging.FATAL
-ERROR = logging.ERROR
-WARNING = logging.WARNING
-WARN = logging.WARN
-INFO = logging.INFO
-DEBUG = logging.DEBUG
-FINE = logging.DEBUG // 2
-TRACE = 2
-REPRO = 1
-NOTSET = 0
-_REPRO_LOGGER = logging.getLogger("repro")
+_PID = "%-5s" % os.getpid()
 
 
-logging._nameToLevel["FINE"] = FINE
-logging._nameToLevel["TRACE"] = TRACE
-logging._nameToLevel["REPRO"] = REPRO
-logging._levelToName[FINE] = "FINE"
-logging._levelToName[TRACE] = "TRACE"
-logging._levelToName[REPRO] = "REPRO"
+class HPCLogger(logging.Logger):
+    def __init__(self, name: str, level: int = logging.DEBUG) -> None:
+        logging.Logger.__init__(self, name, level)
 
-basicConfig = logging.basicConfig
-getLogger = logging.getLogger
-debug = logging.debug
-info = logging.info
-warning = logging.warning
-warn = logging.warn
-error = logging.error
-exception = logging.exception
-critical = logging.critical
-log = logging.log
+    def _log(  # type: ignore
+        self,
+        level,
+        msg,
+        args,
+        exc_info=None,
+        extra=None,
+        stack_info=False,
+        # stacklevel only exists in python 3.8
+        *stacklevel,
+        **stacklevelkw
+    ):
+        if extra is None:
+            extra = {}
+        if "context" not in extra:
+            extra["context"] = _CONTEXT
+
+        if "pid" not in extra:
+            extra["pid"] = _PID
+
+        logging.Logger._log(
+            self,
+            level,
+            msg,
+            args,
+            exc_info,
+            extra,
+            stack_info,
+            *stacklevel,
+            **stacklevelkw
+        )
+
+    def fine(self, msg: str, *args: Any) -> None:
+        self._log(FINE, msg, args)
+
+    def trace(self, msg: str, *args: Any) -> None:
+        self._log(TRACE, msg, args)
 
 
-def fine(msg: str, *args: Any) -> None:
-    logging.log(FINE, msg, *args)
-
-
-def trace(msg: str, *args: Any) -> None:
-    logging.log(TRACE, msg, *args)
+class HPCRootLogger(HPCLogger, logging.RootLogger):
+    def __init__(self, level: int = logging.WARNING):
+        HPCLogger.__init__(self, "root", level)
 
 
 def reprolog(func: Callable, args: Dict[str, Any], retval: Any) -> Any:
@@ -69,6 +79,53 @@ def reprolog(func: Callable, args: Dict[str, Any], retval: Any) -> Any:
             }
         ),
     )
+
+
+logging.setLoggerClass(HPCLogger)
+logging.root = HPCRootLogger(logging.root.level)
+
+
+CRITICAL = logging.CRITICAL
+FATAL = logging.FATAL
+ERROR = logging.ERROR
+WARNING = logging.WARNING
+WARN = logging.WARN
+INFO = logging.INFO
+DEBUG = logging.DEBUG
+FINE = logging.DEBUG // 2
+TRACE = 2
+REPRO = 1
+NOTSET = 0
+_REPRO_LOGGER = logging.getLogger("repro")
+_CONTEXT = "[init]"
+
+
+logging._nameToLevel["FINE"] = FINE
+logging._nameToLevel["TRACE"] = TRACE
+logging._nameToLevel["REPRO"] = REPRO
+logging._levelToName[FINE] = "FINE"
+logging._levelToName[TRACE] = "TRACE"
+logging._levelToName[REPRO] = "REPRO"
+
+getLogger = logging.getLogger
+basicConfig = logging.basicConfig
+
+log = logging.log
+debug = logging.debug
+
+# we are the ones adding fine/trace when we override the logger class above
+try:
+    fine = logging.getLogger().fine  # type: ignore
+    trace = logging.getLogger().trace  # type: ignore
+except AttributeError:
+    print("fine/trace logging are disabled", file=sys.stderr)
+    fine = trace = logging.debug
+info = logging.info
+warning = logging.warning
+warn = logging.warn
+error = logging.error
+exception = logging.exception
+critical = logging.critical
 
 
 __CALL_ID = 10000
@@ -170,6 +227,7 @@ __INITIALIZED = False
 
 def initialize_logging(config: Optional[Dict[str, Any]] = None) -> None:
     global __INITIALIZED
+
     if __INITIALIZED:
         return
 
@@ -183,6 +241,7 @@ def initialize_logging(config: Optional[Dict[str, Any]] = None) -> None:
         print(msg, file=sys.stderr)
 
     if logging_config_file:
+
         try:
             with open(logging_config_file, "r"):
                 pass
@@ -208,3 +267,36 @@ def initialize_logging(config: Optional[Dict[str, Any]] = None) -> None:
             )
 
     __INITIALIZED = True
+
+
+def set_context(ctx: str) -> None:
+    global _CONTEXT
+    _CONTEXT = ctx
+
+
+def cut(columns: Iterable[int]) -> None:
+    file_handlers = [x for x in logging.root.handlers if hasattr(x, "baseFilename")]
+
+    fact = logging.getLogRecordFactory()
+
+    for handler in file_handlers:
+        if not handler.formatter:
+            continue
+
+        record = fact(
+            name="cut",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=100,
+            msg="example line",
+            args=(),
+            exc_info=None,
+        )
+        setattr(record, "context", "[example]")
+
+        # print(record.args)
+        # print(record.getMessage())
+        # for x in dir(record):
+        #     print(x, getattr(record, x))
+        msg = handler.formatter.format(record)
+        print(repr(msg))

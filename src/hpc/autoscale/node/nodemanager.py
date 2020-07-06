@@ -507,7 +507,10 @@ class NodeManager:
         result: NodeCreationResult = self.__cluster_bindings.create_nodes(nodes)
 
         for s in result.sets:
-            logging.info(s.message)
+            if s.message:
+                logging.info(s.message)
+            else:
+                logging.info("Create %d %s nodes")
 
         for creation_set in result.sets:
             if creation_set.message:

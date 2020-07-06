@@ -1,12 +1,15 @@
-from __future__ import print_function
-
+import inspect
+import io
 import json
+import logging as logginglib
 import sys
-from typing import Any, List, Optional, Set, TextIO, Tuple
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional, Set, TextIO, Tuple
 
 import frozendict
 from typing_extensions import Literal
 
+from hpc.autoscale import hpclogging as logging
 from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpctypes import Hostname
 from hpc.autoscale.job.demand import DemandResult
@@ -24,6 +27,7 @@ class DemandPrinter:
         output_format: OutputFormat = "table",
     ) -> None:
         column_names_list: List[str] = []
+
         if column_names:
             column_names_list = column_names
 
@@ -82,6 +86,7 @@ class DemandPrinter:
         formats = " ".join(["{:%d}" % x for x in widths])
         assert len(widths) == len(columns), "{} != {}".format(len(widths), len(columns))
         print(formats.format(*columns), file=self.stream)
+        self.stream.flush()
 
     def print_demand(self, demand_result: DemandResult) -> None:
         rows = []
@@ -149,6 +154,8 @@ class DemandPrinter:
                 # convert sets to lists, as sets are not json serializable
                 if isinstance(value, set):
                     value = list(value)
+                elif isinstance(value, datetime):
+                    value = value.isoformat()
 
                 # for json, we support lists, null, numbers etc.
                 # for table* we will output a string for every value.
@@ -184,6 +191,7 @@ class DemandPrinter:
 
             for row in rows:
                 print(formats.format(*[str(r) for r in row]), file=self.stream)
+        self.stream.flush()
 
     def __str__(self) -> str:
         return "DemandPrinter(columns={}, output_format={}, stream={})".format(
@@ -208,6 +216,90 @@ def print_demand(
     demand_result: DemandResult,
     stream: Optional[TextIO] = None,
     output_format: OutputFormat = "table",
+    log: bool = False,
 ) -> None:
+    if log:
+        stream = logging_stream(stream or sys.stdout)
     printer = DemandPrinter(columns, stream=stream, output_format=output_format)
     printer.print_demand(demand_result)
+
+
+def wrap_text_io(clz: Any) -> Callable[[TextIO], TextIO]:
+    members: Dict[str, Any] = {}
+    for attr in dir(TextIO):
+        if not attr[0].islower() and attr not in [
+            "__enter__",
+            "__exit__",
+            "__iter__",
+            "__next__",
+        ]:
+            continue
+
+        if attr in dir(clz):
+            continue
+        f = open("/tmp/log.txt", "w")
+
+        def make_member(mem_name: str) -> Any:
+            is_function = inspect.isfunction(getattr(TextIO, mem_name))
+            if is_function:
+                return lambda *args: getattr(args[0].wrapped, mem_name)(*args[1:])
+            else:
+                return property(lambda *args: getattr(args[0].wrapped, mem_name))
+
+        f.close()
+
+        members[attr] = make_member(attr)
+    return type("LoggingStream", (clz,), members)
+
+
+class _LoggingStream:
+    def __init__(self, wrapped: TextIO) -> None:
+        self.line_buffer = io.StringIO()
+        self.wrapped = wrapped
+
+    def write(self, s: str) -> int:
+        self.line_buffer.write(s)
+        return self.wrapped.write(s)
+
+    def flush(self) -> None:
+        buf = self.line_buffer.getvalue()
+        if not buf:
+            return
+        fact = logginglib.getLogRecordFactory()
+        root = logging.getLogger()
+
+        if not root.filters:
+            root.addFilter(ExcludeDemandPrinterFilter("root"))
+
+        for line in buf.splitlines(keepends=False):
+            record = fact(
+                name="demandprinter",
+                level=logging.INFO,
+                pathname=__file__,
+                lineno=1,
+                msg=line,
+                args=(),
+                exc_info=None,
+            )
+            root.handle(record)
+
+        self.line_buffer = io.StringIO()
+
+    def close(self) -> None:
+        self.flush()
+        self.wrapped.close()
+
+
+LoggingStream = wrap_text_io(_LoggingStream)
+
+
+def logging_stream(wrapped: TextIO) -> TextIO:
+    return LoggingStream(wrapped)
+
+
+class ExcludeDemandPrinterFilter(logginglib.Filter):
+    def __init__(self, name: str = "") -> None:
+        super().__init__(name)
+
+    def filter(self, record: logginglib.LogRecord) -> bool:
+        return record.name != "demandprinter"

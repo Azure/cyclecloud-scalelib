@@ -57,12 +57,17 @@ class NullNodeHistory(NodeHistory):
 
 
 def initialize_db(path: str, read_only: bool) -> sqlite3.Connection:
-    if read_only:
-        path = os.path.abspath(path)
-        file_uri = "file://{}?mode=ro".format(path)
-        conn = sqlite3.connect(file_uri, uri=True)
-    else:
-        conn = sqlite3.connect(path)
+    try:
+        if read_only:
+            path = os.path.abspath(path)
+            file_uri = "file://{}?mode=ro".format(path)
+            conn = sqlite3.connect(file_uri, uri=True)
+        else:
+            file_uri = path
+            conn = sqlite3.connect(path)
+    except sqlite3.OperationalError as e:
+        logging.exception("Error while opening %s - %s", file_uri, e)
+        raise
 
     try:
         conn.execute("CREATE TABLE metadata (version)")
@@ -105,6 +110,7 @@ class SQLiteNodeHistory(NodeHistory):
         self.path = path
         self.conn = initialize_db(path, read_only)
         self.read_only = read_only
+        self.last_match_timeout = self.create_timeout = 0.0
 
     def now(self) -> float:
         return datetime.datetime.utcnow().timestamp()
@@ -134,7 +140,6 @@ class SQLiteNodeHistory(NodeHistory):
             node_id = node.delayed_node_id.node_id
 
             if node_id not in rows_by_id:
-                print("{} not in {}".format(node_id, rows_by_id.keys()))
                 # first time we see it, just put an entry
                 rows_by_id[node_id] = tuple([node_id, node.hostname, now, now])
 
@@ -230,6 +235,8 @@ class SQLiteNodeHistory(NodeHistory):
         rows = self._execute(stmt)
         rows_by_id = partition_single(list(rows), lambda r: r[0])
 
+        now = self.now()
+
         for node in nodes:
             node_id = node.delayed_node_id.node_id
 
@@ -242,10 +249,21 @@ class SQLiteNodeHistory(NodeHistory):
                 continue
 
             if node_id in rows_by_id:
+
                 node_id, last_match_time, create_time, delete_time = rows_by_id[node_id]
-                node.create_time = create_time
-                node.last_match_time = last_match_time
-                node.delete_time = delete_time
+                node.create_time_unix = create_time
+                node.last_match_time_unix = last_match_time
+                node.delete_time_unix = delete_time
+
+                if self.create_timeout:
+                    create_elapsed = max(0, now - create_time)
+                    create_remaining = max(0, self.create_timeout - create_elapsed)
+                    node.create_time_remaining = create_remaining
+
+                if self.last_match_timeout:
+                    match_elapsed = max(0, now - last_match_time)
+                    match_remaining = max(0, self.last_match_timeout - match_elapsed)
+                    node.idle_time_remaining = match_remaining
 
     def _execute(self, stmt: str) -> sqlite3.Cursor:
         logging.debug(stmt)

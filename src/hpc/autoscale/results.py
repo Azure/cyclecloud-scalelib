@@ -315,10 +315,13 @@ class DefaultContextHandler(ResultsHandler):
     """
 
     def __init__(self, ctx: Hashable) -> None:
-        self.ctx = ctx
-        self.by_context: Dict[Hashable, List[Result]] = {ctx: []}
+        self.ctx: Hashable
+        self.by_context: Dict[Hashable, List[Result]] = {}
+        self.set_context(ctx)
 
     def set_context(self, ctx: Hashable, ctx_str: Optional[str] = None) -> None:
+        logging.set_context(str(ctx))
+
         self.ctx = ctx
         if self.ctx not in self.by_context:
             self.by_context[ctx] = []

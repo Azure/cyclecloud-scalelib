@@ -1,6 +1,7 @@
 import re
 from abc import ABC
 from copy import deepcopy
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
@@ -20,9 +21,11 @@ QUERYABLE_PROPERTIES: List[str] = [
     "state",
     "exists",
     "placement_group",
-    "create_time",
-    "last_match_time",
-    "delete_time",
+    "create_time_unix",
+    "last_match_time_unix",
+    "delete_time_unix",
+    "create_time_remaining",
+    "match_time_remaining",
 ]
 
 
@@ -95,6 +98,7 @@ class Node(ABC):
         self.__software_configuration = software_configuration
 
         self.__create_time = self.__last_match_time = self.__delete_time = 0.0
+        self.__create_time_remaining = self.__idle_time_remaining = 0.0
 
     @property
     def required(self) -> bool:
@@ -266,28 +270,60 @@ class Node(ABC):
         return self.__node_attribute_overrides
 
     @property
-    def create_time(self) -> float:
+    def create_time_unix(self) -> float:
         return self.__create_time
 
-    @create_time.setter
-    def create_time(self, value: float) -> None:
+    @create_time_unix.setter
+    def create_time_unix(self, value: float) -> None:
         self.__create_time = value
 
+    @nodeproperty
+    def create_time(self) -> datetime:
+        return datetime.fromtimestamp(self.create_time_unix)
+
     @property
-    def last_match_time(self) -> float:
+    def create_time_remaining(self) -> float:
+        if self.state == "Ready":
+            return -1
+        return self.__create_time_remaining
+
+    @create_time_remaining.setter
+    def create_time_remaining(self, value: float) -> None:
+        self.__create_time_remaining = max(0, value)
+
+    @property
+    def idle_time_remaining(self) -> float:
+        if self.assignments:
+            return -1
+        return self.__idle_time_remaining
+
+    @idle_time_remaining.setter
+    def idle_time_remaining(self, value: float) -> None:
+        self.__idle_time_remaining = max(0, value)
+
+    @property
+    def last_match_time_unix(self) -> float:
         return self.__last_match_time
 
-    @last_match_time.setter
-    def last_match_time(self, value: float) -> None:
+    @last_match_time_unix.setter
+    def last_match_time_unix(self, value: float) -> None:
         self.__last_match_time = value
 
+    @nodeproperty
+    def last_match_time(self) -> datetime:
+        return datetime.fromtimestamp(self.last_match_time_unix)
+
     @property
-    def delete_time(self) -> float:
+    def delete_time_unix(self) -> float:
         return self.__delete_time
 
-    @delete_time.setter
-    def delete_time(self, value: float) -> None:
+    @delete_time_unix.setter
+    def delete_time_unix(self, value: float) -> None:
         self.__delete_time = value
+
+    @nodeproperty
+    def delete_time(self) -> datetime:
+        return datetime.fromtimestamp(self.delete_time_unix)
 
     def clone(self) -> "Node":
         ret = Node(
