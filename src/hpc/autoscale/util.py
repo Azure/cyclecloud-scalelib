@@ -1,7 +1,7 @@
 import os
 import uuid as uuidlib
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, TypeVar
+from typing import Any, Callable, Dict, List, TextIO, TypeVar
 
 from hpc.autoscale.codeanalysis import hpcwrapclass
 
@@ -75,26 +75,25 @@ class MultipleInstancesError(RuntimeError):
     pass
 
 
-
-
 # Handle advisory locking on windows and posix
 try:
     import fcntl
 
-    def _lock(lockfp):
+    def _lock(lockfp: TextIO) -> None:
         fcntl.lockf(lockfp, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
-    def _unlock(lockfp):
+    def _unlock(lockfp: TextIO) -> None:
         pass
+
 
 except ModuleNotFoundError:
     import msvcrt
 
-    def _lock(lockfp):
+    def _lock(lockfp: TextIO) -> None:
         file_size = os.path.getsize(os.path.realpath(lockfp.name))
         msvcrt.locking(lockfp.fileno(), msvcrt.LK_RLCK, file_size)
 
-    def _unlock(lockfp):
+    def _unlock(lockfp: TextIO) -> None:
         file_size = os.path.getsize(os.path.realpath(lockfp.name))
         msvcrt.locking(lockfp.fileno(), msvcrt.LK_UNLCK, file_size)
 
@@ -112,7 +111,7 @@ class SingletonFileLock(SingletonLock):
         try:
             self.lockfp = open(self.lockpath, "w")
             _lock(self.lockfp)
-            
+
             self.lockfp.write(str(os.getpid()))
             self.lockfp.flush()
         except IOError:
