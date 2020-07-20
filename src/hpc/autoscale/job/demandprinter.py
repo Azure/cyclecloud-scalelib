@@ -113,7 +113,7 @@ class DemandPrinter:
             demand_result.compute_nodes,
             key=lambda n: tuple(map(int, n.private_ip.split(".")))
             if n.private_ip
-            else tuple([2 ** 31] + [ord(l) for l in n.name]),
+            else tuple([2 ** 31] + [ord(l) for l in n.name]),  # noqa: E741
         )
 
         for node in ordered_nodes:

@@ -72,8 +72,8 @@ def test_basic():
     run_test(snodes(), [_xjob("1"), _xjob("2")], unmatched=0, matched=2, new=1)  # noqa      
 
     run_test(snodes(),
-        [_xjob("1", {"customer_htc_flag": False}),
-            _xjob("2", {"customer_htc_flag": False})],
+        [_xjob("1", {"customer_htc_flag": False}),  # noqa
+         _xjob("2", {"customer_htc_flag": False})],  # noqa
                                                 unmatched=1, matched=0, new=0)  # noqa
 
     run_test(
