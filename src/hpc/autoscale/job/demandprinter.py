@@ -237,7 +237,6 @@ def wrap_text_io(clz: Any) -> Callable[[TextIO], TextIO]:
 
         if attr in dir(clz):
             continue
-        f = open("/tmp/log.txt", "w")
 
         def make_member(mem_name: str) -> Any:
             is_function = inspect.isfunction(getattr(TextIO, mem_name))
@@ -245,8 +244,6 @@ def wrap_text_io(clz: Any) -> Callable[[TextIO], TextIO]:
                 return lambda *args: getattr(args[0].wrapped, mem_name)(*args[1:])
             else:
                 return property(lambda *args: getattr(args[0].wrapped, mem_name))
-
-        f.close()
 
         members[attr] = make_member(attr)
     return type("LoggingStream", (clz,), members)

@@ -9,7 +9,7 @@ from setuptools import find_packages, setup
 from setuptools.command.test import Command
 from setuptools.command.test import test as TestCommand  # noqa: N812
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 class PyTest(TestCommand):
@@ -188,12 +188,12 @@ setup(
     },
     include_package_data=True,
     install_requires=[
-        "requests == 2.21.0",
+        "requests >= 2.24.0",
         "typing_extensions",
         "frozendict==1.2.0",
         "jsonpickle==1.4.1",
     ]
-    + ["urllib3==1.24.1"],  # noqa: W503
+    + ["urllib3>=1.25.10"],  # noqa: W503
     tests_require=["pytest==3.2.3"],
     cmdclass={
         "test": PyTest,

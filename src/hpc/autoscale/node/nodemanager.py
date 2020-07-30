@@ -510,7 +510,7 @@ class NodeManager:
             if s.message:
                 logging.info(s.message)
             else:
-                logging.info("Create %d %s nodes")
+                logging.info("Create %d nodes", s.added)
 
         for creation_set in result.sets:
             if creation_set.message:
