@@ -157,8 +157,8 @@ Order = 20
         Label = Base OS
         ParameterType = Cloud.Image
         Config.OS = linux
-        DefaultValue = cycle.image.centos7
-        Config.Filter := Package === "cycle.image.centos7"
+        DefaultValue = cycle.image.ubuntu18
+        Config.Filter := Package === "cycle.image.ubuntu18"
 
         [[[parameter MasterClusterInitSpecs]]]
         Label = Master Cluster-Init

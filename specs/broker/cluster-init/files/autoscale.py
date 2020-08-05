@@ -7,7 +7,7 @@ import pdb
 
 from hpc.autoscale.job import demandcalculator
 from hpc.autoscale.job.job import Job
-from hpc.autoscale.job.computenode import SchedulerNode
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node.nodehistory import SQLiteNodeHistory
 from hpc.autoscale.node.nodemanager import new_node_manager
 from hpc.autoscale.job.demandprinter import print_demand
@@ -62,12 +62,24 @@ def setup():
         level=logging.DEBUG,
     )
 
-    CONFIG = {
-        "cluster_name": "celery2",
-        "url": "https://127.0.0.1:37140",
-        "username": "user",
-        "password": "password",
-    }
+    # Depends on cluserinit to write json files
+    try:
+        with open("/root/cyclecloud.config.json") as open_file:
+            cc_config = json.load(open_file)
+        with open("/root/cyclecloud.cluster.name.json") as open_file:
+            cc_cluster_config = json.load(open_file)
+        CONFIG = {}
+        CONFIG["cluster_name"] = cc_cluster_config["cyclecloud.cluster.name"]
+        CONFIG["url"] = cc_config["web_server"]
+        CONFIG["username"] = cc_config["username"]
+        CONFIG["password"] = cc_config["password"]
+    except:
+        CONFIG = {
+            "cluster_name": "celery",
+            "url": "https://127.0.0.1:37140",
+            "username": "username",
+            "password": "password",
+        }
 
 def auto():
     setup()
