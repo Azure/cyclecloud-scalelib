@@ -13,6 +13,7 @@ if ! [ -f "$FILE" ]; then
     pip install cyclecloud_api-${CC_VERSION}-py2.py3-none-any.whl
 fi
 
+jetpack download cyclecloud-scalelib-0.1.1.tar.gz $CYCLECLOUD_SPEC_PATH/files/
 pip install $CYCLECLOUD_SPEC_PATH/files/cyclecloud-scalelib-0.1.1.tar.gz
 
 cp $CYCLECLOUD_SPEC_PATH/files/add_task.py /root/
