@@ -80,9 +80,10 @@ def setup():
             "username": "username",
             "password": "password",
         }
+    return CONFIG
 
 def auto():
-    setup()
+    CONFIG = setup()
 
     MIN_CORE_COUNT = 4
     WARM_BUFFER = 2
