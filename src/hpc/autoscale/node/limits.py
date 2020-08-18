@@ -1,5 +1,7 @@
 from typing import Optional, Union
 
+from hpc.autoscale import hpclogging as logging
+
 
 class _SharedLimit:
     def __init__(
@@ -19,11 +21,15 @@ class _SharedLimit:
         )
         self._consumed_core_count = max(0, consumed_core_count)
         self._max_core_count = max(0, max_core_count)
-        assert (
-            self._consumed_core_count <= self._max_core_count
-        ), "consumed_core_count({}) > max_core_count({}) for {} limit".format(
-            self._consumed_core_count, self._max_core_count, name
-        )
+        if self._consumed_core_count > self._max_core_count:
+            logging.warning(
+                "consumed_core_count(%s) > max_core_count(%s) for %s limit. Flooring it.",
+                self._consumed_core_count,
+                self._max_core_count,
+                name,
+            )
+            self._consumed_core_count = self._max_core_count
+
         if max_count is None:
             assert consumed_count is None
         else:
