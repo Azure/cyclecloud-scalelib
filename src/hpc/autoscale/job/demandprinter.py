@@ -7,13 +7,13 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, TextIO, Tuple
 
 import frozendict
-from typing_extensions import Literal
 
 from hpc.autoscale import hpclogging as logging
 from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpctypes import Hostname
 from hpc.autoscale.job.demand import DemandResult
 from hpc.autoscale.node.node import Node
+from typing_extensions import Literal
 
 OutputFormat = Literal["json", "table", "table_headerless"]
 

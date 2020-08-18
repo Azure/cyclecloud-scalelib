@@ -1,4 +1,5 @@
 import typing
+from uuid import uuid4
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -276,7 +277,9 @@ class Or(BaseNodeConstraint):
             result = c.satisfied_by_node(node)
 
             if result:
-                return c.do_decrement(node)
+                ret = c.do_decrement(node)
+                if ret > 0:
+                    return ret
 
         return False
 
@@ -285,6 +288,70 @@ class Or(BaseNodeConstraint):
 
     def to_dict(self) -> dict:
         return {"or": [jc.to_dict() for jc in self.constraints]}
+
+
+@hpcwrapclass
+class XOr(BaseNodeConstraint):
+    def __init__(self, *constraints: Union[NodeConstraint, ConstraintDict]) -> None:
+        if len(constraints) <= 1:
+            raise AssertionError("XOr expression requires at least 2 constraints")
+        self.constraints = get_constraints(list(constraints))
+
+    def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        xor_result: SatisfiedResult = SatisfiedResult(
+            "UnknownReason",
+            self,
+            node,
+            ["Constraint {} failed for an unknown reason".format(self)],
+        )
+
+        reasons: List[str] = []
+        for n, c in enumerate(self.constraints):
+            expr_result = c.satisfied_by_node(node)
+
+            if expr_result:
+                # true ^ true == false
+                if xor_result:
+                    return SatisfiedResult(
+                        "XORFailed",
+                        self,
+                        node,
+                        ["Multiple expressions evaluated as true"] + reasons,
+                    )
+                # assign the first true expression as the final result
+                xor_result = expr_result
+            elif hasattr(expr_result, "reasons"):
+                # if this does end up failing for all expressions, keep
+                # track of the set of reasons
+                reasons.extend(expr_result.reasons)
+
+        if xor_result:
+            return xor_result
+
+        return SatisfiedResult("CompoundFailure", self, node, reasons)
+
+    def do_decrement(self, node: "Node") -> bool:
+        xor_result: Union[bool, "SatisfiedResult"] = False
+
+        for c in self.constraints:
+            expr_result = c.satisfied_by_node(node)
+            if expr_result:
+                if xor_result:
+                    raise AssertionError(
+                        "XOr expression is invalid but do_decrement was still called."
+                    )
+                xor_result = expr_result
+
+        if xor_result:
+            return c.do_decrement(node)
+
+        return False
+
+    def __str__(self) -> str:
+        return " xor ".join([str(c) for c in self.constraints])
+
+    def to_dict(self) -> dict:
+        return {"xor": [jc.to_dict() for jc in self.constraints]}
 
 
 @hpcwrapclass
@@ -479,7 +546,7 @@ def new_job_constraint(
 
     elif isinstance(value, list):
 
-        if attr == "or":
+        if attr in ["or", "xor"]:
             child_values: List[NodeConstraint] = []
             for child in value:
                 and_cons = get_constraints([child])
@@ -489,7 +556,9 @@ def new_job_constraint(
                     child_values.append(And(*and_cons))
                 else:
                     child_values.append(and_cons[0])
-            return Or(*child_values)
+            if attr == "or":
+                return Or(*child_values)
+            return XOr(*child_values)
 
         elif attr == "and":
             child_values = []

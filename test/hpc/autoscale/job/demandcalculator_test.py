@@ -1,8 +1,6 @@
 from typing import List, Optional
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as s
 
 from hpc.autoscale import results as resultslib
 from hpc.autoscale import util
@@ -18,6 +16,8 @@ from hpc.autoscale.node.constraints import (
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import NullNodeHistory
 from hpc.autoscale.node.nodemanager import NodeManager
+from hypothesis import given, settings
+from hypothesis import strategies as s
 
 util.set_uuid_func(util.IncrementingUUID())
 

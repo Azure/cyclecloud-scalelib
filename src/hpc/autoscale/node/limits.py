@@ -60,6 +60,19 @@ class _SharedLimit:
                     self._max_core_count,
                 )
             )
+        new_node_count = self._consumed_core_count / cores_per_node + nodes
+
+        if new_node_count > self._max_count(cores_per_node):
+            raise RuntimeError(
+                "OutOfCapacity: Asked for {} * {} nodes, which would be over the {} limit ({}/{})".format(
+                    nodes,
+                    cores_per_node,
+                    self._name,
+                    self._consumed_core_count // cores_per_node,
+                    self._max_count(cores_per_node),
+                )
+            )
+
         self._consumed_core_count = new_core_count
         if self.__max_count is not None and self.__consumed_count is not None:
             assert self.__consumed_count + nodes <= self.__max_count

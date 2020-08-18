@@ -15,9 +15,8 @@
 # pylint: disable=invalid-name
 import typing
 
-from typing_extensions import Literal
-
 from hpc.autoscale.codeanalysis import hpcwrapclass
+from typing_extensions import Literal
 
 BucketId = typing.NewType("BucketId", str)
 ClusterName = typing.NewType("ClusterName", str)

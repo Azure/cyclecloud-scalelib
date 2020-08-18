@@ -1,9 +1,6 @@
 from typing import Any, List
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as s
-from hypothesis.strategies import SearchStrategy
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
@@ -16,6 +13,9 @@ from hpc.autoscale.results import (
     unregister_all_result_handlers,
 )
 from hpc.autoscale.util import partition, partition_single
+from hypothesis import given, settings
+from hypothesis import strategies as s
+from hypothesis.strategies import SearchStrategy
 
 
 def setup_function(function: Any) -> None:

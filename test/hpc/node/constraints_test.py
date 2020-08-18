@@ -9,6 +9,7 @@ from hpc.autoscale.node.constraints import (
     NodePropertyConstraint,
     NodeResourceConstraint,
     Or,
+    XOr,
     get_constraint,
     get_constraints,
     register_parser,
@@ -181,6 +182,25 @@ def test_or() -> None:
     c = get_constraint({"node.vcpu_count": 2})
     assert -1 == c.minimum_space(SchedulerNode(""))
     assert c.do_decrement(SchedulerNode(""))
+
+
+def test_xor() -> None:
+    assert (
+        XOr(
+            NodeResourceConstraint("blah", "A"), NodeResourceConstraint("blah", "B")
+        ).to_dict()
+        == get_constraint({"xor": [{"blah": ["A"]}, {"blah": ["B"]}]}).to_dict()
+    )
+
+    xor_expr = {"xor": [{"blah": ["A"]}, {"blah": ["B"]}]}
+    assert isinstance(get_constraint(xor_expr), XOr)
+
+    c = XOr(NodeResourceConstraint("blah", "A"), NodeResourceConstraint("blah", "B"))
+    assert not c.satisfied_by_node(SchedulerNode(""))
+    assert not c.satisfied_by_node(SchedulerNode("", {"blah": ["A", "B"]}))
+    assert c.satisfied_by_node(SchedulerNode("", {"blah": "A"}))
+    assert c.satisfied_by_node(SchedulerNode("", {"blah": "B"}))
+    assert c.do_decrement(SchedulerNode("", {"blah": "A"}))
 
 
 def test_non_exclusive_mixed() -> None:

@@ -9,7 +9,6 @@ from cyclecloud.model.ClusterStatusModule import ClusterStatus
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
-
 from hpc.autoscale.hpctypes import (
     ClusterName,
     Hostname,
