@@ -278,14 +278,9 @@ def test_mock_bindings(bindings: MockClusterBinding) -> None:
     nm = _node_mgr(bindings)
 
     b = MockClusterBinding()
-    b.add_nodearray("haspgs", {})
+    b.add_nodearray("haspgs", {}, max_placement_group_size=20)
     b.add_bucket(
-        "haspgs",
-        "Standard_F4",
-        100,
-        100,
-        max_placement_group_size=20,
-        placement_groups=["pg0", "pg1"],
+        "haspgs", "Standard_F4", 100, 100, placement_groups=["pg0", "pg1"],
     )
     # make sure we take the max_placement_group_size (20) into account
     # and that we have the non-pg and 2 pg buckets.

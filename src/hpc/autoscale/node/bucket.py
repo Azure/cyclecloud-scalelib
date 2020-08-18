@@ -223,8 +223,8 @@ class NodeBucket:
 
     def __str__(self) -> str:
         if self.placement_group:
-            return "NodeBucket({}, pg={}, size={})".format(
-                self.nodearray, self.placement_group, self.vm_size
+            return "NodeBucket({}, available={}, pg={}, size={})".format(
+                self.nodearray, self.available_count, self.placement_group, self.vm_size
             )
         return "NodeBucket({}, available={}, size={}, id={})".format(
             self.nodearray, self.available_count, self.vm_size, self.bucket_id

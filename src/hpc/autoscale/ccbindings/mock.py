@@ -77,6 +77,7 @@ class MockClusterBinding(ClusterBindingInterface):
         max_count: int = 100_000,
         spot: bool = False,
         software_configuration: Dict = {},
+        max_placement_group_size: int = 100,
     ) -> ClusterNodearrayStatus:
         nodearray_status = ClusterNodearrayStatus()
         nodearray_status.buckets = []
@@ -90,6 +91,7 @@ class MockClusterBinding(ClusterBindingInterface):
             "SubnetId": self.subnet_id,
             "Configuration": {"autoscale": {"resources": resources}},
             "Interruptible": spot,
+            "Azure": {"MaxScalesetSize": max_placement_group_size},
         }
 
         nodearray_status.nodearray["Configuration"].update(software_configuration)
@@ -115,7 +117,6 @@ class MockClusterBinding(ClusterBindingInterface):
         regional_consumed_core_count: Optional[int] = None,
         regional_quota_core_count: Optional[int] = 1_000_000,
         regional_quota_count: Optional[int] = 10_000,
-        max_placement_group_size: int = 100,
         placement_groups: Optional[List[str]] = None,
     ) -> NodearrayBucketStatus:
         def pick(a: Optional[int], b: Optional[int]) -> int:
@@ -150,7 +151,10 @@ class MockClusterBinding(ClusterBindingInterface):
 
         bucket_status.active_count = max_count - available_count
         bucket_status.active_nodes = []
-        bucket_status.max_placement_group_size = max_placement_group_size
+
+        bucket_status.max_placement_group_size = nodearray_status.nodearray.get(
+            "Azure", {}
+        ).get("MaxScalesetSize", 100)
         bucket_status.family_consumed_core_count = pick(
             family_consumed_core_count, bucket_status.active_count * vcpu_count
         )
