@@ -4,7 +4,7 @@ from hpc.autoscale.ccbindings.mock import MockClusterBinding
 from hpc.autoscale.node.bucket import NodeBucket
 from hpc.autoscale.node.limits import _SharedLimit
 from hpc.autoscale.node.nodemanager import new_node_manager
-from hpc.autoscale.util import partition, partition_single
+from hpc.autoscale.util import partition
 
 
 def test_family_and_spots() -> None:
@@ -85,7 +85,6 @@ def test_family_and_spots() -> None:
     htc = by_key[("htc", "Standard_F4s")][0]
     htc2 = by_key[("htc", "Standard_D4s_v3")][0]
     htcspot = by_key[("htcspot", "Standard_F4s")][0]
-    spot = by_key[("htcspot", "Standard_F4s")][0]
     hpcs = by_key[("hpc", "Standard_D4s_v3")]
     hpc_pg = [x for x in hpcs if x.placement_group][0]
 

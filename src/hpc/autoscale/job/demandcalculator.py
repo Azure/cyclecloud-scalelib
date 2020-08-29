@@ -89,17 +89,7 @@ class DemandCalculator:
         4) tell the bucket to allocate X nodes - let the bucket figure out what is new and what is not.
         """
         slots_to_allocate = job.iterations_remaining
-        # available_buckets = self.node_mgr.get_buckets()
-        # candidates_result = job.bucket_candidates(available_buckets)
 
-        # if not candidates_result:
-        #     # TODO log or something
-        #     logging.warn("There are no resources to scale up for job %s", job)
-        #     return candidates_result
-
-        # failure_reasons: List[str] = []
-
-        # for candidate in candidates_result.candidates:
         allocated_nodes: List[Node] = []
         failure_reasons = self._handle_allocate(job, allocated_nodes, True)
         if failure_reasons:

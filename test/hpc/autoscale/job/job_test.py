@@ -2,10 +2,11 @@ import random
 import string
 from typing import Any, Dict, Optional
 
-from hpc.autoscale import hpctypes as ht
-from hpc.autoscale.job.job import Job
 from hypothesis import given
 from hypothesis.strategies import SearchStrategy
+
+from hpc.autoscale import hpctypes as ht
+from hpc.autoscale.job.job import Job
 
 
 def _cmp(a: Job, b: Job) -> bool:

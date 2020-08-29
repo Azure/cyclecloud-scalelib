@@ -5,9 +5,8 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
-from frozendict import frozendict
-
 import hpc.autoscale.hpclogging as logging
+from frozendict import frozendict
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.codeanalysis import hpcwrap
 from hpc.autoscale.node import vm_sizes
@@ -195,6 +194,12 @@ class Node(ABC):
             if self.exists:
                 raise RuntimeError(
                     "Can not change the placement group of an existing node: {} old={} new={}".format(
+                        self, self.__placement_group, value
+                    )
+                )
+            else:
+                raise RuntimeError(
+                    "Can not change the placement group of a node: {} old={} new={}".format(
                         self, self.__placement_group, value
                     )
                 )

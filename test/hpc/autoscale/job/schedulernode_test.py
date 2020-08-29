@@ -2,10 +2,11 @@ import random
 import string
 from typing import Any, Dict, Optional
 
-from hpc.autoscale import hpctypes as ht
-from hpc.autoscale.job.schedulernode import SchedulerNode
 from hypothesis import given
 from hypothesis.strategies import SearchStrategy
+
+from hpc.autoscale import hpctypes as ht
+from hpc.autoscale.job.schedulernode import SchedulerNode
 
 
 def _cmp(a: SchedulerNode, b: SchedulerNode) -> bool:
