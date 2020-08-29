@@ -142,7 +142,8 @@ class Job:
             self._constraints,
             slot_count=self.iterations_remaining,
             allow_existing=allow_existing,
-            all_or_nothing=all_or_nothing,
+            all_or_nothing=all_or_nothing
+            or self.colocated,  # colocated is always all or nothing
             assignment_id=self.name,
         )
 

@@ -208,7 +208,8 @@ class DemandCalculator:
 
             job.iterations_remaining -= result.total_slots
             for node in result.nodes:
-                self.__scheduler_nodes_queue.push(node)
+                if not node.exists:
+                    self.__scheduler_nodes_queue.push(node)
             allocated_nodes_out.extend(result.nodes)
 
         return None
@@ -383,6 +384,7 @@ def new_demand_calculator(
         config_dict = config
 
     existing_nodes = existing_nodes or []
+    
     if isinstance(config, str):
         with open(config) as fr:
             config = json.load(fr)

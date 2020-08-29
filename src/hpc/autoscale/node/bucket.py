@@ -94,6 +94,7 @@ class NodeBucket:
         self.priority = 0
         # list of nodes cyclecloud currently says are in this bucket
         self.nodes = nodes
+        self.__decrement_counter = 0
         example_node_name = ht.NodeName("{}-0".format(definition.nodearray))
         # TODO infiniband
         from hpc.autoscale.node.node import Node
@@ -121,10 +122,23 @@ class NodeBucket:
         )
 
     def decrement(self, count: int = 1) -> None:
-        self.limits.decrement(self.vcpu_count, count)
+        assert (
+            self.available_count - count >= 0
+        ), "Requested too many nodes: %s > %s" % (count, self.available_count)
+        assert self.family_available_count >= 0
+        self.__decrement_counter += count
+        # self.limits.decrement(self.vcpu_count, count)
 
     def increment(self, count: int = 1) -> None:
-        self.limits.increment(self.vcpu_count, count)
+        return self.decrement(-count)
+
+    def commit(self) -> None:
+        to_dec = self.__decrement_counter
+        self.__decrement_counter = 0
+        self.limits.decrement(to_dec)
+
+    def rollback(self) -> None:
+        self.__decrement_counter = 0
 
     @property
     def available_count(self) -> int:
@@ -134,23 +148,26 @@ class NodeBucket:
         if pg_available < 0:
             pg_available = 2 ** 32
 
-        return min(
-            self.limits.available_count,
-            self.limits.regional_available_count,
-            self.limits.cluster_available_count,
-            self.limits.nodearray_available_count,
-            self.limits.family_available_count,
-            pg_available,
+        return (
+            min(
+                self.limits.available_count,
+                self.limits.regional_available_count,
+                self.limits.cluster_available_count,
+                self.limits.nodearray_available_count,
+                self.limits.family_available_count,
+                pg_available,
+            )
+            - self.__decrement_counter
         )
 
     @available_count.setter
     def available_count(self, value: int) -> None:
         assert value >= 0, "{} < 0".format(value)
-        self.limits.decrement(self.vcpu_count, value)
+        self.limits.decrement(value)
 
     @property
     def family_available_count(self) -> int:
-        return self.limits.family_available_count
+        return self.limits.family_available_count - self.__decrement_counter
 
     @property
     def location(self) -> ht.Location:

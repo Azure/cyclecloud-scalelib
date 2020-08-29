@@ -184,6 +184,7 @@ class MinResourcePerNode(BaseNodeConstraint):
 class ExclusiveNode(BaseNodeConstraint):
     def __init__(self, is_exclusive: bool = True) -> None:
         self.is_exclusive = is_exclusive
+        assert self.is_exclusive, "Only exclusive=true is supported at this time"
         self.assignment_id = str(uuid4())
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
@@ -496,6 +497,37 @@ class NotAllocated(BaseNodeConstraint):
 
     def to_dict(self) -> dict:
         raise RuntimeError()
+
+
+class ReadOnlyAlias(BaseNodeConstraint):
+    def __init__(self, alias: str, resource_name: str) -> None:
+        self.alias = alias
+        self.resource_name = resource_name
+
+    def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        if self.resource_name not in node.resources:
+            return SatisfiedResult(
+                "MissingResourceForAlias",
+                self,
+                node,
+                reasons=[
+                    "{} does not have resource {}".format(node, self.resource_name)
+                ],
+            )
+        return SatisfiedResult("success", self, node)
+
+    def do_decrement(self, node: "Node") -> bool:
+        node.available[self.alias] = node.resources[self.resource_name]
+        return True
+
+    def minimum_space(self, node: "Node") -> int:
+        return -1
+
+    def __str__(self) -> str:
+        return "Alias({}, {})".format(self.alias, self.resource_name)
+
+    def to_dict(self) -> dict:
+        return {"class": self.__class__.__name__, self.alias: self.resource_name}
 
 
 def _parse_node_property_constraint(

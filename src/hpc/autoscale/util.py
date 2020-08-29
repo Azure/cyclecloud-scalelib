@@ -154,3 +154,31 @@ def new_singleton_lock(config: Dict) -> SingletonLock:
         return SingletonFileLock(lock_path)
 
     return NullSingletonLock()
+
+
+class AliasDict(dict):
+    """
+    Dictionary that allows you to set/get/contain an alias of the actual key.
+    The alias key will never show up in keys() or items().
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.__aliases: Dict = {}
+
+    def add_alias(self, alias: str, canonical: str) -> None:
+        self.__aliases[alias] = canonical
+
+    def _key(self, key: object) -> object:
+        if key in self.__aliases:
+            return self.__aliases[key]
+        return key
+
+    def __contains__(self, key: object) -> bool:
+        return super().__contains__(self._key(key))
+
+    def __getitem__(self, key: object) -> object:
+        return super().__getitem__(self._key(key))
+
+    def __setitem__(self, key: object, value: object) -> None:
+        return super().__setitem__(self._key(key), value)

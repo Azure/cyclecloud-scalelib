@@ -125,7 +125,8 @@ def test_multi_array_alloc(bindings: MockClusterBinding) -> None:
         {"node.nodearray": ["htc", "hpc"], "exclusive": True}, node_count=20
     )
 
-    assert result and len(result.nodes) == 15
+    assert result
+    assert len(result.nodes) == 15
     assert hpc.available_count == 0
     assert htc.available_count == 0
     assert set(["htc", "hpc"]) == set([n.nodearray for n in result.nodes])
@@ -174,20 +175,22 @@ def test_excl_colocated_packing_bug() -> None:
 
 
 def test_packing(node_mgr: NodeManager) -> None:
+    # htc node can fit 4 ncpus, so only allocate one node
     result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=2)
     assert result, str(result)
     assert len(result.nodes) == 1, result.nodes
     assert result.nodes[0].name == "htc-1"
     assert result.nodes[0].resources["ncpus"] == 4
     assert result.nodes[0].available["ncpus"] == 2, result.nodes[0].available["ncpus"]
-
     assert len(node_mgr.new_nodes) == 1, len(node_mgr.new_nodes)
+
+    # htc node can fit 4 ncpus, so only allocate one node
     result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=4)
     assert result
     assert len(result.nodes) == 2, result.nodes
     assert result.nodes[0].name == "htc-1"
     assert result.nodes[1].name == "htc-2"
-    assert len(node_mgr.new_nodes) == 2
+    assert len(node_mgr.new_nodes) == 2, [n.name for n in node_mgr.new_nodes]
     assert len(set([n.name for n in node_mgr.new_nodes])) == 2
     result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=2)
     assert len(result.nodes) == 1
@@ -311,8 +314,13 @@ def test_mock_bindings(bindings: MockClusterBinding) -> None:
 
     hpc.decrement(1)
     assert hpc.family_available_count == 9
+    assert htc.family_available_count == 20
+    hpc.commit()
+    assert hpc.family_available_count == 9
     assert htc.family_available_count == 18
+
     hpc.increment(1)
+    hpc.commit()
     assert hpc.family_available_count == 10
     assert htc.family_available_count == 20
 
@@ -566,8 +574,10 @@ def test_overscaling_error() -> None:
     bindings.add_bucket("htc", "Standard_E2s_v3", max_count=80, available_count=4)
 
     node_mgr = _node_mgr(bindings)
+    node_mgr.set_system_default_resources()
     result = node_mgr.allocate({"ncpus": 1}, slot_count=10, assignment_id="slots")
     assert result
+    assert len(result.nodes) > 1
 
     result = node_mgr.allocate(
         {"exclusive": True, "node.vm_size": "Standard_D16s_v3"},
@@ -578,6 +588,7 @@ def test_overscaling_error() -> None:
 
     by_size = partition(node_mgr.new_nodes, lambda b: b.vm_size)
 
+    assert "Standard_E2s_v3" in by_size
     assert len(by_size["Standard_E2s_v3"]) == 4
     assert len(by_size["Standard_E16_v3"]) == 1
     assert len(by_size["Standard_D16s_v3"]) == 10
@@ -610,6 +621,7 @@ def test_overscaling_error() -> None:
 
     by_size = partition(node_mgr.get_nodes(), lambda b: b.vm_size)
 
+    assert "Standard_E2s_v3" in by_size
     assert len(by_size["Standard_E2s_v3"]) == 4
     assert len(by_size["Standard_E16_v3"]) == 1
     assert len(by_size["Standard_D16s_v3"]) == 10

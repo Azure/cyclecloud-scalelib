@@ -142,7 +142,7 @@ class CandidatesResult(Result):
         fire_result_handlers(self)
 
     def __str__(self) -> str:
-        reasons = " AND ".join(set(self.reasons))[:5]
+        reasons = " AND ".join(list(set(self.reasons))[:5])
         if self:
             return "CandidatesResult(status={}, candidates={})".format(
                 self.status, [str(x) for x in self.candidates]

@@ -13,6 +13,7 @@ from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.node.constraints import NodeConstraint
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.results import MatchResult
+from hpc.autoscale.util import AliasDict
 
 # state is added by default because it also has a setter
 # property and most tools get confused by this
@@ -70,7 +71,7 @@ class Node(ABC):
         self.__infiniband = infiniband
 
         self._resources = resources or ht.ResourceDict({})
-        self.__available = deepcopy(self._resources)
+        self.__available = AliasDict(deepcopy(self._resources))
 
         self.__state = state
         self.__exists = exists

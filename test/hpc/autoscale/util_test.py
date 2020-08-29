@@ -2,6 +2,7 @@ import os
 import tempfile
 
 from hpc.autoscale.util import (
+    AliasDict,
     NullSingletonLock,
     SingletonFileLock,
     new_singleton_lock,
@@ -51,3 +52,24 @@ def test_new_singleton_lock() -> None:
         assert expected == fr.read()
     singleton_lock.unlock()
     os.remove(lock_file)
+
+
+def test_alias_dict() -> None:
+    d = AliasDict()
+    assert not d
+    d["c"] = 100
+    assert "a" not in d
+    d.add_alias("a", "c")
+    assert d._key("a") == "c"
+    assert "a" not in d.keys()
+    assert "a" in d
+    assert d["a"] == 100
+    assert d["c"] == 100
+
+    d["a"] = 90
+    assert d["a"] == 90
+    assert d["c"] == 90
+
+    d["c"] = 80
+    assert d["a"] == 80
+    assert d["c"] == 80
