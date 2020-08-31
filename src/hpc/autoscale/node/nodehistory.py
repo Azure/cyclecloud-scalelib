@@ -60,7 +60,11 @@ def initialize_db(path: str, read_only: bool) -> sqlite3.Connection:
     try:
         if read_only:
             path = os.path.abspath(path)
-            file_uri = "file://{}?mode=ro".format(path)
+            # just use an in memory db if this is the first time this is run
+            if not os.path.exists(path):
+                file_uri = "mem:temp"
+            else:
+                file_uri = "file://{}?mode=ro".format(path)
             conn = sqlite3.connect(file_uri, uri=True)
         else:
             file_uri = path
