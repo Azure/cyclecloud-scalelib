@@ -885,6 +885,8 @@ class NodeManager:
         self.add_default_resource({}, "ncpus", "node.vcpu_count")
         self.add_default_resource({}, "pcpus", "node.pcpu_count")
         self.add_default_resource({}, "ngpus", "node.gpu_count")
+        self.add_default_resource({}, "memb", MemoryDefault("b"))
+        self.add_default_resource({}, "memkb", MemoryDefault("k"))
         self.add_default_resource({}, "memmb", MemoryDefault("m"))
         self.add_default_resource({}, "memgb", MemoryDefault("g"))
         self.add_default_resource({}, "memtb", MemoryDefault("t"))
