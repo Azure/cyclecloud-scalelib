@@ -1,6 +1,9 @@
 from typing import Any, List
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as s
+from hypothesis.strategies import SearchStrategy
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
@@ -13,9 +16,6 @@ from hpc.autoscale.results import (
     unregister_all_result_handlers,
 )
 from hpc.autoscale.util import partition, partition_single
-from hypothesis import given, settings
-from hypothesis import strategies as s
-from hypothesis.strategies import SearchStrategy
 
 
 def setup_function(function: Any) -> None:
@@ -129,6 +129,48 @@ def test_multi_array_alloc(bindings: MockClusterBinding) -> None:
     assert hpc.available_count == 0
     assert htc.available_count == 0
     assert set(["htc", "hpc"]) == set([n.nodearray for n in result.nodes])
+
+
+def test_excl_colocated_packing_bug() -> None:
+    def n() -> NodeManager:
+        return _node_mgr(_bindings())
+
+    # assert [] == node_mgr.get_nodes()
+    # result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1, "exclusive": True}, slot_count=2_000_000, all_or_nothing=True)
+    # assert not result, str(result)
+    # assert [] == node_mgr.get_nodes()
+    # assert [] == node_mgr.new_nodes
+    register_result_handler(DefaultContextHandler("[ttt]"))
+    result = n().allocate(
+        {"node.nodearray": "htc", "ncpus": 1, "exclusive": True},
+        slot_count=10,
+        all_or_nothing=True,
+    )
+    assert len(result.nodes) == 3, len(result.nodes)
+
+    result = n().allocate(
+        {
+            "node.nodearray": "htc",
+            "ncpus": 1,
+            "exclusive": True,
+            "node.vm_size": "Standard_F4s",
+        },
+        slot_count=19,
+        all_or_nothing=True,
+    )
+    assert len(result.nodes) == 5, len(result.nodes)
+
+    result = n().allocate(
+        {
+            "node.nodearray": "htc",
+            "ncpus": 1,
+            "exclusive": True,
+            "node.vm_size": "Standard_F4s",
+        },
+        node_count=101,
+        all_or_nothing=True,
+    )
+    assert not result, result
 
 
 def test_packing(node_mgr: NodeManager) -> None:

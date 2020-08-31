@@ -1,7 +1,7 @@
 import typing
-from uuid import uuid4
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union
+from uuid import uuid4
 
 import hpc  # noqa: F401
 import hpc.autoscale.hpclogging as logging
@@ -40,6 +40,9 @@ class NodeConstraint(ABC):
     @abstractmethod
     def to_dict(self) -> dict:
         raise RuntimeError()
+
+    def get_children(self) -> Iterable["NodeConstraint"]:
+        return []
 
     @abstractmethod
     def __str__(self) -> str:
@@ -181,40 +184,42 @@ class MinResourcePerNode(BaseNodeConstraint):
 class ExclusiveNode(BaseNodeConstraint):
     def __init__(self, is_exclusive: bool = True) -> None:
         self.is_exclusive = is_exclusive
+        self.assignment_id = str(uuid4())
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
-        if node.closed:
-            msg = "[name={} hostname={}]already has an exclusive job".format(
-                node.name, node.hostname
-            )
-            return SatisfiedResult("ExclusiveRequirementFailed", self, node, [msg],)
-
-        if bool(node.assignments):
-            if self.is_exclusive:
-                msg = "Job is exclusive and Node[name={} hostname={}] already has a match".format(
-                    node.name, node.hostname
+        # TODO clean up
+        if node.assignments or node.closed:
+            if self.assignment_id not in node.assignments:
+                msg = "[name={} hostname={}] already has an exclusive job: {}".format(
+                    node.name, node.hostname, node.assignments
                 )
                 return SatisfiedResult("ExclusiveRequirementFailed", self, node, [msg],)
-
         return SatisfiedResult("success", self, node)
 
     def do_decrement(self, node: "Node") -> bool:
-        if node.closed:
-            raise RuntimeError(
-                "Can not call ExclusiveNode.do_decrement on a closed node!"
-            )
+        # if node.closed:
+        #     # the job may not be assigned yet, or we may be packing more than one
+        #     # instance of the job on the machine
+        #     if (not self.is_exclusive) or self.assignment_id not in node.assignments:
+        #         raise RuntimeError(
+        #             "Can not call ExclusiveNode.do_decrement on a closed node! node %s %s" % (node, node.assignments)
+        #         )
+        #     # we already marked this node as exclusive
+        #     assert node.closed
+        # elif self.is_exclusive:
+        #     node.closed = True
+        #     assert not node.assignments
         if self.is_exclusive:
             node.closed = True
         return True
 
     def minimum_space(self, node: "Node") -> int:
+        assert self.assignment_id
+        assert node.vcpu_count > 0
         if node.closed:
-            return 0
-
-        if not self.is_exclusive:
-            return -1
-
-        return 0 if bool(node.assignments) else 1
+            if self.assignment_id not in node.assignments:
+                return 0
+        return -1
 
     def to_dict(self) -> dict:
         return ConstraintDict({"exclusive": self.is_exclusive})
@@ -283,6 +288,9 @@ class Or(BaseNodeConstraint):
 
         return False
 
+    def get_children(self) -> Iterable[NodeConstraint]:
+        return self.constraints
+
     def __str__(self) -> str:
         return " or ".join([str(c) for c in self.constraints])
 
@@ -332,6 +340,7 @@ class XOr(BaseNodeConstraint):
 
     def do_decrement(self, node: "Node") -> bool:
         xor_result: Union[bool, "SatisfiedResult"] = False
+        first_matched_constraint: Optional[NodeConstraint] = None
 
         for c in self.constraints:
             expr_result = c.satisfied_by_node(node)
@@ -341,11 +350,16 @@ class XOr(BaseNodeConstraint):
                         "XOr expression is invalid but do_decrement was still called."
                     )
                 xor_result = expr_result
+                assert first_matched_constraint is None
+                first_matched_constraint = c
 
-        if xor_result:
-            return c.do_decrement(node)
+        if xor_result and first_matched_constraint:
+            return first_matched_constraint.do_decrement(node)
 
         return False
+
+    def get_children(self) -> Iterable[NodeConstraint]:
+        return self.constraints
 
     def __str__(self) -> str:
         return " xor ".join([str(c) for c in self.constraints])
@@ -376,6 +390,9 @@ class And(BaseNodeConstraint):
                 assert c.do_decrement(node)
         return True
 
+    def get_children(self) -> Iterable[NodeConstraint]:
+        return self.constraints
+
     def __str__(self) -> str:
         return " and ".join([str(c) for c in self.constraints])
 
@@ -403,6 +420,9 @@ class Not(BaseNodeConstraint):
 
     def to_dict(self) -> dict:
         return {"not": self.condition.to_dict()}
+
+    def get_children(self) -> Iterable[NodeConstraint]:
+        return [self.condition]
 
     def __str__(self) -> str:
         return "Not({})".format(self.condition)
@@ -516,6 +536,9 @@ def new_job_constraint(
         return value
 
     if attr == "exclusive":
+        if isinstance(value, str) and value.isdigit():
+            value = int(value)
+
         if isinstance(value, str):
             if value.lower() not in ["true", "false"]:
                 raise RuntimeError("Unexpected value for exclusive: {}".format(value))
@@ -523,8 +546,9 @@ def new_job_constraint(
         elif isinstance(value, int):
             value = bool(value)
         if not isinstance(value, bool):
-
-            raise RuntimeError("Unexpected value for exclusive: {}".format(value))
+            raise RuntimeError(
+                "Unexpected value for exclusive: {} {}".format(value, type(format))
+            )
         return ExclusiveNode(is_exclusive=value)
 
     if attr == "not":

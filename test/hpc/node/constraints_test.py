@@ -125,19 +125,19 @@ def test_exclusive_node() -> None:
     assert ctrue.do_decrement(s)
 
     s.assign("1")
-    assert not ctrue.satisfied_by_node(s)
-    try:
-        ctrue.do_decrement(s)
-        assert False
-    except RuntimeError:
-        pass
+    ctrue.assignment_id = "1"
+    assert ctrue.satisfied_by_node(s)
+    assert ctrue.do_decrement(s)
 
     assert s.closed
 
-    assert 0 == ctrue.minimum_space(s)
+    assert 1 == ctrue.minimum_space(s)
 
     cfalse = get_constraint({"exclusive": False})
+    cfalse.assignment_id = "2"
     assert isinstance(cfalse, ExclusiveNode)
+    assert s.assignments
+    # s is already assign to something
     assert not cfalse.satisfied_by_node(s)
     assert 0 == cfalse.minimum_space(s)
     try:

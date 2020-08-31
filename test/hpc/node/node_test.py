@@ -1,5 +1,6 @@
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
 from hpc.autoscale.job.computenode import SchedulerNode
+from hpc.autoscale.job.job import Job
 from hpc.autoscale.node.nodemanager import new_node_manager
 
 
@@ -71,3 +72,20 @@ def test_custom_node_attrs_and_node_config() -> None:
     node.node_attribute_overrides["Configuration"]["myscheduler"]["B"] = 2
 
     node.node_attribute_overrides["Configuration"] = {"myscheduler": {"A": 1, "B": 2}}
+
+
+def test_clone() -> None:
+    orig = SchedulerNode("lnx0", {"ncpus": 4})
+    new = orig.clone()
+    assert new.available["ncpus"] == 4
+    assert new.resources["ncpus"] == 4
+    new.available["ncpus"] -= 1
+    assert new.available["ncpus"] == 3
+    assert orig.available["ncpus"] == 4
+
+    job = Job("1", {"ncpus": 2})
+    new.decrement(job._constraints, assignment_id=job.name)
+    assert new.available["ncpus"] == 1
+    assert orig.available["ncpus"] == 4
+    assert new.assignments == set(["1"])
+    assert orig.assignments == set()

@@ -1,5 +1,5 @@
 import typing
-from typing import Any, Dict, List, NewType, Optional, Union
+from typing import Any, Dict, Iterable, List, NewType, Optional, Union
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.codeanalysis import hpcwrapclass
@@ -68,8 +68,16 @@ class Job:
             constraints = [constraints]
 
         self._constraints = get_constraints(constraints)
-        for jc in self._constraints:
-            assert jc is not None
+
+        def update_assignment_id(constraints: Iterable[Any]) -> None:
+            for constraint in constraints:
+                assert constraint is not None
+                if hasattr(constraint, "assignment_id"):
+                    constraint.assignment_id = self.name
+                update_assignment_id(constraint.get_children())
+
+        update_assignment_id(self._constraints)
+
         self.__executing_hostnames = executing_hostnames or []
 
     @property
@@ -108,6 +116,10 @@ class Job:
     @property
     def node_count(self) -> int:
         return self.__node_count
+
+    @property
+    def colocated(self) -> bool:
+        return self.__colocated
 
     def do_allocate(
         self,
