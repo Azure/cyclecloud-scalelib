@@ -307,14 +307,10 @@ class XOr(BaseNodeConstraint):
         self.constraints = get_constraints(list(constraints))
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
-        xor_result: SatisfiedResult = SatisfiedResult(
-            "UnknownReason",
-            self,
-            node,
-            ["Constraint {} failed for an unknown reason".format(self)],
-        )
-
         reasons: List[str] = []
+
+        xor_result: Optional[SatisfiedResult] = None
+        
         for n, c in enumerate(self.constraints):
             expr_result = c.satisfied_by_node(node)
 

@@ -271,7 +271,8 @@ def bucket_candidates(
                 if hasattr(result, "reasons"):
                     reasons.append(result)
                 break
-            satisfaction_scores.append(result.score)
+            num_open_nodes = len([n for n in bucket.nodes if not n.closed])
+            satisfaction_scores.append(result.score * num_open_nodes)
 
         if is_unsatisfied:
             allocation_failures.extend(reasons)
