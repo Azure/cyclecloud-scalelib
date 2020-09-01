@@ -1,6 +1,7 @@
 import os
 import uuid as uuidlib
 from abc import ABC, abstractmethod
+from functools import reduce
 from typing import Any, Callable, Dict, List, TextIO, TypeVar
 
 from hpc.autoscale.codeanalysis import hpcwrapclass
@@ -57,16 +58,20 @@ def partition(node_list: List[T], func: Callable[[T], K]) -> Dict[K, List[T]]:
     return by_key
 
 
-def partition_single(node_list: List[T], func: Callable[[T], K]) -> Dict[K, T]:
+def partition_single(
+    node_list: List[T], func: Callable[[T], K], strict: bool = True
+) -> Dict[K, T]:
     result = partition(node_list, func)
     ret: Dict[K, T] = {}
     for key, value in result.items():
         if len(value) > 1:
-            raise RuntimeError(
-                "Could not partition list into single values - key={} values={}".format(
-                    key, value,
+
+            if strict or not reduce(lambda x, y: x == y, value):  # type: ignore
+                raise RuntimeError(
+                    "Could not partition list into single values - key={} values={}".format(
+                        key, value,
+                    )
                 )
-            )
         ret[key] = value[0]
     return ret
 

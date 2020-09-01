@@ -833,7 +833,7 @@ class NodeManager:
 
         result: NodeManagementResult = function(managed_nodes)
 
-        by_name = partition_single(nodes, lambda n: n.name)
+        by_name = partition_single(nodes, lambda n: n.name, strict=False)
         mgmt_by_name: Dict[ht.NodeName, NodeManagementResultNode]
         mgmt_by_name = partition_single(result.nodes, lambda n: n.name)
 
