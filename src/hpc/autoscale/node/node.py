@@ -102,7 +102,7 @@ class Node(ABC):
 
     @property
     def required(self) -> bool:
-        return self._allocated
+        return self._allocated or bool(self.assignments)
 
     @required.setter
     def required(self, value: bool) -> None:
@@ -460,6 +460,7 @@ class Node(ABC):
         # TODO RDH test coverage
         self.required = self.required or snode.required or bool(snode.assignments)
         self.__assignments.update(snode.assignments)
+        self.metadata.update(deepcopy(snode.metadata))
 
     def __str__(self) -> str:
         hostname = self.hostname if self.exists else "..."
