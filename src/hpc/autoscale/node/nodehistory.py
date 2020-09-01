@@ -133,9 +133,10 @@ class SQLiteNodeHistory(NodeHistory):
         )
 
         rows_by_id = partition_single(rows, lambda r: r[0])
+        nodes_with_ids = [n for n in nodes if n.delayed_node_id.node_id]
 
         nodes_by_id: typing.Dict[typing.Optional[NodeId], Node] = partition_single(
-            list(nodes), lambda n: n.delayed_node_id.node_id,
+            nodes_with_ids, lambda n: n.delayed_node_id.node_id,
         )
 
         to_delete = set(rows_by_id.keys()) - set(nodes_by_id.keys())
