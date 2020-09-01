@@ -310,7 +310,7 @@ class XOr(BaseNodeConstraint):
         reasons: List[str] = []
 
         xor_result: Optional[SatisfiedResult] = None
-        
+
         for n, c in enumerate(self.constraints):
             expr_result = c.satisfied_by_node(node)
 

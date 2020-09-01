@@ -6,9 +6,9 @@ import sys
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, TextIO, Tuple
 
+import frozendict
 from typing_extensions import Literal
 
-import frozendict
 from hpc.autoscale import hpclogging as logging
 from hpc.autoscale.codeanalysis import hpcwrapclass
 from hpc.autoscale.hpctypes import Hostname

@@ -3,6 +3,7 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 import frozendict
+
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import util
 from hpc.autoscale.codeanalysis import hpcwrapclass
@@ -272,7 +273,8 @@ def bucket_candidates(
                     reasons.append(result)
                 break
             num_open_nodes = len([n for n in bucket.nodes if not n.closed])
-            satisfaction_scores.append(result.score * num_open_nodes)
+            if result.score is not None:
+                satisfaction_scores.append(result.score * num_open_nodes)
 
         if is_unsatisfied:
             allocation_failures.extend(reasons)

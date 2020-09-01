@@ -10,9 +10,9 @@ from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
+from frozendict import frozendict
 
 import hpc.autoscale.hpclogging as logging
-from frozendict import frozendict
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings import new_cluster_bindings
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
@@ -406,10 +406,21 @@ class NodeManager:
                 bucket.decrement(1)
 
         if remaining_slots() == initial_slot_count:
-            return AllocationResult("InsufficientResources", reasons=["Could not allocate {} slots for bucket {}".format(remaining_slots(), bucket)])
+            return AllocationResult(
+                "InsufficientResources",
+                reasons=[
+                    "Could not allocate {} slots for bucket {}".format(
+                        remaining_slots(), bucket
+                    )
+                ],
+            )
 
         if not allocated_nodes:
-            raise RuntimeError("Empty but successful node allocation for {} with constraints {}".format(bucket, constraints))
+            raise RuntimeError(
+                "Empty but successful node allocation for {} with constraints {}".format(
+                    bucket, constraints
+                )
+            )
 
         if commit:
             self._commit(bucket, list(allocated_nodes.values()))

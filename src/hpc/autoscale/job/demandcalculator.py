@@ -384,7 +384,7 @@ def new_demand_calculator(
         config_dict = config
 
     existing_nodes = existing_nodes or []
-    
+
     if isinstance(config, str):
         with open(config) as fr:
             config = json.load(fr)

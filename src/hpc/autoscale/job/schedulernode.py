@@ -2,6 +2,7 @@ import socket
 import typing
 
 from frozendict import frozendict
+
 from hpc.autoscale import hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.codeanalysis import hpcwrapclass

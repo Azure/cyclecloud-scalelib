@@ -5,8 +5,9 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
-import hpc.autoscale.hpclogging as logging
 from frozendict import frozendict
+
+import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.codeanalysis import hpcwrap
 from hpc.autoscale.node import vm_sizes
