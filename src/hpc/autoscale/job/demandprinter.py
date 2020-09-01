@@ -179,19 +179,7 @@ class DemandPrinter:
 
                 row.append(value)
 
-        if self.output_format == "json":
-            json.dump(
-                [dict(zip(columns, row)) for row in rows], self.stream, indent=2,
-            )
-        else:
-            widths = self._calc_width(columns, rows)
-            formats = " ".join(["{:%d}" % x for x in widths])
-            if self.output_format == "table":
-                print(formats.format(*[c.upper() for c in columns]), file=self.stream)
-
-            for row in rows:
-                print(formats.format(*[str(r) for r in row]), file=self.stream)
-        self.stream.flush()
+        print_rows(columns, rows, self.stream, self.output_format)
 
     def __str__(self) -> str:
         return "DemandPrinter(columns={}, output_format={}, stream={})".format(
@@ -300,3 +288,36 @@ class ExcludeDemandPrinterFilter(logginglib.Filter):
 
     def filter(self, record: logginglib.LogRecord) -> bool:
         return record.name != "demandprinter"
+
+
+def calculate_column_widths(
+    columns: List[str], rows: List[List[str]]
+) -> Tuple[int, ...]:
+    maxes = [len(c) for c in columns]
+    for row in rows:
+        for n in range(len(row)):
+            maxes[n] = max(len(row[n]), maxes[n])
+    return tuple(maxes)
+
+
+def print_rows(
+    columns: List[str],
+    rows: List[List[str]],
+    stream: Optional[TextIO] = None,
+    output_format: str = "table",
+) -> None:
+    stream = stream or sys.stdout
+
+    if output_format.lower() == "json":
+        json.dump(
+            [dict(zip(columns, row)) for row in rows], stream, indent=2,
+        )
+    else:
+        widths = calculate_column_widths(columns, rows)
+        formats = " ".join(["{:%d}" % x for x in widths])
+        if output_format == "table":
+            print(formats.format(*[c.upper() for c in columns]), file=stream)
+
+        for row in rows:
+            print(formats.format(*[str(r) for r in row]), file=stream)
+    stream.flush()
