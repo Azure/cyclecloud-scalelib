@@ -120,6 +120,7 @@ class NodeBucket:
             managed=False,
             resources=self.resources,
             software_configuration=definition.software_configuration,
+            keep_alive=False,
         )
 
     def decrement(self, count: int = 1) -> None:
@@ -326,4 +327,5 @@ def node_from_bucket(
         managed=True,
         resources=ht.ResourceDict(bucket.resources),
         software_configuration=bucket.software_configuration,
+        keep_alive=False,
     )

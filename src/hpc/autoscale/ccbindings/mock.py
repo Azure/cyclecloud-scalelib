@@ -242,6 +242,7 @@ class MockClusterBinding(ClusterBindingInterface):
         hostname: Optional[Hostname] = None,
         spot: bool = False,
         placement_group: str = None,
+        keep_alive: bool = False,
     ) -> Node:
         assert nodearray in self.nodearrays
         nodearray_status = self.nodearrays[nodearray]
@@ -303,6 +304,7 @@ class MockClusterBinding(ClusterBindingInterface):
             software_configuration=frozendict(
                 nodearray_record.get("Configuration", {})
             ),
+            keep_alive=keep_alive,
         )
         op_id = OperationId(str(uuid4()))
         self.operations[op_id] = MockNodeManagementResult(op_id, [self.nodes[name]])

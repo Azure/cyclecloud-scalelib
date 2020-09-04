@@ -43,6 +43,7 @@ class SchedulerNode(Node):
             managed=False,
             resources=ht.ResourceDict(resources),
             software_configuration=frozendict({}),
+            keep_alive=False,
         )
 
     def to_dict(self) -> typing.Dict:

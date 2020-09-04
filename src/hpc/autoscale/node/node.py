@@ -57,6 +57,7 @@ class Node(ABC):
         managed: bool,
         resources: ht.ResourceDict,
         software_configuration: frozendict,
+        keep_alive: bool,
     ) -> None:
         self.__name = name
         self.__nodearray = nodearray
@@ -72,7 +73,7 @@ class Node(ABC):
         self.__infiniband = infiniband
 
         self._resources = resources or ht.ResourceDict({})
-        self.__available = AliasDict(deepcopy(self._resources))
+        self.__available = deepcopy(self._resources)
 
         self.__state = state
         self.__exists = exists
@@ -100,14 +101,19 @@ class Node(ABC):
 
         self.__create_time = self.__last_match_time = self.__delete_time = 0.0
         self.__create_time_remaining = self.__idle_time_remaining = 0.0
+        self.__keep_alive = keep_alive
 
     @property
     def required(self) -> bool:
-        return self._allocated or bool(self.assignments)
+        return self.__keep_alive or self._allocated or bool(self.assignments)
 
     @required.setter
     def required(self, value: bool) -> None:
         self._allocated = value
+
+    @property
+    def keep_alive(self) -> bool:
+        return self.__keep_alive
 
     @nodeproperty
     def name(self) -> ht.NodeName:
@@ -353,6 +359,7 @@ class Node(ABC):
             managed=self.managed,
             resources=ht.ResourceDict(deepcopy(self._resources)),
             software_configuration=self.software_configuration,
+            keep_alive=self.__keep_alive,
         )
         ret.available.update(self.available)
         return ret
@@ -518,6 +525,7 @@ class UnmanagedNode(Node):
             managed=False,
             resources=ht.ResourceDict(resources),
             software_configuration=frozendict({}),
+            keep_alive=True,
         )
         assert self.exists
 

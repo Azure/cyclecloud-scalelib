@@ -1282,6 +1282,7 @@ def _node_from_cc_node(
         managed=True,
         resources=resources,
         software_configuration=software_configuration,
+        keep_alive=cc_node_rec.get("KeepAlive", False),
     )
 
 
