@@ -11,6 +11,7 @@ from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
 from frozendict import frozendict
+from typing_extensions import Literal
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
@@ -50,6 +51,7 @@ logger = logging.getLogger("cyclecloud.buckets")
 
 
 DefaultValueFunc = Callable[[Node], ht.ResourceTypeAtom]
+ResourceModifier = Literal["add", "subtract", "multiply", "divide", "divide_floor"]
 
 
 T = TypeVar("T")
@@ -682,6 +684,8 @@ class NodeManager:
         selection: Union[Dict, List[constraintslib.Constraint]],
         resource_name: str,
         default_value: Union[ht.ResourceTypeAtom, DefaultValueFunc],
+        modifier: Optional[ResourceModifier] = None,
+        modifier_magnitude: Optional[Union[int, float]] = None,
     ) -> None:
         if isinstance(default_value, str):
             if default_value.startswith("node."):
@@ -692,6 +696,7 @@ class NodeManager:
 
                     def get_from_node_resources(node: Node) -> ht.ResourceTypeAtom:
                         value = node.resources.get(alias)
+
                         if value is None:
                             msg: str = (
                                 "Could not define default resource name=%s with alias=%s"
@@ -749,13 +754,24 @@ class NodeManager:
 
             def default_value_func(node: Node) -> ht.ResourceTypeAtom:
                 # already checked if it has a call
+                if isinstance(default_value, str):
+                    if default_value.startswith("`") and default_value.endswith("`"):
+                        expr = default_value[1:-1]
+                        return eval(
+                            "(lambda: {})()".format(expr), {"node": node.clone()}
+                        )
                 return default_value  # type: ignore
 
         else:
             default_value_func = default_value  # type: ignore
 
         dr = _DefaultResource(
-            constraints, resource_name, default_value_func, default_value_expr
+            constraints,
+            resource_name,
+            default_value_func,
+            default_value_expr,
+            modifier,
+            modifier_magnitude,
         )
         self.__default_resources.append(dr)
         self._apply_defaults_all()
@@ -926,6 +942,7 @@ class NodeManager:
             managed=False,
             resources=ht.ResourceDict({}),
             software_configuration=frozendict({}),
+            keep_alive=False,
         )
         self._apply_defaults(node)
         return node
@@ -983,7 +1000,7 @@ class MemoryDefault:
         self.mag = mag
 
     def __call__(self, node: Node) -> ht.ResourceTypeAtom:
-        return node.memory.convert_to(self.mag).value
+        return node.memory.convert_to(self.mag)
 
     def __repr__(self) -> str:
         return "node.memory[{}]".format(self.mag)
@@ -1016,8 +1033,24 @@ def new_node_manager(
                     e
                 )
             )
+        modifier = None
+        for op in ["add", "subtract", "multiply", "divide", "divide_floor"]:
+            if op in entry:
+                if modifier:
+                    raise RuntimeError(
+                        "Can not support more than one modifier for default resources at this time. {}".format(
+                            entry
+                        )
+                    )
+                modifier = op
 
-        ret.add_default_resource(entry["select"], entry["name"], entry["value"])
+        ret.add_default_resource(
+            entry["select"],
+            entry["name"],
+            entry["value"],
+            modifier,
+            entry.get(modifier, None),
+        )
 
     return ret
 
@@ -1128,15 +1161,14 @@ def _new_node_manager_79(
             if hardcoded_pg:
                 predefined_pgs.append(hardcoded_pg)
 
-            # TODO RRR RDH
-
             for predef_pg in predefined_pgs:
                 if predef_pg not in placement_groups:
                     placement_groups[predef_pg] = PlacementGroupStatus(
                         active_core_count=0, active_count=0, name=predef_pg
                     )
 
-            # TODO RDH comment
+            # We allow a non-placement grouped bucket. We simply set it to none here and
+            # downstream understands this
             if None not in placement_groups:
                 placement_groups[None] = None
 
@@ -1287,11 +1319,18 @@ class _DefaultResource:
         resource_name: str,
         default_value_function: DefaultValueFunc,
         default_value_expr: str,
+        modifier: Optional[ResourceModifier],
+        modifier_magnitude: Optional[Union[int, float, ht.Memory]],
     ) -> None:
         self.selection = selection
         self.resource_name = resource_name
         self.default_value_function = default_value_function
         self.default_value_expr = default_value_expr
+        assert not (
+            bool(modifier) ^ bool(modifier_magnitude)
+        ), "Please specify both modifier and modifier_magnitude"
+        self.modifier = modifier
+        self.modifier_magnitude = modifier_magnitude
 
     def apply_default(self, node: Node) -> None:
 
@@ -1305,6 +1344,45 @@ class _DefaultResource:
 
         # it met all of our criteria, so set the default
         default_value = self.default_value_function(node)
+        if self.modifier and default_value is not None:
+            if not isinstance(default_value, (float, int, ht.Memory)):
+                raise RuntimeError(
+                    "Can't modify a default resource if the value is not an int, float or memory expression."
+                    + "select={} name={} value={} {}={}".format(
+                        self.selection,
+                        self.resource_name,
+                        default_value,
+                        self.modifier,
+                        self.modifier_magnitude,
+                    )
+                )
+            assert self.modifier_magnitude
+            try:
+                if self.modifier == "add":
+                    default_value = default_value + self.modifier_magnitude  # type: ignore
+                elif self.modifier == "subtract":
+                    default_value = default_value - self.modifier_magnitude  # type: ignore
+                elif self.modifier == "multiply":
+                    default_value = default_value * self.modifier_magnitude  # type: ignore
+                elif self.modifier == "divide":
+                    default_value = default_value / self.modifier_magnitude  # type: ignore
+                elif self.modifier == "divide_floor":
+                    default_value = default_value // self.modifier_magnitude  # type: ignore
+                else:
+                    raise RuntimeError("Unsupported modifier {}".format(self))
+            except Exception as e:
+                logging.error(
+                    "Could not modify default value: 'Error={}' select={} name={} value={} {}={}".format(
+                        e,
+                        self.selection,
+                        self.resource_name,
+                        default_value,
+                        self.modifier,
+                        self.modifier_magnitude,
+                    )
+                )
+                return
+
         node._resources[self.resource_name] = default_value
         node.available[self.resource_name] = default_value
 
