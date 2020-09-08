@@ -113,6 +113,9 @@ class Memory:
             return Memory(num, mag)
         raise RuntimeError("Unsupported memory value '{}'".format(value))
 
+    def __int__(self) -> int:
+        return int(self.value)
+
     def __add__(self, other: typing.Union[MemoryValue, "Memory"]) -> "Memory":
         other = Memory.value_of(other)
         b = float(self) + float(other)
@@ -132,27 +135,44 @@ class Memory:
             )
         return Memory((self.value / other), self.magnitude)
 
-    def __floordiv__(self, other: float) -> "Memory":
-        return Memory((self.value // other), self.magnitude)
+    def __floordiv__(self, other: typing.Tuple[float, "Memory"]) -> "Memory":
+        as_float: float
+        if isinstance(other, Memory):
+            as_float = other.convert_to(self.magnitude).value
+        elif isinstance(other, (float, int)):
+            as_float = other
+        return Memory((self.value // as_float), self.magnitude)
 
     def __mul__(self, other: MemoryValue) -> "Memory":
         b = float(self) * float(other)
         new_value = b / _MAG_CONVERSIONS[self.magnitude]
         return Memory(new_value, self.magnitude)
 
+    def __float_eq(self, f1: float, f2: float) -> bool:
+        # FYI we are comparing bytes here, so it will likely be tiny
+        return abs(f1 - f2) < 10 ** -10
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, (int, float, Memory)):
             return False
-
         other = Memory.value_of(other)
-        # FYI we are comparing bytes here, so it will likely be tiny
-        return abs(float(self) - float(other)) < 10 ** -10
+        return self.__float_eq(float(self), float(other))
 
     def __gt__(self, other: MemoryValue) -> bool:
         return float(self) > float(other)
 
+    def __ge__(self, other: MemoryValue) -> bool:
+        me = float(self)
+        them = float(other)
+        return me > them or self.__float_eq(me, them)
+
     def __lt__(self, other: MemoryValue) -> bool:
-        return float(self) > float(other)
+        return float(self) < float(other)
+
+    def __le__(self, other: MemoryValue) -> bool:
+        me = float(self)
+        them = float(other)
+        return me < them or self.__float_eq(me, them)
 
     def __str__(self) -> str:
         return "{}{}".format(self.value, self.magnitude)
