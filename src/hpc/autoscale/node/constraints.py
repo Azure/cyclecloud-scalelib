@@ -182,15 +182,22 @@ class MinResourcePerNode(BaseNodeConstraint):
 
 @hpcwrapclass
 class ExclusiveNode(BaseNodeConstraint):
-    def __init__(self, is_exclusive: bool = True) -> None:
+    def __init__(
+        self,
+        is_exclusive: bool = True,
+        job_exclusive: bool = True,
+        assignment_id: str = "",
+    ) -> None:
         self.is_exclusive = is_exclusive
         assert self.is_exclusive, "Only exclusive=true is supported at this time"
-        self.assignment_id = str(uuid4())
+        self.assignment_id = assignment_id or str(uuid4())
+        self.job_exclusive = job_exclusive
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
         # TODO clean up
         if node.assignments or node.closed:
-            if self.assignment_id not in node.assignments:
+
+            if self.job_exclusive or self.assignment_id not in node.assignments:
                 msg = "[name={} hostname={}] already has an exclusive job: {}".format(
                     node.name, node.hostname, node.assignments
                 )
@@ -211,14 +218,19 @@ class ExclusiveNode(BaseNodeConstraint):
         #     node.closed = True
         #     assert not node.assignments
         if self.is_exclusive:
+            if self.assignment_id in node.assignments:
+                if self.job_exclusive:
+                    return False
             node.closed = True
         return True
 
     def minimum_space(self, node: "Node") -> int:
         assert self.assignment_id
         assert node.vcpu_count > 0
-        if node.closed:
+        if node.assignments:
             if self.assignment_id not in node.assignments:
+                return 0
+            elif self.job_exclusive:
                 return 0
         return -1
 
@@ -563,7 +575,7 @@ def new_job_constraint(
     if isinstance(value, NodeConstraint):
         return value
 
-    if attr == "exclusive":
+    if attr in ["exclusive", "exclusive_task"]:
         if isinstance(value, str) and value.isdigit():
             value = int(value)
 
@@ -577,7 +589,10 @@ def new_job_constraint(
             raise RuntimeError(
                 "Unexpected value for exclusive: {} {}".format(value, type(format))
             )
-        return ExclusiveNode(is_exclusive=value)
+        # exclusive_tasks = multiple tasks from the same job run on the same node
+        # exclusive = only a single task from the same job can run on the same node
+        job_exclusive = attr == "exclusive"
+        return ExclusiveNode(is_exclusive=value, job_exclusive=job_exclusive)
 
     if attr == "not":
         not_cons = get_constraint(value)
