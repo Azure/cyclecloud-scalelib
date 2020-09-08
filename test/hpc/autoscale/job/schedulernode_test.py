@@ -115,5 +115,6 @@ def schedulernode() -> SearchStrategy[SchedulerNode]:
 
 @given(schedulernode())
 def test_schedulernode_json(a: SchedulerNode):
+    SchedulerNode.ignore_hostnames = True
     b = SchedulerNode.from_dict(a.to_dict())
     assert _cmp(a, b)

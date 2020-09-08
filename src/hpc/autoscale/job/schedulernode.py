@@ -12,15 +12,20 @@ from hpc.autoscale.node.node import Node
 
 @hpcwrapclass
 class SchedulerNode(Node):
+    # used only internally for testing
+    ignore_hostnames: bool = False
+
     def __init__(self, hostname: str, resources: typing.Optional[dict] = None) -> None:
         resources = resources or ht.ResourceDict({})
-        try:
-            private_ip: typing.Optional[ht.IpAddress] = ht.IpAddress(
-                socket.gethostbyname(hostname)
-            )
-        except Exception as e:
-            logging.warning("Could not find private ip for %s: %s", hostname, e)
+        private_ip: typing.Optional[ht.IpAddress]
+        if SchedulerNode.ignore_hostnames:
             private_ip = None
+        else:
+            try:
+                private_ip = ht.IpAddress(socket.gethostbyname(hostname))
+            except Exception as e:
+                logging.warning("Could not find private ip for %s: %s", hostname, e)
+                private_ip = None
 
         Node.__init__(
             self,
