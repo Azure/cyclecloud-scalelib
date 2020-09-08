@@ -109,12 +109,19 @@ class DemandPrinter:
             columns.insert(0, "name")
 
         # sort by private ip or the node name
-        ordered_nodes = sorted(
-            demand_result.compute_nodes,
-            key=lambda n: tuple(map(int, n.private_ip.split(".")))
-            if n.private_ip
-            else tuple([2 ** 31] + [ord(l) for l in n.name]),  # noqa: E741
-        )
+
+        def sort_by_ip_or_name(node: Node) -> Any:
+            if node.private_ip:
+                return tuple(map(int, node.private_ip.split(".")))
+            name_toks = node.name.split("-")
+            if name_toks[-1].isdigit():
+                node_index = int(name_toks[-1])
+                nodearray_ord = [ord(l) for l in node.nodearray]
+                # 2**31 to make these come after private ips
+                # then nodearray name, then index
+                return tuple([2 ** 31] + nodearray_ord + [node_index])
+
+        ordered_nodes = sorted(demand_result.compute_nodes, key=sort_by_ip_or_name)
 
         for node in ordered_nodes:
             row: List[str] = []
