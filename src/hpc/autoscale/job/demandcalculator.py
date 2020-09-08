@@ -258,7 +258,11 @@ class DemandCalculator:
             for_at_least=at_least
         ):
             if node_id and node_id in by_id and idle_time > at_least:
-                ret.append(by_id[node_id])
+                node = by_id[node_id]
+                if node.assignments:
+                    continue
+
+                ret.append(node)
         return ret
 
     @apitrace
@@ -266,11 +270,12 @@ class DemandCalculator:
         self, at_least: float = 1800, booting_nodes: Optional[List[Node]] = None,
     ) -> List[Node]:
         if not booting_nodes:
-            booting_nodes = [
-                n for n in self.node_mgr.get_nodes() if n.state != "Started"
-            ]
+            booting_nodes = self.node_mgr.get_nodes()
 
-        booting_nodes = [n for n in booting_nodes if n.exists]
+        # filter out nodes that have converged.
+        booting_nodes = [
+            n for n in booting_nodes if n.exists and n.state not in ["Ready", "Started"]
+        ]
 
         by_id = partition_single(booting_nodes, lambda n: n.delayed_node_id.node_id)
 

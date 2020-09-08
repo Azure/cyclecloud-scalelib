@@ -23,14 +23,14 @@ from hpc.autoscale.node.node import (
 from hpc.autoscale.results import SatisfiedResult
 
 
-def test_minimum_space():
+def test_minimum_space() -> None:
     c = MinResourcePerNode("pcpus", 1)
-    assert 1 == c.minimum_space(SchedulerNode("nodey", {"pcpus": 1}))
-    assert 2 == c.minimum_space(SchedulerNode("nodey", {"pcpus": 2}))
-    snode = SchedulerNode("nodey", {"pcpus": 2})
-    assert 1 == ExclusiveNode().minimum_space(snode)
-    # snode.assign("1")
-    # assert 0 == ExclusiveNode().minimum_space(snode)
+    assert 1 == c.minimum_space(SchedulerNode("", {"pcpus": 1}))
+    assert 2 == c.minimum_space(SchedulerNode("", {"pcpus": 2}))
+    snode = SchedulerNode("", {"pcpus": 2})
+    assert -1 == ExclusiveNode(assignment_id="1").minimum_space(snode)
+    snode.assign("1")
+    assert 0 == ExclusiveNode(assignment_id="1").minimum_space(snode)
 
 
 def test_min_resource_per_node() -> None:
@@ -93,7 +93,7 @@ def test_node_resource_constraint() -> None:
     assert c.satisfied_by_node(SchedulerNode("wrong-blah-define", {"blah": "A"}))
 
 
-def test_exclusive_node() -> None:
+def test_exclusive_node_parsing() -> None:
     assert (
         ExclusiveNode(True).to_dict() == get_constraint({"exclusive": True}).to_dict()
     )
@@ -101,14 +101,14 @@ def test_exclusive_node() -> None:
         ExclusiveNode(True).to_dict() == get_constraint({"exclusive": "true"}).to_dict()
     )
     assert ExclusiveNode(True).to_dict() == get_constraint({"exclusive": 1}).to_dict()
-    assert (
-        ExclusiveNode(False).to_dict()
-        == get_constraint({"exclusive": "faLse"}).to_dict()
-    )
-    assert ExclusiveNode(False).to_dict() == get_constraint({"exclusive": 0}).to_dict()
-    assert (
-        ExclusiveNode(False).to_dict() == get_constraint({"exclusive": False}).to_dict()
-    )
+    # assert (
+    #     ExclusiveNode(False).to_dict()
+    #     == get_constraint({"exclusive": "faLse"}).to_dict()
+    # )
+    # assert ExclusiveNode(False).to_dict() == get_constraint({"exclusive": 0}).to_dict()
+    # assert (
+    #     ExclusiveNode(False).to_dict() == get_constraint({"exclusive": False}).to_dict()
+    # )
 
     try:
         get_constraint({"exclusive": "asdf"})
@@ -116,40 +116,64 @@ def test_exclusive_node() -> None:
     except RuntimeError:
         pass
 
-    s = SchedulerNode("ip-123")
 
-    ctrue = get_constraint({"exclusive": True})
-    assert isinstance(ctrue, ExclusiveNode)
-    assert ctrue.satisfied_by_node(s)
-    assert -1 == ctrue.minimum_space(s)
-    assert ctrue.do_decrement(s)
+def test_job_excl() -> None:
+    s = SchedulerNode("")
+    # typical exclusive behavior - one task per job per node
+    job_excl = get_constraint({"exclusive": True})
+    assert job_excl.job_exclusive
+    assert isinstance(job_excl, ExclusiveNode)
+    assert job_excl.satisfied_by_node(s)
+    assert -1 == job_excl.minimum_space(s)
+    assert job_excl.do_decrement(s)
 
     s.assign("1")
-    ctrue.assignment_id = "1"
-    assert ctrue.satisfied_by_node(s)
-    assert ctrue.do_decrement(s)
+    job_excl.assignment_id = "1"
+    # can't put the same jobid on the same node twice
+    assert not job_excl.satisfied_by_node(s)
+    assert not job_excl.do_decrement(s)
+    assert s.closed
+    assert 0 == job_excl.minimum_space(s)
+
+
+def test_task_excl() -> None:
+    s = SchedulerNode("")
+
+    # now to test tack exclusive, where multiple tasks from the same
+    # job can run on the same machine
+    task_excl = get_constraint({"exclusive_task": True})
+    assert not task_excl.job_exclusive
+    assert isinstance(task_excl, ExclusiveNode)
+    assert task_excl.satisfied_by_node(s)
+    assert -1 == task_excl.minimum_space(s)
+    assert task_excl.do_decrement(s)
+
+    s.assign("1")
+    task_excl.assignment_id = "1"
+    assert task_excl.satisfied_by_node(s)
+    assert task_excl.do_decrement(s)
 
     assert s.closed
 
-    assert -1 == ctrue.minimum_space(s)
+    assert -1 == task_excl.minimum_space(s)
 
-    cfalse = get_constraint({"exclusive": False})
-    cfalse.assignment_id = "2"
-    assert isinstance(cfalse, ExclusiveNode)
-    assert s.assignments
-    # s is already assign to something
-    assert not cfalse.satisfied_by_node(s)
-    assert 0 == cfalse.minimum_space(s)
-    try:
-        cfalse.do_decrement(s)
-        assert False
-    except RuntimeError:
-        pass
+    # cfalse = get_constraint({"exclusive": False})
+    # cfalse.assignment_id = "2"
+    # assert isinstance(cfalse, ExclusiveNode)
+    # assert s.assignments
+    # # s is already assign to something
+    # assert not cfalse.satisfied_by_node(s)
+    # assert 0 == cfalse.minimum_space(s)
+    # try:
+    #     cfalse.do_decrement(s)
+    #     assert False
+    # except RuntimeError:
+    #     pass
 
-    s = SchedulerNode("")
-    assert cfalse.satisfied_by_node(s)
-    assert -1 == cfalse.minimum_space(s)
-    assert cfalse.do_decrement(s)
+    # s = SchedulerNode("")
+    # assert cfalse.satisfied_by_node(s)
+    # assert -1 == cfalse.minimum_space(s)
+    # assert cfalse.do_decrement(s)
 
 
 def test_in_a_placement_group() -> None:
@@ -203,12 +227,12 @@ def test_xor() -> None:
     assert c.do_decrement(SchedulerNode("", {"blah": "A"}))
 
 
-def test_non_exclusive_mixed() -> None:
-    simple = get_constraints([{"ncpus": 1}])
-    complex = get_constraints([{"ncpus": 1, "exclusive": False}])
-    node = SchedulerNode("test", {"ncpus": 4})
-    assert minimum_space(simple, node) == 4
-    assert minimum_space(simple, node) == minimum_space(complex, node)
+# def test_non_exclusive_mixed() -> None:
+#     simple = get_constraints([{"ncpus": 1}])
+#     complex = get_constraints([{"ncpus": 1, "exclusive": False}])
+#     node = SchedulerNode("", {"ncpus": 4})
+#     assert minimum_space(simple, node) == 4
+#     assert minimum_space(simple, node) == minimum_space(complex, node)
 
 
 def test_memory() -> None:

@@ -5,7 +5,7 @@ from hpc.autoscale.node.nodemanager import new_node_manager
 
 
 def test_placement_group() -> None:
-    node = SchedulerNode("tux", {})
+    node = SchedulerNode("", {})
     node.exists = False
 
     node.placement_group = ""
@@ -13,6 +13,7 @@ def test_placement_group() -> None:
 
     node.placement_group = "a"
     assert node.placement_group == "a"
+
     node.placement_group = "0"
     assert node.placement_group == "0"
     try:

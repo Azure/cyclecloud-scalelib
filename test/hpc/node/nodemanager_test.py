@@ -426,6 +426,31 @@ def test_default_resources() -> None:
     assert by_nodetype.get("A")[0].resources["vcpus"] == 4
     assert by_nodetype.get("B")[0].resources["vcpus"] == 8
 
+    node_mgr = _node_mgr(_bindings())
+    node_mgr.add_default_resource({}, "add_vcpus", "node.vcpu_count", "add", 4)
+    node_mgr.add_default_resource(
+        {}, "subtract_vcpus", "node.vcpu_count", "subtract", 4
+    )
+    node_mgr.add_default_resource(
+        {}, "multiply_vcpus", "node.vcpu_count", "multiply", 4
+    )
+    node_mgr.add_default_resource({}, "divide_vcpus", "node.vcpu_count", "divide", 4)
+    node_mgr.add_default_resource(
+        {}, "divide_floor_vcpus", "node.vcpu_count", "divide_floor", 1.5
+    )
+
+    by_nodetype = partition(node_mgr.get_buckets(), lambda b: b.resources["nodetype"])
+    assert by_nodetype.get("A")[0].resources["add_vcpus"] == 8
+    assert by_nodetype.get("B")[0].resources["add_vcpus"] == 12
+    assert by_nodetype.get("A")[0].resources["subtract_vcpus"] == 0
+    assert by_nodetype.get("B")[0].resources["subtract_vcpus"] == 4
+    assert by_nodetype.get("A")[0].resources["multiply_vcpus"] == 16
+    assert by_nodetype.get("B")[0].resources["multiply_vcpus"] == 32
+    assert by_nodetype.get("A")[0].resources["divide_vcpus"] == 1
+    assert by_nodetype.get("B")[0].resources["divide_vcpus"] == 2
+    assert by_nodetype.get("A")[0].resources["divide_floor_vcpus"] == 2
+    assert by_nodetype.get("B")[0].resources["divide_floor_vcpus"] == 5
+
 
 def vmindices() -> SearchStrategy[ht.VMSize]:
     class VMIndexStrategy(SearchStrategy):

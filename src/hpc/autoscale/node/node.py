@@ -14,7 +14,6 @@ from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.node.constraints import NodeConstraint
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.results import MatchResult
-from hpc.autoscale.util import AliasDict
 
 # state is added by default because it also has a setter
 # property and most tools get confused by this
@@ -202,12 +201,6 @@ class Node(ABC):
             if self.exists:
                 raise RuntimeError(
                     "Can not change the placement group of an existing node: {} old={} new={}".format(
-                        self, self.__placement_group, value
-                    )
-                )
-            else:
-                raise RuntimeError(
-                    "Can not change the placement group of a node: {} old={} new={}".format(
                         self, self.__placement_group, value
                     )
                 )

@@ -1005,12 +1005,6 @@ def new_node_manager(
         ret.set_system_default_resources()
 
     for entry in config.get("default_resources", []):
-        if set(["select", "name", "value"]) != set(entry.keys()):
-            raise RuntimeError(
-                "default_resources: Expected select=dict name=str value=str: {}".format(
-                    entry
-                )
-            )
 
         try:
             assert isinstance(entry["select"], dict)

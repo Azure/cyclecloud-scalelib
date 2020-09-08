@@ -12,6 +12,7 @@ from hpc.autoscale.node.node import Node
 
 
 def setup_function(function) -> None:
+    SchedulerNode.ignore_hostnames = True
     results.register_result_handler(
         results.DefaultContextHandler("[{}]".format(function.__name__))
     )

@@ -212,13 +212,7 @@ def test_bug100(mixedbindings) -> None:
     dcalc = _new_dc(mixedbindings)
 
     # # 100 cores
-    dcalc.add_job(
-        Job(
-            "tc-10",
-            {"node.nodearray": "htc", "ncpus": 1, "exclusive": False},
-            iterations=10,
-        )
-    )
+    dcalc.add_job(Job("tc-10", {"node.nodearray": "htc", "ncpus": 1}, iterations=10,))
     demand = dcalc.finish()
 
     assert len(demand.new_nodes) == 3
