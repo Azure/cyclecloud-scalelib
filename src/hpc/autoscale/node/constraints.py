@@ -98,9 +98,9 @@ class NodeResourceConstraint(BaseNodeConstraint):
                 )
 
             return SatisfiedResult("InvalidOption", self, node, [msg],)
-        return SatisfiedResult(
-            "success", self, node, score=len(self.values) - self.values.index(target),
-        )
+        # so we want
+        score = len(self.values) - self.values.index(target) + 1
+        return SatisfiedResult("success", self, node, score=score,)
 
     def __str__(self) -> str:
         if len(self.values) == 1:
@@ -116,7 +116,7 @@ class NodeResourceConstraint(BaseNodeConstraint):
 
 @hpcwrapclass
 class MinResourcePerNode(BaseNodeConstraint):
-    def __init__(self, attr: str, value: Union[int, float]) -> None:
+    def __init__(self, attr: str, value: Union[int, float, ht.Memory]) -> None:
         self.attr = attr
         self.value = value
 
@@ -635,7 +635,11 @@ def new_job_constraint(
 
         return NodeResourceConstraint(attr, *value)
 
-    elif isinstance(value, int) or isinstance(value, float):
+    elif (
+        isinstance(value, int)
+        or isinstance(value, float)
+        or isinstance(value, ht.Memory)
+    ):
         return MinResourcePerNode(attr, value)
 
     elif value is None:

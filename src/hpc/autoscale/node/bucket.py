@@ -1,6 +1,6 @@
 import typing
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import frozendict
 
@@ -252,33 +252,19 @@ class NodeBucket:
         return str(self)
 
 
-class BucketSatisfactionScore:
-    def __init__(self, bucket: "NodeBucket", scores: Tuple[float, ...]) -> None:
-        self.__bucket = bucket
-        self.__scores = scores
-
-    @property
-    def bucket(self) -> NodeBucket:
-        return self.__bucket
-
-    @property
-    def scores(self) -> Tuple[float, ...]:
-        return self.__scores
-
-
 def bucket_candidates(
     candidates: List["NodeBucket"], constraints: List["constraintslib.NodeConstraint"],
 ) -> CandidatesResult:
     if not candidates:
-        return CandidatesResult("NoBucketsDefined", child_results=[],)
+        return CandidatesResult("NoBucketsDefined", child_results=[],)  # TODO 46
 
-    satisfied_buckets: List[BucketSatisfactionScore] = []
+    satisfactory_buckets = []
     allocation_failures = []
 
     for bucket in candidates:
         reasons: List[Result] = []
         is_unsatisfied = False
-        raw_scores: List[int] = []
+        satisfaction_scores = []
         for constraint in constraints:
             # TODO reason
             result = constraint.satisfied_by_bucket(bucket)
@@ -287,21 +273,23 @@ def bucket_candidates(
                 if hasattr(result, "reasons"):
                     reasons.append(result)
                 break
+            num_open_nodes = len([n for n in bucket.nodes if not n.closed])
             if result.score is not None:
-                raw_scores.append(result.score)
-
-        # as a tie breaker, the number of open nodes
-        num_open_nodes = len([n for n in bucket.nodes if not n.closed])
-        raw_scores.append(num_open_nodes)
+                satisfaction_scores.append(result.score * num_open_nodes)
 
         if is_unsatisfied:
             allocation_failures.extend(reasons)
         else:
-            score_tuple = tuple(raw_scores)
-            satisfied_buckets.append(BucketSatisfactionScore(bucket, score_tuple))
+            satisfactory_buckets.append((tuple(satisfaction_scores), bucket))
 
-    if satisfied_buckets:
-        return CandidatesResult("success", scores=satisfied_buckets)
+    if satisfactory_buckets:
+        ret = [
+            bucket
+            for _, bucket in reversed(
+                sorted(satisfactory_buckets, key=lambda tup: tup[0])
+            )
+        ]
+        return CandidatesResult("success", candidates=ret)
 
     return CandidatesResult("CompoundFailure", child_results=allocation_failures)
 

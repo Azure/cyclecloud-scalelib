@@ -14,6 +14,7 @@ if typing.TYPE_CHECKING:
     from hpc.autoscale.node.node import Node
     from hpc.autoscale.node.node import NodeConstraint  # noqa: F401
     from hpc.autoscale.node.bucket import NodeBucket  # noqa: F401
+    from hpc.autoscale.node.bucket import BucketSatisfactionScore
 
 
 Reasons = Optional[List[str]]  # pylint: disable=invalid-name
@@ -157,11 +158,11 @@ class CandidatesResult(Result):
     def __init__(
         self,
         status: str,
-        candidates: Optional[List["NodeBucket"]] = None,
+        scores: List["BucketSatisfactionScore"] = None,
         child_results: List[Result] = None,
     ) -> None:
         Result.__init__(self, status, [str(r) for r in (child_results or [])])
-        self.candidates = candidates or []  # List[NodeBucket]
+        self.__satisfaction_scores = sorted(scores or [], key=lambda b: b.scores)
         self.child_results = child_results
         fire_result_handlers(self)
 
