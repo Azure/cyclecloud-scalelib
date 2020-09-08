@@ -464,6 +464,10 @@ class Node(ABC):
         self.metadata.update(deepcopy(snode.metadata))
 
     def __str__(self) -> str:
+        if self.name.endswith("-0"):
+            return "NodeBucket(nodearray={}, vm_size={}, pg={})".format(
+                self.nodearray, self.vm_size, self.placement_group
+            )
         hostname = self.hostname if self.exists else "..."
         node_id = self.delayed_node_id.node_id
         if node_id:

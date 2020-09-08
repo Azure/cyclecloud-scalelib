@@ -55,6 +55,10 @@ class Result(ABC):
     def __bool__(self) -> bool:
         return self.status == "success"
 
+    @property
+    def message(self) -> str:
+        return str(self)
+
     @abstractmethod
     def __str__(self) -> str:
         ...
@@ -87,6 +91,19 @@ class AllocationResult(Result):
 
         fire_result_handlers(self)
 
+    @property
+    def message(self) -> str:
+        if self:
+            node_names = ",".join([str(n) for n in self.nodes])
+            if self.total_slots > 0:
+                return "Allocated {} slots on nodes={}".format(
+                    self.total_slots, node_names
+                )
+            else:
+                return "Allocated {} nodes={}".format(len(self.nodes), node_names)
+        else:
+            return "\n".join(self.reasons)
+
     def __str__(self) -> str:
         if self:
             return "AllocationResult(status={}, nodes={})".format(
@@ -116,6 +133,13 @@ class MatchResult(Result):
             assert not isinstance(self.reasons[0], list)
         fire_result_handlers(self)
 
+    @property
+    def message(self) -> str:
+        if self:
+            return "{} potential slots on {}".format(self.total_slots, self.node)
+        else:
+            return "\n".join(self.reasons)
+
     def __str__(self) -> str:
         reasons = " AND ".join(self.reasons)
         if self:
@@ -140,6 +164,20 @@ class CandidatesResult(Result):
         self.candidates = candidates or []  # List[NodeBucket]
         self.child_results = child_results
         fire_result_handlers(self)
+
+    @property
+    def candidates(self) -> List["NodeBucket"]:
+        return [s.bucket for s in self.__satisfaction_scores]
+
+    @property
+    def message(self) -> str:
+        if self:
+            bucket_exprs = []
+            for bss in self.__satisfaction_scores:
+                bucket_exprs.append("{} score={}".format(bss.bucket, bss.scores))
+            return "Bucket candidates are:\n\t{}".format("\n\t".join(bucket_exprs))
+        else:
+            return "\n".join(self.reasons)
 
     def __str__(self) -> str:
         reasons = " AND ".join(list(set(self.reasons))[:5])
@@ -175,6 +213,23 @@ class SatisfiedResult(Result):
         self.constraint = constraint
         self.node = node
         fire_result_handlers(self)
+
+    @property
+    def message(self) -> str:
+
+        if self:
+            node = self.node
+            if node.name.endswith("-o"):
+                node_name = "Bucket(nodearray={}, vm_size={}, pg={})".format(
+                    node.nodearray, node.vm_size, node.placement_group
+                )
+            else:
+                node_name = str(node)
+            return "{} satisfies constraint {} with score {}".format(
+                node_name, self.constraint, int(self)
+            )
+        else:
+            return "\n".join(self.reasons)
 
     def __int__(self) -> int:
         if self.score is None:
