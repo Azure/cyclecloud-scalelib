@@ -1080,6 +1080,18 @@ def _new_node_manager_79(
 ) -> NodeManager:
     cluster_status = cluster_bindings.get_cluster_status(nodes=True)
     nodes_list = cluster_bindings.get_nodes()
+
+    # to make it trivial to mimic 'onprem' nodes by simply filtering them out
+    # of the response.
+    mimic_on_prem = autoscale_config.get("_mimic_on_prem", [])
+    if mimic_on_prem:
+        nodes_list.nodes = [
+            n for n in nodes_list.nodes if n["Name"] not in mimic_on_prem
+        ]
+        cluster_status.nodes = [
+            n for n in cluster_status.nodes if n["Name"] not in mimic_on_prem
+        ]
+
     all_node_names = [n["Name"] for n in nodes_list.nodes]
 
     buckets = []
