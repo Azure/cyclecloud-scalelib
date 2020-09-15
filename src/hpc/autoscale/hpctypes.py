@@ -175,10 +175,10 @@ class Memory:
         return me < them or self.__float_eq(me, them)
 
     def __str__(self) -> str:
-        return "{}{}".format(self.value, self.magnitude)
+        return "{:.2f}{}".format(self.value, self.magnitude)
 
     def __repr__(self) -> str:
-        return str(self)
+        return "{}{}".format(self.value, self.magnitude)
 
     def to_json(self) -> str:
         return str(self)

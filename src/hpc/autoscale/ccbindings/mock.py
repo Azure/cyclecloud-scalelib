@@ -197,7 +197,7 @@ class MockClusterBinding(ClusterBindingInterface):
         bucket_status.definition.machine_type = vm_size
         bucket_status.virtual_machine = NodearrayBucketStatusVirtualMachine()
         bucket_status.virtual_machine.vcpu_count = vcpu_count
-        bucket_status.virtual_machine.memory = aux_info.memory.convert_to("m").value
+        bucket_status.virtual_machine.memory = aux_info.memory.convert_to("g").value
 
         bucket_status.virtual_machine.infiniband = aux_info.infiniband
 

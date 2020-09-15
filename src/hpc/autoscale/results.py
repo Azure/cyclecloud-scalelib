@@ -82,9 +82,6 @@ class AllocationResult(Result):
             assert nodes
             pass
         self.nodes = nodes or []
-        self.total_core_count = sum([x.vcpu_count for x in nodes]) if nodes else 0
-        self.total_memory = sum([x.vcpu_count for x in nodes]) if nodes else 0
-
         if self:
             assert slots_allocated is not None
             assert slots_allocated > 0
