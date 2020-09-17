@@ -665,8 +665,8 @@ def get_constraint(constraint_expression: Constraint) -> NodeConstraint:
 
 @hpcwrap
 def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConstraint]:
-    #     if isinstance(constraint_expressions, dict):
-    #         constraint_expressions = [constraint_expressions]
+    if isinstance(constraint_expressions, dict):
+        constraint_expressions = [constraint_expressions]
 
     if isinstance(constraint_expressions, tuple):
         constraint_expressions = list(constraint_expressions)
