@@ -581,7 +581,7 @@ class NodeManager:
             if name in nodes_by_name:
                 node = nodes_by_name[name]
                 if name not in updated_cc_nodes:
-                    logging.warning("Node %s no longer exists.", name)
+                    logging.warning("%s no longer exists.", name)
                     node.exists = False
                     node.state = ht.NodeStatus("Off")
                 else:
@@ -900,7 +900,7 @@ class NodeManager:
 
             logging.warning(
                 (
-                    "Somehow node {} is not being tracked by bucket {}. "
+                    "Somehow {} is not being tracked by bucket {}. "
                     + "Did you try to shutdown/terminate/delete a node twice?"
                 ).format(node, bucket)
             )

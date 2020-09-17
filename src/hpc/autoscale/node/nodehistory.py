@@ -248,7 +248,7 @@ class SQLiteNodeHistory(NodeHistory):
             # should be impossible because we already filtered by exists
             if not node_id:
                 logging.warning(
-                    "Null node_id for node %s. Leaving create/last_match/delete times as null.",
+                    "Null node_id for %s. Leaving create/last_match/delete times as null.",
                     node,
                 )
                 continue

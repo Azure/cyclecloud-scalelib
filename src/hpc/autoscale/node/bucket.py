@@ -291,8 +291,8 @@ def bucket_candidates(
                 raw_scores.append(result.score)
 
         # as a tie breaker, the number of open nodes
-        num_open_nodes = len([n for n in bucket.nodes if not n.closed])
-        raw_scores.append(num_open_nodes)
+        # num_open_nodes = len([n for n in bucket.nodes if not n.closed])
+        # raw_scores.append(num_open_nodes)
 
         if is_unsatisfied:
             allocation_failures.extend(reasons)

@@ -157,7 +157,7 @@ class MinResourcePerNode(BaseNodeConstraint):
         # TODO type checking here.
         if remaining < self.value:
             raise RuntimeError(
-                "Attempted to allocate more {} than is available for node {}: {} < {} ({})".format(
+                "Attempted to allocate more {} than is available for {}: {} < {} ({})".format(
                     self.attr, node.name, remaining, self.value, str(self),
                 )
             )
@@ -210,7 +210,7 @@ class ExclusiveNode(BaseNodeConstraint):
         #     # instance of the job on the machine
         #     if (not self.is_exclusive) or self.assignment_id not in node.assignments:
         #         raise RuntimeError(
-        #             "Can not call ExclusiveNode.do_decrement on a closed node! node %s %s" % (node, node.assignments)
+        #             "Can not call ExclusiveNode.do_decrement on a closed node! %s %s" % (node, node.assignments)
         #         )
         #     # we already marked this node as exclusive
         #     assert node.closed
