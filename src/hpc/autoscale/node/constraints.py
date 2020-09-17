@@ -235,7 +235,9 @@ class ExclusiveNode(BaseNodeConstraint):
         return -1
 
     def to_dict(self) -> dict:
-        return ConstraintDict({"exclusive": self.is_exclusive})
+        if self.job_exclusive:
+            return {"exclusive": self.is_exclusive}
+        return {"exclusive_task": self.is_exclusive}
 
     def __str__(self) -> str:
         return "NodeConstraint(exclusive={})".format(self.is_exclusive)
