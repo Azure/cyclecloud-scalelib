@@ -1,4 +1,5 @@
 import json
+import math as m
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import hpc.autoscale.hpclogging as logging
@@ -52,8 +53,10 @@ class DemandCalculator:
             node_queue = NodeQueue()
 
         self.__scheduler_nodes_queue: NodeQueue = node_queue
+
         for node in self.node_mgr.get_non_failed_nodes():
             self.__scheduler_nodes_queue.push(node)
+
         self.__set_buffer_delayed_invocations: List[Tuple[Any, ...]] = []
 
         self.node_history.decorate(list(self.__scheduler_nodes_queue))
@@ -61,6 +64,10 @@ class DemandCalculator:
         if not singleton_lock:
             singleton_lock = new_singleton_lock({})
         self.__singleton_lock = singleton_lock
+        logging.debug(
+            "Calculating demand using the following pre-existing nodes: %s",
+            [n.name for n in self.__scheduler_nodes_queue],
+        )
 
     @apitrace
     def add_jobs(self, jobs: List[Job]) -> None:
@@ -91,7 +98,9 @@ class DemandCalculator:
         slots_to_allocate = job.iterations_remaining
 
         allocated_nodes: List[Node] = []
-        failure_reasons = self._handle_allocate(job, allocated_nodes, True)
+        failure_reasons = self._handle_allocate(
+            job, allocated_nodes, all_or_nothing=True
+        )
         if failure_reasons:
             return AllocationResult(
                 "CompoundFailure",
@@ -99,11 +108,12 @@ class DemandCalculator:
                 slots_allocated=slots_to_allocate,
             )
         else:
+            assert len(allocated_nodes) == job.node_count, "{} != {}".format(
+                len(allocated_nodes), job.node_count
+            )
             return AllocationResult(
                 "success", nodes=allocated_nodes, slots_allocated=slots_to_allocate
             )
-
-        return AllocationResult("CompoundFailure", reasons=failure_reasons)
 
     def _pack_job(self, job: Job) -> Result:
         """
@@ -191,10 +201,22 @@ class DemandCalculator:
     def _handle_allocate(
         self, job: Job, allocated_nodes_out: List[Node], all_or_nothing: bool,
     ) -> Optional[List[str]]:
-
         failure_reasons: List[str] = []
         max_loop_iters = 1_000_000
-        while job.iterations_remaining > 0:
+
+        def remaining() -> int:
+            return job.iterations_remaining
+
+        def decrement(result: AllocationResult) -> None:
+            if job.node_count > 0:
+                total_nodes = job.iterations_remaining * job.node_count
+                allocated = len(allocated_nodes_out)
+                remaining = total_nodes - allocated
+                job.iterations_remaining = m.ceil(remaining / job.node_count)
+            else:
+                job.iterations_remaining -= result.total_slots
+
+        while remaining() > 0:
             max_loop_iters -= 1
             assert max_loop_iters > 0, "Caught in an infinite loop!"
 
@@ -206,11 +228,11 @@ class DemandCalculator:
                 failure_reasons.extend(result.reasons)
                 return failure_reasons
 
-            job.iterations_remaining -= result.total_slots
             for node in result.nodes:
                 if not node.exists:
                     self.__scheduler_nodes_queue.push(node)
             allocated_nodes_out.extend(result.nodes)
+            decrement(result)
 
         return None
 

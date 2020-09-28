@@ -134,7 +134,8 @@ class MinResourcePerNode(BaseNodeConstraint):
                 return SatisfiedResult("success", self, node,)
         except TypeError as e:
             logging.warning(
-                "Could not evaluate %s >= %s because they are different types: %s",
+                "For attribute %s: Could not evaluate %s >= %s because they are different types: %s",
+                self.attr,
                 node.available[self.attr],
                 self.value,
                 e,
@@ -322,7 +323,6 @@ class XOr(BaseNodeConstraint):
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
         reasons: List[str] = []
-
         xor_result: Optional[SatisfiedResult] = None
 
         for n, c in enumerate(self.constraints):
@@ -330,13 +330,12 @@ class XOr(BaseNodeConstraint):
 
             if expr_result:
                 # true ^ true == false
+
                 if xor_result:
-                    return SatisfiedResult(
-                        "XORFailed",
-                        self,
-                        node,
-                        ["Multiple expressions evaluated as true"] + reasons,
+                    msg = "Multiple expressions evaluated as true. See below:\n\t{}\n\t{}".format(
+                        xor_result.message, expr_result.message
                     )
+                    return SatisfiedResult("XORFailed", self, node, [msg] + reasons,)
                 # assign the first true expression as the final result
                 xor_result = expr_result
             elif hasattr(expr_result, "reasons"):

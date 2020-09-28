@@ -14,7 +14,7 @@ if typing.TYPE_CHECKING:
     from hpc.autoscale.node.node import Node
     from hpc.autoscale.node.node import NodeConstraint  # noqa: F401
     from hpc.autoscale.node.bucket import NodeBucket  # noqa: F401
-    from hpc.autoscale.node.bucket import BucketSatisfactionScore
+    from hpc.autoscale.node.bucket import BucketSatisfactionScore  # noqa: F401
 
 
 Reasons = Optional[List[str]]  # pylint: disable=invalid-name
@@ -216,15 +216,8 @@ class SatisfiedResult(Result):
     def message(self) -> str:
 
         if self:
-            node = self.node
-            if node.name.endswith("-o"):
-                node_name = "Bucket(nodearray={}, vm_size={}, pg={})".format(
-                    node.nodearray, node.vm_size, node.placement_group
-                )
-            else:
-                node_name = str(node)
             return "{} satisfies constraint {} with score {}".format(
-                node_name, self.constraint, int(self)
+                self.node, self.constraint, int(self)
             )
         else:
             return "\n".join(self.reasons)

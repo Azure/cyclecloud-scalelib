@@ -89,7 +89,7 @@ class MockClusterBinding(ClusterBindingInterface):
             "Status": self.state,
             "Region": location,
             "SubnetId": self.subnet_id,
-            "Configuration": {"autoscale": {"resources": resources}},
+            "Configuration": {},
             "Interruptible": spot,
             "Azure": {"MaxScalesetSize": max_placement_group_size},
         }
@@ -489,6 +489,12 @@ class MockClusterBinding(ClusterBindingInterface):
     ) -> None:
         raise NotImplementedError()
 
+    def update_state(self, state: str, node_names: Optional[List[str]] = None) -> None:
+        """For test purposes only"""
+        node_names = node_names or list(self.nodes.keys())
+        for node_name in node_names:
+            self.nodes[NodeName(node_name)].state = NodeStatus(state)
+
     def __str__(self) -> str:
         return "MockBindings()"
 
@@ -518,7 +524,7 @@ class MockNodeManagementResult(NodeManagementResult):
 
 
 def _node_to_ccnode(n: Node) -> NodeRecord:
-    return {
+    ret = {
         "Name": n.name,
         "Template": n.nodearray,
         "MachineType": n.vm_size,
@@ -532,10 +538,10 @@ def _node_to_ccnode(n: Node) -> NodeRecord:
         "Status": n.state,
         "PlacementGroupId": n.placement_group,
         "Infiniband": n.infiniband,
-        "Configuration": {
-            "Configuration": {"autoscale": {"resources": deepcopy(n.resources)}}
-        },
+        "Configuration": {},
     }
+    ret["Configuration"].update(deepcopy(n.software_configuration))
+    return ret
 
 
 def _nodes_to_ccnode(nodes: List[Node]) -> List[NodeRecord]:

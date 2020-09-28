@@ -41,6 +41,7 @@ from hpc.autoscale.results import (
     DeallocateResult,
     DeleteResult,
     RemoveResult,
+    SatisfiedResult,
     ShutdownResult,
     StartResult,
     TerminateResult,
@@ -146,8 +147,8 @@ class NodeManager:
                 node_count_floored = self._get_node_count(
                     candidate,
                     node_count - len(allocated_nodes),
-                    all_or_nothing,
-                    allow_existing,
+                    all_or_nothing=all_or_nothing,
+                    allow_existing=allow_existing,
                 )
 
                 if node_count_floored < 1:
@@ -298,20 +299,14 @@ class NodeManager:
         commit: bool = True,
     ) -> AllocationResult:
 
+        for node in bucket.nodes:
+            assert node.placement_group == bucket.placement_group
+
         if not allow_existing and bucket.available_count < 1:
             return AllocationResult(
                 "OutOfCapacity",
                 reasons=["No more capacity for bucket {}".format(bucket)],
             )
-
-        for constraint in constraints:
-            sat_result = constraint.satisfied_by_bucket(bucket)
-            assert constraint.satisfied_by_node(bucket.example_node)
-            if not sat_result:
-                return AllocationResult(sat_result.status, reasons=sat_result.reasons)
-            min_space = constraint.minimum_space(bucket.example_node)
-            if min_space != -1:
-                assert min_space > 0, constraint
 
         assert count > 0
         allocated_nodes: Dict[str, Node] = {}
@@ -344,10 +339,19 @@ class NodeManager:
             )
 
         for node in bucket.nodes:
+
             if node.closed:
                 continue
 
+            satisfied: Union[SatisfiedResult, bool]
+
             if constraints:
+                for c in constraints:
+
+                    result = c.satisfied_by_node(node)
+                    if not result:
+                        satisfied = result
+
                 satisfied: bool = functools.reduce(lambda a, b: bool(a) and bool(b), [c.satisfied_by_node(node) for c in constraints])  # type: ignore
             else:
                 satisfied = True
@@ -357,6 +361,7 @@ class NodeManager:
                 assert match_result
                 slots_allocated += match_result.total_slots
                 allocated_nodes[node.name] = node
+
                 if remaining_slots() <= 0:
                     break
 
@@ -423,6 +428,10 @@ class NodeManager:
                     bucket, constraints
                 )
             )
+
+        if len(allocated_nodes) != count:
+            msg = "Could only allocate {}/{} nodes".format(len(allocated_nodes), count)
+            return AllocationResult("InsufficientCapacity", reasons=[msg])
 
         if commit:
             self._commit(bucket, list(allocated_nodes.values()))
@@ -695,7 +704,13 @@ class NodeManager:
                     alias = attr[len("resources.") :]  # noqa: E203
 
                     def get_from_node_resources(node: Node) -> ht.ResourceTypeAtom:
-                        value = node.resources.get(alias)
+
+                        if alias.endswith(".value"):
+                            rname = alias[: -len(".value")]
+                            value = node.resources.get(rname)
+                        else:
+                            rname = alias
+                            value = node.resources.get(rname)
 
                         if value is None:
                             msg: str = (
@@ -706,6 +721,9 @@ class NodeManager:
                                 msg, attr, alias, node, alias,
                             )
                             value = ""
+
+                        if alias.endswith(".value"):
+                            return getattr(value, "value")
 
                         return value
 
@@ -825,6 +843,10 @@ class NodeManager:
         return self._nodes_operation(
             nodes, self.__cluster_bindings.terminate_nodes, TerminateResult
         )
+
+    @property
+    def cluster_bindings(self) -> ClusterBindingInterface:
+        return self.__cluster_bindings
 
     def _nodes_operation(
         self,
@@ -1026,10 +1048,10 @@ def new_node_manager(
         try:
             assert isinstance(entry["select"], dict)
             assert isinstance(entry["name"], str)
-            assert isinstance(entry["value"], str)
+            assert isinstance(entry["value"], (str, int, float, bool))
         except AssertionError as e:
             raise RuntimeError(
-                "default_resources: Expected select=dict name=str value=str: {}".format(
+                "default_resources: Expected select=dict name=str value=str|int|float|bool: {}".format(
                     e
                 )
             )
