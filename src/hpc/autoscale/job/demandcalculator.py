@@ -1,4 +1,3 @@
-import json
 import math as m
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -21,6 +20,7 @@ from hpc.autoscale.results import AllocationResult, BootupResult, DeleteResult, 
 from hpc.autoscale.util import (
     NullSingletonLock,
     SingletonLock,
+    json_load,
     new_singleton_lock,
     partition_single,
 )
@@ -404,17 +404,9 @@ def new_demand_calculator(
     singleton_lock: Optional[SingletonLock] = NullSingletonLock(),
 ) -> DemandCalculator:
 
-    if isinstance(config, str):
-        with open(config) as fr:
-            config_dict = json.load(fr)
-    else:
-        config_dict = config
+    config_dict = json_load(config)
 
     existing_nodes = existing_nodes or []
-
-    if isinstance(config, str):
-        with open(config) as fr:
-            config = json.load(fr)
 
     if node_mgr is None:
         node_mgr = new_node_manager(

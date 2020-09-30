@@ -1,8 +1,9 @@
+import json
 import os
 import uuid as uuidlib
 from abc import ABC, abstractmethod
 from functools import reduce
-from typing import Any, Callable, Dict, List, TextIO, TypeVar
+from typing import Any, Callable, Dict, List, TextIO, TypeVar, Union
 
 from hpc.autoscale.codeanalysis import hpcwrapclass
 
@@ -187,3 +188,20 @@ class AliasDict(dict):
 
     def __setitem__(self, key: object, value: object) -> None:
         return super().__setitem__(self._key(key), value)
+
+
+class ConfigurationException(RuntimeError):
+    pass
+
+
+def json_load(config: Union[str, Dict]) -> Dict:
+    if hasattr(config, "keys"):
+        return config  # type: ignore
+
+    try:
+        assert isinstance(config, str)
+        with open(config) as fr:
+            return json.load(fr)
+    except Exception as e:
+        msg = "Could not parse config {}: {}".format(config, str(e))
+        raise ConfigurationException(msg)
