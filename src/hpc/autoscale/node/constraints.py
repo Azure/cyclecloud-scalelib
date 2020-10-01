@@ -508,6 +508,31 @@ class NotAllocated(BaseNodeConstraint):
         raise RuntimeError()
 
 
+class Never(BaseNodeConstraint):
+    """
+    If you need to insert a constraint that rejects every node.
+    """
+
+    def __init__(self, message: str) -> None:
+        self.__message = message
+
+    @property
+    def message(self) -> str:
+        return self.__message
+
+    def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        return SatisfiedResult("Never", self, node, reasons=[self.message])
+
+    def do_decrement(self, node: "Node") -> bool:
+        return False
+
+    def to_dict(self) -> dict:
+        return {"never": self.message}
+
+    def __str__(self) -> str:
+        return "Never({})".format(self.message)
+
+
 class ReadOnlyAlias(BaseNodeConstraint):
     def __init__(self, alias: str, resource_name: str) -> None:
         self.alias = alias
@@ -599,6 +624,9 @@ def new_job_constraint(
         not_cons = get_constraint(value)
         job_cons = new_job_constraint("_", not_cons)
         return Not(job_cons)
+
+    if attr == "never":
+        return Never(str(value))
 
     if attr.startswith("node."):
         assert value is None or isinstance(

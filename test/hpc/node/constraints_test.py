@@ -6,6 +6,7 @@ from hpc.autoscale.node.constraints import (
     ExclusiveNode,
     InAPlacementGroup,
     MinResourcePerNode,
+    Never,
     NodePropertyConstraint,
     NodeResourceConstraint,
     Or,
@@ -21,6 +22,10 @@ from hpc.autoscale.node.node import (
     minimum_space,
 )
 from hpc.autoscale.results import SatisfiedResult
+
+
+def setup_module() -> None:
+    SchedulerNode.ignore_hostnames = True
 
 
 def test_minimum_space() -> None:
@@ -270,3 +275,14 @@ def test_register_parser() -> None:
     register_parser("custom-parser", SimpleConstraint.from_dict)
 
     assert get_constraints([{"custom-parser": "a"}]) == [SimpleConstraint("a")]
+
+
+def test_never() -> None:
+    c = Never("my message")
+    node = SchedulerNode("test", {"memgb": 4.0})
+    assert not c.satisfied_by_node(node)
+    assert c.satisfied_by_node(node).reasons == ["my message"]
+
+    c = get_constraint({"never": "my other message"})
+    assert isinstance(c, Never)
+    assert c.message == "my other message"
