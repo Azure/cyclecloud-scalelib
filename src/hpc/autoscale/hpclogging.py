@@ -48,10 +48,12 @@ class HPCLogger(logging.Logger):
         )
 
     def fine(self, msg: str, *args: Any) -> None:
-        self._log(FINE, msg, args)
+        if self.getEffectiveLevel() <= FINE:
+            self._log(FINE, msg, args)
 
     def trace(self, msg: str, *args: Any) -> None:
-        self._log(TRACE, msg, args)
+        if self.getEffectiveLevel() <= TRACE:
+            self._log(TRACE, msg, args)
 
 
 class HPCRootLogger(HPCLogger, logging.RootLogger):
