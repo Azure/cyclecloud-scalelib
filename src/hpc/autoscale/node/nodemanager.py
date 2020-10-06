@@ -1,7 +1,7 @@
 import functools
 import math
 from copy import deepcopy
-from typing import Callable, Dict, List, Optional, TypeVar, Union
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
 from uuid import uuid4
 
 from cyclecloud.model.ClusterStatusModule import ClusterStatus
@@ -82,6 +82,9 @@ class NodeManager:
                 self._node_names[node.name] = True
 
         self.__default_resources: List[_DefaultResource] = []
+        self.__node_preprocessor: Callable[[Node], bool]
+        # trigger default behavior
+        self.node_preprocessor = None  # type: ignore
 
         # list of nodes a user has 'allocated'.
         # self.new_nodes = []  # type: List[Node]
@@ -379,6 +382,8 @@ class NodeManager:
                 new_node_name=node_name,
             )
             self._apply_defaults(new_node)
+
+            assert self.node_preprocessor(new_node)
 
             assert new_node.vcpu_count == bucket.vcpu_count
 
@@ -804,9 +809,13 @@ class NodeManager:
             for node in self.get_nodes():
                 dr.apply_default(node)
 
+        for node in self.get_nodes():
+            self.node_preprocessor(node)
+
     def _apply_defaults(self, node: Node) -> None:
         for dr in self.__default_resources:
             dr.apply_default(node)
+        self.node_preprocessor(node)
 
     @apitrace
     def deallocate_nodes(self, nodes: List[Node]) -> DeallocateResult:
@@ -847,6 +856,20 @@ class NodeManager:
     @property
     def cluster_bindings(self) -> ClusterBindingInterface:
         return self.__cluster_bindings
+
+    @property
+    def node_preprocessor(self) -> Callable[[Node], bool]:
+        return self.__node_preprocessor
+
+    @node_preprocessor.setter
+    def node_preprocessor(self, value: Optional[Callable[[Node], bool]]) -> None:
+        if value is None:
+
+            def default_value(node: Node) -> bool:
+                return True
+
+            value = default_value
+        self.__node_preprocessor = value
 
     def _nodes_operation(
         self,
@@ -1033,11 +1056,12 @@ def new_node_manager(
     config: dict,
     existing_nodes: Optional[List[UnmanagedNode]] = None,
     disable_default_resources: bool = False,
+    node_preprocessor: Optional[Callable[[Node], bool]] = None,
 ) -> NodeManager:
 
     logging.initialize_logging(config)
 
-    ret = _new_node_manager_79(new_cluster_bindings(config), config)
+    ret = _new_node_manager_79(new_cluster_bindings(config), config, node_preprocessor)
     existing_nodes = existing_nodes or []
 
     if not disable_default_resources:
@@ -1098,7 +1122,9 @@ def _cluster_limits(cluster_name: str, cluster_status: ClusterStatus) -> _Shared
 
 
 def _new_node_manager_79(
-    cluster_bindings: ClusterBindingInterface, autoscale_config: Dict
+    cluster_bindings: ClusterBindingInterface,
+    autoscale_config: Dict,
+    node_preprocessor: Optional[Callable[[Node], bool]] = None,
 ) -> NodeManager:
     cluster_status = cluster_bindings.get_cluster_status(nodes=True)
     nodes_list = cluster_bindings.get_nodes()
@@ -1263,7 +1289,8 @@ def _new_node_manager_79(
                 nodes = []
 
                 for cc_node_rec in cc_node_records:
-                    nodes.append(_node_from_cc_node(cc_node_rec, bucket, region))
+                    node = _node_from_cc_node(cc_node_rec, bucket, region)
+                    nodes.append(node)
 
                 node_def = NodeDefinition(
                     nodearray=nodearray_name,
@@ -1281,11 +1308,19 @@ def _new_node_manager_79(
                     ),
                 )
 
+                def nodes_key(n: Node) -> Tuple[str, int]:
+
+                    try:
+                        name, index = n.name.rsplit("-", 1)
+                        return (name, int(index))
+                    except Exception:
+                        return (n.name, 0)
+
                 node_bucket = NodeBucket(
                     node_def,
                     limits=bucket_limit,
                     max_placement_group_size=bucket.max_placement_group_size,
-                    nodes=nodes,
+                    nodes=sorted(nodes, key=nodes_key),
                 )
 
                 logging.debug(
@@ -1294,6 +1329,7 @@ def _new_node_manager_79(
                 buckets.append(node_bucket)
 
     ret = NodeManager(cluster_bindings, buckets)
+    ret.node_preprocessor = node_preprocessor  # type: ignore
     for name in all_node_names:
         ret._node_names[name] = True
     return ret

@@ -329,7 +329,7 @@ class Node(ABC):
 
     @nodeproperty
     def delete_time(self) -> datetime:
-        return datetime.fromtimestamp(self.delete_time_unix)
+        return datetime.fromtimestamp(self.delete_time_unix or 0)
 
     def clone(self) -> "Node":
         ret = Node(

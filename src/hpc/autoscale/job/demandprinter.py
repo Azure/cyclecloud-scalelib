@@ -131,7 +131,8 @@ class DemandPrinter:
 
                 value: Any = None
                 is_from_available = column.startswith("*")
-                if is_from_available:
+                is_ratio = column.startswith("/")
+                if is_from_available or is_ratio:
                     column = column[1:]
 
                 if column == "hostname":
@@ -152,6 +153,10 @@ class DemandPrinter:
                 else:
                     if is_from_available:
                         value = node.available.get(column)
+                    elif is_ratio:
+                        value = "{}/{}".format(
+                            node.available.get(column), node.resources.get(column)
+                        )
                     else:
                         value = node.resources.get(column)
 
@@ -168,9 +173,9 @@ class DemandPrinter:
                 # for table* we will output a string for every value.
                 if self.output_format != "json":
                     if isinstance(value, list):
-                        value = ",".join(value)
+                        value = ",".join(sorted(value))
                     elif isinstance(value, set):
-                        value = ",".join(value)
+                        value = ",".join(sorted(list(value)))
                     elif value is None:
                         value = ""
                     elif isinstance(value, float):
@@ -186,6 +191,8 @@ class DemandPrinter:
 
                 row.append(value)
 
+        # remove /
+        columns = [c.lstrip("/") for c in columns]
         print_rows(columns, rows, self.stream, self.output_format)
 
     def __str__(self) -> str:

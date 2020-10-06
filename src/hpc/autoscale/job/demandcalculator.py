@@ -1,5 +1,5 @@
 import math as m
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.codeanalysis import hpcwrapclass
@@ -181,8 +181,8 @@ class DemandCalculator:
             # TODO log or something
             logging.warning("There are no resources to scale up for job %s", job)
             logging.warning("See below:")
-            for line in repr(candidates_result).splitlines():
-                logging.warning("    %s", line)
+            for child_result in candidates_result.child_results:
+                logging.warning("    %s", child_result.message)
             return candidates_result
 
         failure_reasons = self._handle_allocate(
@@ -402,18 +402,21 @@ def new_demand_calculator(
     disable_default_resources: bool = False,
     node_queue: Optional[NodeQueue] = None,
     singleton_lock: Optional[SingletonLock] = NullSingletonLock(),
+    node_preprocessor: Optional[Callable[[Node], bool]] = None,
 ) -> DemandCalculator:
-
     config_dict = json_load(config)
 
     existing_nodes = existing_nodes or []
 
     if node_mgr is None:
         node_mgr = new_node_manager(
-            config_dict, disable_default_resources=disable_default_resources
+            config_dict,
+            disable_default_resources=disable_default_resources,
+            node_preprocessor=node_preprocessor,
         )
     else:
         logging.initialize_logging(config_dict)
+        node_mgr.node_preprocessor = node_preprocessor
 
         if not disable_default_resources:
             node_mgr.set_system_default_resources()
@@ -424,5 +427,6 @@ def new_demand_calculator(
         singleton_lock = new_singleton_lock(config_dict)
 
     dc = DemandCalculator(node_mgr, node_history, node_queue, singleton_lock)
+
     dc.update_scheduler_nodes(existing_nodes)
     return dc
