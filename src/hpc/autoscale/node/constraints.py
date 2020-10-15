@@ -403,6 +403,17 @@ class And(BaseNodeConstraint):
     def get_children(self) -> Iterable[NodeConstraint]:
         return self.constraints
 
+    def minimum_space(self, node: "Node") -> int:
+        m = -1
+        for child in self.get_children():
+            child_min = child.minimum_space(node)
+            if child_min == -1:
+                continue
+            if m == -1:
+                m = child_min
+            m = min(m, child_min)
+        return m
+
     def __str__(self) -> str:
         return " and ".join([str(c) for c in self.constraints])
 
