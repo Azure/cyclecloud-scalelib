@@ -215,7 +215,7 @@ class SatisfiedResult(Result):
     @property
     def message(self) -> str:
 
-        if self:
+        if bool(self):
             return "{} satisfies constraint {} with score {}".format(
                 self.node, self.constraint, int(self)
             )
