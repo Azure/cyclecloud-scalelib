@@ -127,7 +127,6 @@ class Job:
         allow_existing: bool,
         all_or_nothing: bool,
     ) -> AllocationResult:
-
         if self.__node_count > 0:
 
             return node_mgr.allocate(
@@ -138,14 +137,19 @@ class Job:
                 assignment_id=self.name,
             )
 
-        return node_mgr.allocate(
+        assert self.iterations_remaining > 0
+
+        result = node_mgr.allocate(
             self._constraints,
             slot_count=self.iterations_remaining,
             allow_existing=allow_existing,
-            all_or_nothing=all_or_nothing
-            or self.colocated,  # colocated is always all or nothing
+            # colocated is always all or nothing
+            all_or_nothing=all_or_nothing or self.colocated,
             assignment_id=self.name,
         )
+        if result:
+            self.iterations_remaining -= result.total_slots
+        return result
 
     def bucket_candidates(self, candidates: List["NodeBucket"]) -> CandidatesResult:
         from hpc.autoscale.node import bucket

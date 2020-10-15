@@ -27,6 +27,7 @@ from hpc.autoscale.node.bucket import (
     bucket_candidates,
     node_from_bucket,
 )
+from hpc.autoscale.node.constraints import NodeConstraint
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import (
     BucketLimits,
@@ -82,9 +83,6 @@ class NodeManager:
                 self._node_names[node.name] = True
 
         self.__default_resources: List[_DefaultResource] = []
-        self.__node_preprocessor: Callable[[Node], bool]
-        # trigger default behavior
-        self.node_preprocessor = None  # type: ignore
 
         # list of nodes a user has 'allocated'.
         # self.new_nodes = []  # type: List[Node]
@@ -107,6 +105,14 @@ class NodeManager:
         assignment_id: Optional[str] = None,
     ) -> AllocationResult:
 
+        if int(node_count or 0) <= 0 and int(slot_count or 0) <= 0:
+            return AllocationResult(
+                "NothingRequested",
+                reasons=[
+                    "Either node_count or slot_count must be defined as a positive integer."
+                ],
+            )
+
         if not isinstance(constraints, list):
             constraints = [constraints]
 
@@ -125,6 +131,7 @@ class NodeManager:
 
         for candidate in candidates_result.candidates:
             if slot_count:
+
                 result = self._allocate_slots(
                     candidate,
                     slot_count,
@@ -147,6 +154,7 @@ class NodeManager:
                     break
             else:
                 assert node_count is not None
+
                 node_count_floored = self._get_node_count(
                     candidate,
                     node_count - len(allocated_nodes),
@@ -216,7 +224,7 @@ class NodeManager:
 
         for node in bucket.nodes:
             min_count = minimum_space(constraints, node)
-            if min_count != 0:
+            if min_count > 0:
                 while remaining > 0:
                     match_result = node.decrement(constraints)
                     if match_result:
@@ -232,8 +240,12 @@ class NodeManager:
 
         while remaining > 0:
             min_count = minimum_space(constraints, bucket.example_node)
-            num_nodes = int(math.ceil(remaining / min_count))
-            num_nodes = min(num_nodes, bucket.available_count)
+            # -1 is returned when the constraints have no say in how many could fit
+            # like, say, if the only constraint was that a flag was true
+            if min_count == -1:
+                min_count = remaining
+            _num_nodes = int(math.ceil(remaining / min_count))
+            num_nodes = min(_num_nodes, bucket.available_count)
 
             alloc_result = self._allocate_nodes(
                 bucket,
@@ -327,6 +339,39 @@ class NodeManager:
         def remaining_nodes() -> int:
             return count - len(allocated_nodes)
 
+        def _per_node(node: Node, constraints: List[NodeConstraint]) -> int:
+            min_space = minimum_space(constraints, node)
+
+            if min_space == -1:
+                min_space = remaining_slots()
+            else:
+                for constraint in constraints:
+                    res = constraint.satisfied_by_node(node)
+                    assert res, "{} {} {}".format(res, constraint, node.vcpu_count)
+                    m = constraint.minimum_space(node)
+                    assert (
+                        m != 0
+                    ), "{} satisfies node {} but minimum_space was {}".format(
+                        constraint, node.name, m
+                    )
+
+            per_node = 1 if total_iterations < 0 else min(remaining_slots(), min_space)
+            if per_node == 0:
+                for constraint in constraints:
+                    res = constraint.satisfied_by_node(node)
+                    assert res, "{} {} {}".format(res, constraint, node.vcpu_count)
+                    m = constraint.minimum_space(node)
+                    assert (
+                        m != 0
+                    ), "{} satisfies node {} but minimum_space was {}".format(
+                        constraint, node.name, m
+                    )
+
+            assert per_node > 0, "{} {} {} {}".format(
+                per_node, remaining_slots(), node.resources, constraints
+            )
+            return per_node
+
         assert remaining_slots() > 0
 
         if remaining_nodes() > available_count_total:
@@ -360,7 +405,10 @@ class NodeManager:
                 satisfied = True
 
             if satisfied:
-                match_result = node.decrement(constraints, assignment_id=assignment_id)
+                per_node = _per_node(node, constraints)
+                match_result = node.decrement(
+                    constraints, per_node, assignment_id=assignment_id
+                )
                 assert match_result
                 slots_allocated += match_result.total_slots
                 allocated_nodes[node.name] = node
@@ -371,7 +419,6 @@ class NodeManager:
         while remaining_slots() > 0 and bucket.available_count > 0:
 
             node_name = self._next_node_name(bucket)
-
             new_node = node_from_bucket(
                 bucket,
                 exists=False,
@@ -383,26 +430,9 @@ class NodeManager:
             )
             self._apply_defaults(new_node)
 
-            assert self.node_preprocessor(new_node)
-
             assert new_node.vcpu_count == bucket.vcpu_count
 
-            min_space = minimum_space(constraints, new_node)
-
-            if min_space == 0:
-                continue
-            elif min_space == -1:
-                min_space = remaining_slots()
-            else:
-                for constraint in constraints:
-                    res = constraint.satisfied_by_node(new_node)
-                    assert res, "{} {} {}".format(res, constraint, new_node.vcpu_count)
-
-            per_node = min(remaining_slots(), min_space)
-
-            assert per_node > 0, "{} {} {} {}".format(
-                per_node, remaining_slots(), new_node.resources, constraints
-            )
+            per_node = _per_node(new_node, constraints)
 
             match_result = new_node.decrement(constraints, per_node, assignment_id)
 
@@ -809,13 +839,9 @@ class NodeManager:
             for node in self.get_nodes():
                 dr.apply_default(node)
 
-        for node in self.get_nodes():
-            self.node_preprocessor(node)
-
     def _apply_defaults(self, node: Node) -> None:
         for dr in self.__default_resources:
             dr.apply_default(node)
-        self.node_preprocessor(node)
 
     @apitrace
     def deallocate_nodes(self, nodes: List[Node]) -> DeallocateResult:
@@ -856,20 +882,6 @@ class NodeManager:
     @property
     def cluster_bindings(self) -> ClusterBindingInterface:
         return self.__cluster_bindings
-
-    @property
-    def node_preprocessor(self) -> Callable[[Node], bool]:
-        return self.__node_preprocessor
-
-    @node_preprocessor.setter
-    def node_preprocessor(self, value: Optional[Callable[[Node], bool]]) -> None:
-        if value is None:
-
-            def default_value(node: Node) -> bool:
-                return True
-
-            value = default_value
-        self.__node_preprocessor = value
 
     def _nodes_operation(
         self,
@@ -1056,12 +1068,11 @@ def new_node_manager(
     config: dict,
     existing_nodes: Optional[List[UnmanagedNode]] = None,
     disable_default_resources: bool = False,
-    node_preprocessor: Optional[Callable[[Node], bool]] = None,
 ) -> NodeManager:
 
     logging.initialize_logging(config)
 
-    ret = _new_node_manager_79(new_cluster_bindings(config), config, node_preprocessor)
+    ret = _new_node_manager_79(new_cluster_bindings(config), config)
     existing_nodes = existing_nodes or []
 
     if not disable_default_resources:
@@ -1122,9 +1133,7 @@ def _cluster_limits(cluster_name: str, cluster_status: ClusterStatus) -> _Shared
 
 
 def _new_node_manager_79(
-    cluster_bindings: ClusterBindingInterface,
-    autoscale_config: Dict,
-    node_preprocessor: Optional[Callable[[Node], bool]] = None,
+    cluster_bindings: ClusterBindingInterface, autoscale_config: Dict,
 ) -> NodeManager:
     cluster_status = cluster_bindings.get_cluster_status(nodes=True)
     nodes_list = cluster_bindings.get_nodes()
@@ -1329,7 +1338,6 @@ def _new_node_manager_79(
                 buckets.append(node_bucket)
 
     ret = NodeManager(cluster_bindings, buckets)
-    ret.node_preprocessor = node_preprocessor  # type: ignore
     for name in all_node_names:
         ret._node_names[name] = True
     return ret

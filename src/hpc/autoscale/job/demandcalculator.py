@@ -1,5 +1,4 @@
-import math as m
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.codeanalysis import hpcwrapclass
@@ -123,65 +122,23 @@ class DemandCalculator:
         4) tell the bucket to allocate X nodes - let the bucket figure out what is new and what is not.
         """
         # TODO break non-exclusive
-        allocated_nodes = []
+        allocated_nodes: List[Node] = []
         slots_to_allocate = job.iterations_remaining
         assert job.iterations_remaining > 0
 
-        for snode in self.__scheduler_nodes_queue:
-            # TODO
-            if snode.state == "Failed":
-                continue
-
-            if snode.closed:
-                continue
-
-            bailout_result = self.__scheduler_nodes_queue.early_bailout(snode)
-            if not bailout_result:
-                logging.warning("Bailing out early - %s", bailout_result)
-                break
-
-            node_added = False
-
-            while job.iterations_remaining > 0:
-                # TODO this is ugly and hokey RDH
-                still_valid = True
-                for constraint in job._constraints:
-                    still_valid = still_valid and constraint.satisfied_by_node(snode)
-
-                # TODO hokey
-                if not still_valid:
-                    break
-
-                add_job_result = snode.decrement(
-                    job._constraints, job.iterations_remaining, job.name
-                )
-
-                if not add_job_result:
-                    break
-
-                if not node_added:
-                    allocated_nodes.append(snode)
-                    node_added = True
-
-                job.iterations_remaining -= add_job_result.total_slots
-
-                if job.iterations_remaining <= 0:
-                    break
-
-        if job.iterations_remaining == 0:
-            return AllocationResult(
-                "success", nodes=allocated_nodes, slots_allocated=slots_to_allocate
-            )
-
         available_buckets = self.node_mgr.get_buckets()
-
-        candidates_result = job.bucket_candidates(available_buckets)
+        # I don't want to fill up the log with rejecting placement groups
+        # so just filter them here
+        filter_by_colocated = [
+            b for b in available_buckets if bool(b.placement_group) == job.colocated
+        ]
+        candidates_result = job.bucket_candidates(filter_by_colocated)
 
         if not candidates_result:
             # TODO log or something
             logging.warning("There are no resources to scale up for job %s", job)
             logging.warning("See below:")
-            for child_result in candidates_result.child_results:
+            for child_result in candidates_result.child_results or []:
                 logging.warning("    %s", child_result.message)
             return candidates_result
 
@@ -190,7 +147,7 @@ class DemandCalculator:
         )
 
         # we have allocated at least some tasks
-        if job.iterations_remaining < job.iterations:
+        if allocated_nodes:
             assert allocated_nodes
             return AllocationResult(
                 "success", nodes=allocated_nodes, slots_allocated=slots_to_allocate
@@ -201,38 +158,18 @@ class DemandCalculator:
     def _handle_allocate(
         self, job: Job, allocated_nodes_out: List[Node], all_or_nothing: bool,
     ) -> Optional[List[str]]:
-        failure_reasons: List[str] = []
-        max_loop_iters = 1_000_000
+        result = job.do_allocate(
+            self.node_mgr, all_or_nothing=all_or_nothing, allow_existing=True,
+        )
 
-        def remaining() -> int:
-            return job.iterations_remaining
+        if not result:
+            return result.reasons
 
-        def decrement(result: AllocationResult) -> None:
-            if job.node_count > 0:
-                total_nodes = job.iterations_remaining * job.node_count
-                allocated = len(allocated_nodes_out)
-                remaining = total_nodes - allocated
-                job.iterations_remaining = m.ceil(remaining / job.node_count)
-            else:
-                job.iterations_remaining -= result.total_slots
-
-        while remaining() > 0:
-            max_loop_iters -= 1
-            assert max_loop_iters > 0, "Caught in an infinite loop!"
-
-            result = job.do_allocate(
-                self.node_mgr, all_or_nothing=all_or_nothing, allow_existing=True,
-            )
-
-            if not result:
-                failure_reasons.extend(result.reasons)
-                return failure_reasons
-
-            for node in result.nodes:
-                if not node.exists:
-                    self.__scheduler_nodes_queue.push(node)
-            allocated_nodes_out.extend(result.nodes)
-            decrement(result)
+        for node in result.nodes:
+            if not node.exists and node.metadata.get("__demand_allocated") is None:
+                self.__scheduler_nodes_queue.push(node)
+                node.metadata["__demand_allocated"] = True
+        allocated_nodes_out.extend(result.nodes)
 
         return None
 
@@ -402,7 +339,6 @@ def new_demand_calculator(
     disable_default_resources: bool = False,
     node_queue: Optional[NodeQueue] = None,
     singleton_lock: Optional[SingletonLock] = NullSingletonLock(),
-    node_preprocessor: Optional[Callable[[Node], bool]] = None,
 ) -> DemandCalculator:
     config_dict = json_load(config)
 
@@ -410,13 +346,10 @@ def new_demand_calculator(
 
     if node_mgr is None:
         node_mgr = new_node_manager(
-            config_dict,
-            disable_default_resources=disable_default_resources,
-            node_preprocessor=node_preprocessor,
+            config_dict, disable_default_resources=disable_default_resources,
         )
     else:
         logging.initialize_logging(config_dict)
-        node_mgr.node_preprocessor = node_preprocessor
 
         if not disable_default_resources:
             node_mgr.set_system_default_resources()
