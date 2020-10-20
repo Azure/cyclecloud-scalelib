@@ -226,7 +226,9 @@ class NodeManager:
             min_count = minimum_space(constraints, node)
             if min_count > 0:
                 while remaining > 0:
-                    match_result = node.decrement(constraints)
+                    match_result = node.decrement(
+                        constraints, assignment_id=assignment_id
+                    )
                     if match_result:
                         allocated_nodes[node.name] = node
                         if match_result.total_slots <= 0:

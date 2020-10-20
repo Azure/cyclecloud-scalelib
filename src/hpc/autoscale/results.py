@@ -14,7 +14,6 @@ if typing.TYPE_CHECKING:
     from hpc.autoscale.node.node import Node
     from hpc.autoscale.node.node import NodeConstraint  # noqa: F401
     from hpc.autoscale.node.bucket import NodeBucket  # noqa: F401
-    from hpc.autoscale.node.bucket import BucketSatisfactionScore  # noqa: F401
 
 
 Reasons = Optional[List[str]]  # pylint: disable=invalid-name
@@ -155,24 +154,24 @@ class CandidatesResult(Result):
     def __init__(
         self,
         status: str,
-        scores: List["BucketSatisfactionScore"] = None,
+        candidates: Optional[List["NodeBucket"]] = None,
         child_results: List[Result] = None,
     ) -> None:
         Result.__init__(self, status, [str(r) for r in (child_results or [])])
-        self.__satisfaction_scores = sorted(scores or [], key=lambda b: b.scores)
+        self.__candidates = candidates
         self.child_results = child_results
         fire_result_handlers(self)
 
     @property
     def candidates(self) -> List["NodeBucket"]:
-        return [s.bucket for s in self.__satisfaction_scores]
+        return self.__candidates or []
 
     @property
     def message(self) -> str:
         if self:
             bucket_exprs = []
-            for bss in self.__satisfaction_scores:
-                bucket_exprs.append("{} score={}".format(bss.bucket, bss.scores))
+            for bucket in self.candidates:
+                bucket_exprs.append(str(bucket))
             return "Bucket candidates are:\n\t{}".format("\n\t".join(bucket_exprs))
         else:
             return "\n".join(self.reasons)

@@ -252,30 +252,26 @@ class NodeBucket:
         return str(self)
 
 
-class BucketSatisfactionScore:
-    def __init__(self, bucket: "NodeBucket", scores: Tuple[float, ...]) -> None:
-        self.__bucket = bucket
-        self.__scores = scores
-
-    @property
-    def bucket(self) -> NodeBucket:
-        return self.__bucket
-
-    @property
-    def scores(self) -> Tuple[float, ...]:
-        return self.__scores
-
-
 def bucket_candidates(
     candidates: List["NodeBucket"], constraints: List["constraintslib.NodeConstraint"],
 ) -> CandidatesResult:
     if not candidates:
         return CandidatesResult("NoBucketsDefined", child_results=[],)
 
-    satisfied_buckets: List[BucketSatisfactionScore] = []
+    satisfied_buckets: List["NodeBucket"] = []
     allocation_failures = []
 
-    for bucket in candidates:
+    bucket_weights = []
+    for n, bucket in enumerate(candidates):
+        bucket_weights.append((bucket, float(len(candidates) - n)))
+
+    for constraint in constraints:
+        bucket_weights = constraint.weight_buckets(bucket_weights)
+
+    sorted_bucket_weights = sorted(bucket_weights, key=lambda t: -t[1])
+    sorted_candidates = [t[0] for t in sorted_bucket_weights]
+
+    for bucket in sorted_candidates:
         reasons: List[Result] = []
         is_unsatisfied = False
         raw_scores: List[int] = []
@@ -297,11 +293,10 @@ def bucket_candidates(
         if is_unsatisfied:
             allocation_failures.extend(reasons)
         else:
-            score_tuple = tuple(raw_scores)
-            satisfied_buckets.append(BucketSatisfactionScore(bucket, score_tuple))
+            satisfied_buckets.append(bucket)
 
     if satisfied_buckets:
-        return CandidatesResult("success", scores=satisfied_buckets)
+        return CandidatesResult("success", candidates=satisfied_buckets)
 
     return CandidatesResult("CompoundFailure", child_results=allocation_failures)
 

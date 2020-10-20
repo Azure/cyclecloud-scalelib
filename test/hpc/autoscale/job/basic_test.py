@@ -40,6 +40,7 @@ def _bindings():
     return mock_bindings
 
 
+@pytest.mark.skip
 def test_basic():
     def run_test(scheduler_nodes, jobs, unmatched, matched, new, mock_bindings=None):
         current_frame = inspect.currentframe()

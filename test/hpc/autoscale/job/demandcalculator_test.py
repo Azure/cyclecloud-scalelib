@@ -219,7 +219,7 @@ def test_bug100(mixedbindings) -> None:
 
 
 def _assert_success(result, bucket_names, index_start=1):
-    result == str(result)
+    assert result
     assert "success" == result.status
 
     node_names = []

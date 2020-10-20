@@ -1,6 +1,6 @@
 import typing
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 from uuid import uuid4
 
 import hpc  # noqa: F401
@@ -22,6 +22,11 @@ if typing.TYPE_CHECKING:
 
 # TODO split by job and node constraints (job being a subclass of node constraint)
 class NodeConstraint(ABC):
+    def weight_buckets(
+        self, bucket_weights: List[Tuple["NodeBucket", float]]
+    ) -> List[Tuple["NodeBucket", float]]:
+        return bucket_weights
+
     @abstractmethod
     def satisfied_by_bucket(self, bucket: "NodeBucket") -> SatisfiedResult:
         raise RuntimeError()
@@ -71,10 +76,48 @@ class NodeResourceConstraint(BaseNodeConstraint):
     def __init__(self, attr: str, *values: ht.ResourceTypeAtom) -> None:
         self.attr = attr
         self.values: List[ResourceType] = list(values)
+        self.weight = 100
+
+    def weight_buckets(
+        self, bucket_weights: List[Tuple["NodeBucket", float]]
+    ) -> List[Tuple["NodeBucket", float]]:
+        ret: List[Tuple["NodeBucket", float]] = []
+
+        for bucket, b_weight in bucket_weights:
+            new_weight = 0.0
+            if self.attr not in bucket.example_node.available:
+                ret.append((bucket, 0.0))
+                continue
+            target = bucket.example_node.available[self.attr]
+
+            for n, value in enumerate(self.values):
+                if target == value:
+                    new_weight = (
+                        float(len(self.values) * self.weight - n * self.weight)
+                        + b_weight
+                    )
+                    break
+
+            ret.append((bucket, new_weight))
+
+        return ret
+
+    def _satisfied(self, node: "Node", target: ht.ResourceTypeAtom) -> Optional[str]:
+        target = node.available[self.attr]
+
+        if target not in self.values:
+            if len(self.values) > 1:
+                return "Resource[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
+                    self.attr, target, self.values, node.name, self.attr,
+                )
+            else:
+                return "Resource[name={} value={}] != node[name={} {}={}]".format(
+                    self.attr, target, node.name, self.attr, self.values[0]
+                )
+        return None
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
         if self.attr not in node.available:
-
             return SatisfiedResult(
                 "UndefinedResource",
                 self,
@@ -119,6 +162,7 @@ class MinResourcePerNode(BaseNodeConstraint):
     def __init__(self, attr: str, value: Union[int, float, ht.Memory]) -> None:
         self.attr = attr
         self.value = value
+        assert isinstance(self.value, (int, float, ht.Memory))
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
 
@@ -272,11 +316,26 @@ class InAPlacementGroup(BaseNodeConstraint):
 @hpcwrapclass
 class Or(BaseNodeConstraint):
     def __init__(self, *constraints: Union[NodeConstraint, ConstraintDict]) -> None:
-        #         if len(constraints) == 1 and isinstance(constraints[0], list):
-        #             constraints = constraints[0]
         if len(constraints) <= 1:
             raise AssertionError("Or expression requires at least 2 constraints")
         self.constraints = get_constraints(list(constraints))
+        self.weight = 100
+
+    def weight_buckets(
+        self, bucket_weights: List[Tuple["NodeBucket", float]]
+    ) -> List[Tuple["NodeBucket", float]]:
+        ret: List[Tuple["NodeBucket", float]] = []
+        for bucket, current_weight in bucket_weights:
+            new_weight = None
+            for n, c in enumerate(self.constraints):
+                result = c.satisfied_by_bucket(bucket)
+                if result:
+                    new_weight = (
+                        float(len(self.constraints) - n) * self.weight + current_weight
+                    )
+                    break
+            ret.append((bucket, new_weight or 0.0))
+        return ret
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
         reasons: List[str] = []
@@ -298,9 +357,7 @@ class Or(BaseNodeConstraint):
             result = c.satisfied_by_node(node)
 
             if result:
-                ret = c.do_decrement(node)
-                if ret > 0:
-                    return ret
+                return c.do_decrement(node)
 
         return False
 
@@ -467,25 +524,50 @@ class NodePropertyConstraint(BaseNodeConstraint):
         else:
             self.values = list(values)
 
+    def _get_target_value(
+        self, node: "Node"
+    ) -> typing.Union[None, ht.ResourceTypeAtom]:
+        return getattr(node, self.attr)
+
+    def weight_buckets(
+        self, bucket_weights: List[Tuple["NodeBucket", float]]
+    ) -> List[Tuple["NodeBucket", float]]:
+        ret: List[Tuple["NodeBucket", float]] = []
+        for bucket, weight in bucket_weights:
+            for n, value in enumerate(self.values):
+                err_msg = self._satisfied(bucket.example_node)
+                if err_msg:
+                    new_weight = 0.0
+                else:
+                    new_weight = float(len(self.values) - n)
+                ret.append((bucket, new_weight))
+        return ret
+
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        err_msg = self._satisfied(node)
+
+        if err_msg:
+            return SatisfiedResult("InvalidOption", self, node, [err_msg],)
+
+        # our score is our inverted index - i.e. the first element is the highest score
+        target = getattr(node, self.attr)
+        score = len(self.values) - self.values.index(target)
+        return SatisfiedResult("success", self, node, score=score,)
+
+    def _satisfied(self, node: "Node") -> Optional[str]:
         target = getattr(node, self.attr)
 
         if target not in self.values:
 
             if len(self.values) > 1:
-                msg = "Property[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
+                return "Property[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
                     self.attr, target, self.values, node.name, self.attr,
                 )
             else:
-                msg = "Property[name={} value={}] != node[name={} {}={}]".format(
+                return "Property[name={} value={}] != node[name={} {}={}]".format(
                     self.attr, self.values[0], node.name, self.attr, target
                 )
-
-            return SatisfiedResult("InvalidOption", self, node, [msg],)
-
-        # our score is our inverted index - i.e. the first element is the highest score
-        score = len(self.values) - self.values.index(target)
-        return SatisfiedResult("success", self, node, score=score,)
+        return None
 
     def __str__(self) -> str:
         if len(self.values) == 1:

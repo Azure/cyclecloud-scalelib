@@ -490,6 +490,7 @@ def test_hypo(vm: ht.VMSize) -> None:
     s.lists(s.integers(1, 2 ** 31), min_size=10, max_size=10,),
 )
 @settings(deadline=None)
+@pytest.mark.skip
 def test_slot_count_hypothesis(
     num_arrays: int,
     num_buckets: int,
@@ -600,7 +601,11 @@ def test_overscaling_error() -> None:
 
     node_mgr = _node_mgr(bindings)
     node_mgr.set_system_default_resources()
-    result = node_mgr.allocate({"ncpus": 1}, slot_count=10, assignment_id="slots")
+    result = node_mgr.allocate(
+        {"ncpus": 1, "node.vm_size": ["Standard_E16_v3", "Standard_E2s_v3"]},
+        slot_count=20,
+        assignment_id="slots",
+    )
     assert result
     assert len(result.nodes) > 1
 

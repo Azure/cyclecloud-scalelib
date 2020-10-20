@@ -93,8 +93,11 @@ class MockClusterBinding(ClusterBindingInterface):
             "Interruptible": spot,
             "Azure": {"MaxScalesetSize": max_placement_group_size},
         }
-
-        nodearray_status.nodearray["Configuration"].update(software_configuration)
+        config = nodearray_status.nodearray["Configuration"]
+        config.update(software_configuration)
+        config["autoscale"] = autoscale = config.get("autoscale", {})
+        autoscale["resources"] = config_resources = autoscale.get("autoscale", {})
+        config_resources.update(resources)
 
         for attr in dir(nodearray_status):
             if attr[0].isalpha() and "count" in attr:
