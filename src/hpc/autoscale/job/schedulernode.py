@@ -1,7 +1,8 @@
 import socket
 import typing
+from uuid import uuid4
 
-from frozendict import frozendict
+from immutabledict import ImmutableOrderedDict
 
 from hpc.autoscale import hpclogging as logging
 from hpc.autoscale import hpctypes as ht
@@ -12,22 +13,32 @@ from hpc.autoscale.node.node import Node
 
 @hpcwrapclass
 class SchedulerNode(Node):
-    def __init__(self, hostname: str, resources: typing.Optional[dict] = None) -> None:
+    # used only internally for testing
+    ignore_hostnames: bool = False
+
+    def __init__(
+        self,
+        hostname: str,
+        resources: typing.Optional[dict] = None,
+        bucket_id: typing.Optional[ht.BucketId] = None,
+    ) -> None:
         resources = resources or ht.ResourceDict({})
-        try:
-            private_ip: typing.Optional[ht.IpAddress] = ht.IpAddress(
-                socket.gethostbyname(hostname)
-            )
-        except Exception as e:
-            logging.warning("Could not find private ip for %s: %s", hostname, e)
+        private_ip: typing.Optional[ht.IpAddress]
+        if SchedulerNode.ignore_hostnames:
             private_ip = None
+        else:
+            try:
+                private_ip = ht.IpAddress(socket.gethostbyname(hostname))
+            except Exception as e:
+                logging.warning("Could not find private ip for %s: %s", hostname, e)
+                private_ip = None
 
         Node.__init__(
             self,
             node_id=DelayedNodeId(ht.NodeName(hostname)),
             name=ht.NodeName(hostname),
             nodearray=ht.NodeArrayName("unknown"),
-            bucket_id=ht.BucketId("unknown"),
+            bucket_id=bucket_id or ht.BucketId(str(uuid4())),
             hostname=ht.Hostname(hostname),
             private_ip=private_ip,
             vm_size=ht.VMSize("unknown"),
@@ -42,7 +53,8 @@ class SchedulerNode(Node):
             placement_group=None,
             managed=False,
             resources=ht.ResourceDict(resources),
-            software_configuration=frozendict({}),
+            software_configuration=ImmutableOrderedDict({}),
+            keep_alive=False,
         )
 
     def to_dict(self) -> typing.Dict:
@@ -51,6 +63,7 @@ class SchedulerNode(Node):
             "job_ids": list(self.assignments),
             "resources": dict(self.resources),
             "available": dict(self.available),
+            "bucket-id": self.bucket_id,
             "metadata": dict(self.metadata),
         }
 
@@ -61,7 +74,8 @@ class SchedulerNode(Node):
         available = d.get("available", {})
         metadata = d.get("metadata", {})
         job_ids = d.get("job_ids", [])
-        ret = SchedulerNode(hostname, resources)
+        bucket_id = d.get("bucket-id")
+        ret = SchedulerNode(hostname, resources, bucket_id)
 
         for job_id in job_ids:
             ret.assign(job_id)

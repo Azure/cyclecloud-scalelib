@@ -9,6 +9,10 @@ from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.job.schedulernode import SchedulerNode
 
 
+def setup_module() -> None:
+    SchedulerNode.ignore_hostnames = True
+
+
 def _cmp(a: SchedulerNode, b: SchedulerNode) -> bool:
     assert a.assignments == b.assignments
     assert a.available == b.available
@@ -84,7 +88,7 @@ def schedulernode() -> SearchStrategy[SchedulerNode]:
                 rname = "res-{}".format(n)
                 resources[rname] = draw_value()
 
-            node = SchedulerNode(ht.Hostname(hostname), resources)
+            node = SchedulerNode(ht.Hostname(hostname), resources, "bucket-id-123")
 
             for job_id in range(r.randint(0, 10)):
                 node.assign(str(job_id))

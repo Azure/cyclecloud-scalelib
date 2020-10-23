@@ -31,7 +31,7 @@ def test_print_demand_header() -> None:
     assert lines[0].split() == ["HOSTNAME", "JOB_IDS", "NCPUS", "*NCPUS", "MEM"]
     vals = lines[1].split()
     vals[1] = set(vals[1].split(","))  # type: ignore
-    assert vals == ["tux", set("11,12".split(",")), "2", "1", "1.0g"]
+    assert vals == ["tux", set("11,12".split(",")), "2", "1", "1.00g"]
 
 
 def test_print_demand_headerless() -> None:
@@ -39,7 +39,7 @@ def test_print_demand_headerless() -> None:
     assert len(lines) == 1
     vals = lines[0].split()
     vals[1] = set(vals[1].split(","))  # type: ignore
-    assert vals == ["tux", set("11,12".split(",")), "2", "1", "1.0g"]
+    assert vals == ["tux", set("11,12".split(",")), "2", "1", "1.00g"]
 
 
 def test_print_demand_json() -> None:
@@ -52,6 +52,6 @@ def test_print_demand_json() -> None:
             "job_ids": ["11", "12"],
             "ncpus": 2,
             "*ncpus": 1,
-            "mem": "1.0g",
+            "mem": "1.00g",
         }
     ]

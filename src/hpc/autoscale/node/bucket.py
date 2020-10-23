@@ -2,7 +2,7 @@ import typing
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
-import frozendict
+from immutabledict import ImmutableOrderedDict
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import util
@@ -11,6 +11,7 @@ from hpc.autoscale.node import constraints as constraintslib  # noqa: F401
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import BucketLimits
 from hpc.autoscale.results import CandidatesResult, Result
+from hpc.autoscale.util import partition
 
 if typing.TYPE_CHECKING:
     from hpc.autoscale.node.node import Node
@@ -34,7 +35,7 @@ class NodeDefinition:
         memory: ht.Memory,
         placement_group: Optional[ht.PlacementGroup],
         resources: ht.ResourceDict,
-        software_configuration: frozendict,
+        software_configuration: ImmutableOrderedDict,
     ) -> None:
         assert nodearray is not None
         self.nodearray = nodearray
@@ -85,6 +86,7 @@ class NodeBucket:
         limits: BucketLimits,
         max_placement_group_size: int,
         nodes: List["Node"],
+        artificial: bool = False,
     ) -> None:
         # example node to be used to see if your job would match this
         self.__definition = definition
@@ -95,7 +97,10 @@ class NodeBucket:
         self.priority = 0
         # list of nodes cyclecloud currently says are in this bucket
         self.nodes = nodes
+        self.__decrement_counter = 0
         example_node_name = ht.NodeName("{}-0".format(definition.nodearray))
+        self._artificial = artificial
+
         # TODO infiniband
         from hpc.autoscale.node.node import Node
 
@@ -119,13 +124,27 @@ class NodeBucket:
             managed=False,
             resources=self.resources,
             software_configuration=definition.software_configuration,
+            keep_alive=False,
         )
 
     def decrement(self, count: int = 1) -> None:
-        self.limits.decrement(self.vcpu_count, count)
+        assert (
+            self.available_count - count >= 0
+        ), "Requested too many nodes: %s > %s" % (count, self.available_count)
+        assert self.family_available_count >= 0
+        self.__decrement_counter += count
+        # self.limits.decrement(self.vcpu_count, count)
 
     def increment(self, count: int = 1) -> None:
-        self.limits.increment(self.vcpu_count, count)
+        return self.decrement(-count)
+
+    def commit(self) -> None:
+        to_dec = self.__decrement_counter
+        self.__decrement_counter = 0
+        self.limits.decrement(to_dec)
+
+    def rollback(self) -> None:
+        self.__decrement_counter = 0
 
     @property
     def available_count(self) -> int:
@@ -135,23 +154,26 @@ class NodeBucket:
         if pg_available < 0:
             pg_available = 2 ** 32
 
-        return min(
-            self.limits.available_count,
-            self.limits.regional_available_count,
-            self.limits.cluster_available_count,
-            self.limits.nodearray_available_count,
-            self.limits.family_available_count,
-            pg_available,
+        return (
+            min(
+                self.limits.available_count,
+                self.limits.regional_available_count,
+                self.limits.cluster_available_count,
+                self.limits.nodearray_available_count,
+                self.limits.family_available_count,
+                pg_available,
+            )
+            - self.__decrement_counter
         )
 
     @available_count.setter
     def available_count(self, value: int) -> None:
         assert value >= 0, "{} < 0".format(value)
-        self.limits.decrement(self.vcpu_count, value)
+        self.limits.decrement(value)
 
     @property
     def family_available_count(self) -> int:
-        return self.limits.family_available_count
+        return self.limits.family_available_count - self.__decrement_counter
 
     @property
     def location(self) -> ht.Location:
@@ -221,10 +243,26 @@ class NodeBucket:
     def software_configuration(self) -> Dict:
         return self.__definition.software_configuration
 
+    def add_nodes(self, nodes: List["Node"]) -> None:
+        new_by_id = partition(nodes, lambda n: n.delayed_node_id.transient_id)
+        cur_by_id = partition(self.nodes, lambda n: n.delayed_node_id.transient_id)
+
+        filtered = []
+        for new_id, new_nodes in new_by_id.items():
+            if new_id not in cur_by_id:
+                filtered.append(new_nodes[0])
+
+        new_by_hostname = partition(filtered, lambda n: n.hostname_or_uuid)
+        cur_by_hostname = partition(self.nodes, lambda n: n.hostname_or_uuid)
+
+        for new_hostname, new_nodes in new_by_hostname.items():
+            if new_hostname not in cur_by_hostname:
+                self.nodes.append(new_nodes[0])
+
     def __str__(self) -> str:
         if self.placement_group:
-            return "NodeBucket({}, pg={}, size={})".format(
-                self.nodearray, self.placement_group, self.vm_size
+            return "NodeBucket({}, available={}, pg={}, size={})".format(
+                self.nodearray, self.available_count, self.placement_group, self.vm_size
             )
         return "NodeBucket({}, available={}, size={}, id={})".format(
             self.nodearray, self.available_count, self.vm_size, self.bucket_id
@@ -238,15 +276,28 @@ def bucket_candidates(
     candidates: List["NodeBucket"], constraints: List["constraintslib.NodeConstraint"],
 ) -> CandidatesResult:
     if not candidates:
-        return CandidatesResult("NoBucketsDefined", child_results=[],)  # TODO 46
+        return CandidatesResult("NoBucketsDefined", child_results=[],)
 
-    satisfactory_buckets = []
+    for c in candidates:
+        assert isinstance(c, NodeBucket)
+
+    satisfied_buckets: List["NodeBucket"] = []
     allocation_failures = []
 
-    for bucket in candidates:
+    bucket_weights = []
+    for n, bucket in enumerate(candidates):
+        bucket_weights.append((bucket, float(len(candidates) - n)))
+
+    for constraint in constraints:
+        bucket_weights = constraint.weight_buckets(bucket_weights)
+
+    sorted_bucket_weights = sorted(bucket_weights, key=lambda t: -t[1])
+    sorted_candidates = [t[0] for t in sorted_bucket_weights]
+
+    for bucket in sorted_candidates:
         reasons: List[Result] = []
         is_unsatisfied = False
-        satisfaction_scores = []
+        raw_scores: List[int] = []
         for constraint in constraints:
             # TODO reason
             result = constraint.satisfied_by_bucket(bucket)
@@ -255,21 +306,31 @@ def bucket_candidates(
                 if hasattr(result, "reasons"):
                     reasons.append(result)
                 break
-            satisfaction_scores.append(result.score)
+            if result.score is not None:
+                raw_scores.append(result.score)
+
+        # as a tie breaker, the number of open nodes
+        # num_open_nodes = len([n for n in bucket.nodes if not n.closed])
+        # raw_scores.append(num_open_nodes)
 
         if is_unsatisfied:
             allocation_failures.extend(reasons)
         else:
-            satisfactory_buckets.append((tuple(satisfaction_scores), bucket))
+            satisfied_buckets.append(bucket)
 
-    if satisfactory_buckets:
-        ret = [
-            bucket
-            for _, bucket in reversed(
-                sorted(satisfactory_buckets, key=lambda tup: tup[0])
-            )
-        ]
-        return CandidatesResult("success", candidates=ret)
+    if satisfied_buckets:
+        for cc in constraints:
+            for b in satisfied_buckets:
+                assert cc.satisfied_by_bucket(b)
+                assert cc.satisfied_by_node(b.example_node)
+        artificial = []
+        actual = []
+        for c in satisfied_buckets:
+            if c._artificial:
+                artificial.append(c)
+            else:
+                actual.append(c)
+        return CandidatesResult("success", candidates=artificial + actual)
 
     return CandidatesResult("CompoundFailure", child_results=allocation_failures)
 
@@ -307,4 +368,5 @@ def node_from_bucket(
         managed=True,
         resources=ht.ResourceDict(bucket.resources),
         software_configuration=bucket.software_configuration,
+        keep_alive=False,
     )

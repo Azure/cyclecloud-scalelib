@@ -1,7 +1,9 @@
+import json
 import os
 import uuid as uuidlib
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, TextIO, TypeVar
+from functools import reduce
+from typing import Any, Callable, Dict, List, TextIO, TypeVar, Union
 
 from hpc.autoscale.codeanalysis import hpcwrapclass
 
@@ -57,16 +59,20 @@ def partition(node_list: List[T], func: Callable[[T], K]) -> Dict[K, List[T]]:
     return by_key
 
 
-def partition_single(node_list: List[T], func: Callable[[T], K]) -> Dict[K, T]:
+def partition_single(
+    node_list: List[T], func: Callable[[T], K], strict: bool = True
+) -> Dict[K, T]:
     result = partition(node_list, func)
     ret: Dict[K, T] = {}
     for key, value in result.items():
-        if len(value) != 1:
-            raise RuntimeError(
-                "Could not partition list into single values - key={} values={}".format(
-                    key, value,
+        if len(value) > 1:
+
+            if strict or not reduce(lambda x, y: x == y, value):  # type: ignore
+                raise RuntimeError(
+                    "Could not partition list into single values - key={} values={}".format(
+                        key, value,
+                    )
                 )
-            )
         ret[key] = value[0]
     return ret
 
@@ -154,3 +160,48 @@ def new_singleton_lock(config: Dict) -> SingletonLock:
         return SingletonFileLock(lock_path)
 
     return NullSingletonLock()
+
+
+class AliasDict(dict):
+    """
+    Dictionary that allows you to set/get/contain an alias of the actual key.
+    The alias key will never show up in keys() or items().
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.__aliases: Dict = {}
+
+    def add_alias(self, alias: str, canonical: str) -> None:
+        self.__aliases[alias] = canonical
+
+    def _key(self, key: object) -> object:
+        if key in self.__aliases:
+            return self.__aliases[key]
+        return key
+
+    def __contains__(self, key: object) -> bool:
+        return super().__contains__(self._key(key))
+
+    def __getitem__(self, key: object) -> object:
+        return super().__getitem__(self._key(key))
+
+    def __setitem__(self, key: object, value: object) -> None:
+        return super().__setitem__(self._key(key), value)
+
+
+class ConfigurationException(RuntimeError):
+    pass
+
+
+def json_load(config: Union[str, Dict]) -> Dict:
+    if hasattr(config, "keys"):
+        return config  # type: ignore
+
+    try:
+        assert isinstance(config, str)
+        with open(config) as fr:
+            return json.load(fr)
+    except Exception as e:
+        msg = "Could not parse config {}: {}".format(config, str(e))
+        raise ConfigurationException(msg)

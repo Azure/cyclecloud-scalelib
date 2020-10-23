@@ -7,6 +7,7 @@ from hypothesis.strategies import SearchStrategy
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.node.node import Node, UnmanagedNode
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
@@ -19,6 +20,7 @@ from hpc.autoscale.util import partition, partition_single
 
 
 def setup_function(function: Any) -> None:
+    SchedulerNode.ignore_hostnames = True
     register_result_handler(DefaultContextHandler("[{}]".format(function.__name__)))
 
 
@@ -125,27 +127,72 @@ def test_multi_array_alloc(bindings: MockClusterBinding) -> None:
         {"node.nodearray": ["htc", "hpc"], "exclusive": True}, node_count=20
     )
 
-    assert result and len(result.nodes) == 15
+    assert result
+    assert len(result.nodes) == 15
     assert hpc.available_count == 0
     assert htc.available_count == 0
     assert set(["htc", "hpc"]) == set([n.nodearray for n in result.nodes])
 
 
+def test_excl_colocated_packing_bug() -> None:
+    def n() -> NodeManager:
+        return _node_mgr(_bindings())
+
+    # assert [] == node_mgr.get_nodes()
+    # result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1, "exclusive": True}, slot_count=2_000_000, all_or_nothing=True)
+    # assert not result, str(result)
+    # assert [] == node_mgr.get_nodes()
+    # assert [] == node_mgr.new_nodes
+    register_result_handler(DefaultContextHandler("[ttt]"))
+    result = n().allocate(
+        {"node.nodearray": "htc", "ncpus": 1, "exclusive": True},
+        slot_count=10,
+        all_or_nothing=True,
+    )
+    assert len(result.nodes) == 3, len(result.nodes)
+
+    result = n().allocate(
+        {
+            "node.nodearray": "htc",
+            "ncpus": 1,
+            "exclusive": True,
+            "node.vm_size": "Standard_F4s",
+        },
+        slot_count=19,
+        all_or_nothing=True,
+    )
+    assert len(result.nodes) == 5, len(result.nodes)
+
+    result = n().allocate(
+        {
+            "node.nodearray": "htc",
+            "ncpus": 1,
+            "exclusive": True,
+            "node.vm_size": "Standard_F4s",
+        },
+        node_count=101,
+        all_or_nothing=True,
+    )
+    assert not result, result
+
+
 def test_packing(node_mgr: NodeManager) -> None:
+    # htc node can fit 4 ncpus, so only allocate one node
     result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=2)
     assert result, str(result)
     assert len(result.nodes) == 1, result.nodes
     assert result.nodes[0].name == "htc-1"
     assert result.nodes[0].resources["ncpus"] == 4
     assert result.nodes[0].available["ncpus"] == 2, result.nodes[0].available["ncpus"]
-
     assert len(node_mgr.new_nodes) == 1, len(node_mgr.new_nodes)
+
+    # htc node can fit 4 ncpus, but 2 are used up on the first node, so allocate a second
     result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=4)
     assert result
     assert len(result.nodes) == 2, result.nodes
     assert result.nodes[0].name == "htc-1"
     assert result.nodes[1].name == "htc-2"
-    assert len(node_mgr.new_nodes) == 2
+    assert len(node_mgr.new_nodes) == 2, [n.name for n in node_mgr.new_nodes]
     assert len(set([n.name for n in node_mgr.new_nodes])) == 2
     result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=2)
     assert len(result.nodes) == 1
@@ -269,8 +316,13 @@ def test_mock_bindings(bindings: MockClusterBinding) -> None:
 
     hpc.decrement(1)
     assert hpc.family_available_count == 9
+    assert htc.family_available_count == 20
+    hpc.commit()
+    assert hpc.family_available_count == 9
     assert htc.family_available_count == 18
+
     hpc.increment(1)
+    hpc.commit()
     assert hpc.family_available_count == 10
     assert htc.family_available_count == 20
 
@@ -278,14 +330,9 @@ def test_mock_bindings(bindings: MockClusterBinding) -> None:
     nm = _node_mgr(bindings)
 
     b = MockClusterBinding()
-    b.add_nodearray("haspgs", {})
+    b.add_nodearray("haspgs", {}, max_placement_group_size=20)
     b.add_bucket(
-        "haspgs",
-        "Standard_F4",
-        100,
-        100,
-        max_placement_group_size=20,
-        placement_groups=["pg0", "pg1"],
+        "haspgs", "Standard_F4", 100, 100, placement_groups=["pg0", "pg1"],
     )
     # make sure we take the max_placement_group_size (20) into account
     # and that we have the non-pg and 2 pg buckets.
@@ -381,6 +428,31 @@ def test_default_resources() -> None:
     assert by_nodetype.get("A")[0].resources["vcpus"] == 4
     assert by_nodetype.get("B")[0].resources["vcpus"] == 8
 
+    node_mgr = _node_mgr(_bindings())
+    node_mgr.add_default_resource({}, "add_vcpus", "node.vcpu_count", "add", 4)
+    node_mgr.add_default_resource(
+        {}, "subtract_vcpus", "node.vcpu_count", "subtract", 4
+    )
+    node_mgr.add_default_resource(
+        {}, "multiply_vcpus", "node.vcpu_count", "multiply", 4
+    )
+    node_mgr.add_default_resource({}, "divide_vcpus", "node.vcpu_count", "divide", 4)
+    node_mgr.add_default_resource(
+        {}, "divide_floor_vcpus", "node.vcpu_count", "divide_floor", 1.5
+    )
+
+    by_nodetype = partition(node_mgr.get_buckets(), lambda b: b.resources["nodetype"])
+    assert by_nodetype.get("A")[0].resources["add_vcpus"] == 8
+    assert by_nodetype.get("B")[0].resources["add_vcpus"] == 12
+    assert by_nodetype.get("A")[0].resources["subtract_vcpus"] == 0
+    assert by_nodetype.get("B")[0].resources["subtract_vcpus"] == 4
+    assert by_nodetype.get("A")[0].resources["multiply_vcpus"] == 16
+    assert by_nodetype.get("B")[0].resources["multiply_vcpus"] == 32
+    assert by_nodetype.get("A")[0].resources["divide_vcpus"] == 1
+    assert by_nodetype.get("B")[0].resources["divide_vcpus"] == 2
+    assert by_nodetype.get("A")[0].resources["divide_floor_vcpus"] == 2
+    assert by_nodetype.get("B")[0].resources["divide_floor_vcpus"] == 5
+
 
 def vmindices() -> SearchStrategy[ht.VMSize]:
     class VMIndexStrategy(SearchStrategy):
@@ -420,6 +492,7 @@ def test_hypo(vm: ht.VMSize) -> None:
     s.lists(s.integers(1, 2 ** 31), min_size=10, max_size=10,),
 )
 @settings(deadline=None)
+@pytest.mark.skip
 def test_slot_count_hypothesis(
     num_arrays: int,
     num_buckets: int,
@@ -529,8 +602,14 @@ def test_overscaling_error() -> None:
     bindings.add_bucket("htc", "Standard_E2s_v3", max_count=80, available_count=4)
 
     node_mgr = _node_mgr(bindings)
-    result = node_mgr.allocate({"ncpus": 1}, slot_count=10, assignment_id="slots")
+    node_mgr.set_system_default_resources()
+    result = node_mgr.allocate(
+        {"ncpus": 1, "node.vm_size": ["Standard_E16_v3", "Standard_E2s_v3"]},
+        slot_count=20,
+        assignment_id="slots",
+    )
     assert result
+    assert len(result.nodes) == 3
 
     result = node_mgr.allocate(
         {"exclusive": True, "node.vm_size": "Standard_D16s_v3"},
@@ -541,7 +620,8 @@ def test_overscaling_error() -> None:
 
     by_size = partition(node_mgr.new_nodes, lambda b: b.vm_size)
 
-    assert len(by_size["Standard_E2s_v3"]) == 4
+    assert "Standard_E2s_v3" in by_size
+    assert len(by_size["Standard_E2s_v3"]) == 2
     assert len(by_size["Standard_E16_v3"]) == 1
     assert len(by_size["Standard_D16s_v3"]) == 10
 
@@ -552,7 +632,7 @@ def test_overscaling_error() -> None:
 
     # recreate it - the bindings 'remembers' that we already created nodes
     node_mgr = _node_mgr(bindings)
-    assert len(node_mgr.get_nodes()) == 15
+    assert len(node_mgr.get_nodes()) == 13
 
     result = node_mgr.allocate({"ncpus": 1}, slot_count=100, assignment_id="slots")
     assert result
@@ -569,11 +649,12 @@ def test_overscaling_error() -> None:
         print(node.name, node.vm_size, node.assignments)
 
     assert len(node_mgr.new_nodes) == 0
-    assert len(node_mgr.get_nodes()) == 15
+    assert len(node_mgr.get_nodes()) == 13
 
     by_size = partition(node_mgr.get_nodes(), lambda b: b.vm_size)
 
-    assert len(by_size["Standard_E2s_v3"]) == 4
+    assert "Standard_E2s_v3" in by_size
+    assert len(by_size["Standard_E2s_v3"]) == 2
     assert len(by_size["Standard_E16_v3"]) == 1
     assert len(by_size["Standard_D16s_v3"]) == 10
 
@@ -668,6 +749,23 @@ def test_node_software_configuration_alias(node_mgr: NodeManager) -> None:
     )
     b = node_mgr.get_buckets()[0]
     assert b.resources["int_alias"] == b.software_configuration["custom_int"]
+
+
+def test_unmanaged_nodes(node_mgr: NodeManager) -> None:
+    assert len(node_mgr.get_buckets()) == 2
+    tux = SchedulerNode("tux", bucket_id=ht.BucketId("tuxid"))
+    node_mgr.add_unmanaged_nodes([tux])
+    assert len(node_mgr.get_buckets()) == 3
+    assert node_mgr.get_buckets_by_id()[tux.bucket_id].nodes == [tux]
+
+    tux2 = SchedulerNode("tux2", bucket_id=tux.bucket_id)
+    node_mgr.add_unmanaged_nodes([tux2])
+    assert len(node_mgr.get_buckets()) == 3
+    assert node_mgr.get_buckets_by_id()[tux.bucket_id].nodes == [tux, tux2]
+
+    node_mgr.add_unmanaged_nodes([tux, tux2])
+    assert len(node_mgr.get_buckets()) == 3
+    assert node_mgr.get_buckets_by_id()[tux.bucket_id].nodes == [tux, tux2]
 
 
 if __name__ == "__main__":

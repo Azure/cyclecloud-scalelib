@@ -55,6 +55,10 @@ class Result(ABC):
     def __bool__(self) -> bool:
         return self.status == "success"
 
+    @property
+    def message(self) -> str:
+        return str(self)
+
     @abstractmethod
     def __str__(self) -> str:
         ...
@@ -77,9 +81,6 @@ class AllocationResult(Result):
             assert nodes
             pass
         self.nodes = nodes or []
-        self.total_core_count = sum([x.vcpu_count for x in nodes]) if nodes else 0
-        self.total_memory = sum([x.vcpu_count for x in nodes]) if nodes else 0
-
         if self:
             assert slots_allocated is not None
             assert slots_allocated > 0
@@ -87,10 +88,23 @@ class AllocationResult(Result):
 
         fire_result_handlers(self)
 
+    @property
+    def message(self) -> str:
+        if self:
+            node_names = ",".join([str(n) for n in self.nodes])
+            if self.total_slots > 0:
+                return "Allocated {} slots on nodes={}".format(
+                    self.total_slots, node_names
+                )
+            else:
+                return "Allocated {} nodes={}".format(len(self.nodes), node_names)
+        else:
+            return "\n".join(self.reasons)
+
     def __str__(self) -> str:
         if self:
-            return "AllocationResult(status={}, nodes={})".format(
-                self.status, self.nodes
+            return "AllocationResult(status={}, num_nodes={}, nodes={})".format(
+                self.status, len(self.nodes), [str(x) for x in self.nodes]
             )
         else:
             return "AllocationResult(status={}, reason={})".format(
@@ -116,6 +130,13 @@ class MatchResult(Result):
             assert not isinstance(self.reasons[0], list)
         fire_result_handlers(self)
 
+    @property
+    def message(self) -> str:
+        if self:
+            return "{} potential slots on {}".format(self.total_slots, self.node)
+        else:
+            return "\n".join(self.reasons)
+
     def __str__(self) -> str:
         reasons = " AND ".join(self.reasons)
         if self:
@@ -137,12 +158,26 @@ class CandidatesResult(Result):
         child_results: List[Result] = None,
     ) -> None:
         Result.__init__(self, status, [str(r) for r in (child_results or [])])
-        self.candidates = candidates or []  # List[NodeBucket]
+        self.__candidates = candidates
         self.child_results = child_results
         fire_result_handlers(self)
 
+    @property
+    def candidates(self) -> List["NodeBucket"]:
+        return self.__candidates or []
+
+    @property
+    def message(self) -> str:
+        if self:
+            bucket_exprs = []
+            for bucket in self.candidates:
+                bucket_exprs.append(str(bucket))
+            return "Bucket candidates are:\n\t{}".format("\n\t".join(bucket_exprs))
+        else:
+            return "\n".join(self.reasons)
+
     def __str__(self) -> str:
-        reasons = " AND ".join(set(self.reasons))[:5]
+        reasons = " AND ".join(list(set(self.reasons))[:5])
         if self:
             return "CandidatesResult(status={}, candidates={})".format(
                 self.status, [str(x) for x in self.candidates]
@@ -175,6 +210,16 @@ class SatisfiedResult(Result):
         self.constraint = constraint
         self.node = node
         fire_result_handlers(self)
+
+    @property
+    def message(self) -> str:
+
+        if bool(self):
+            return "{} satisfies constraint {} with score {}".format(
+                self.node, self.constraint, int(self)
+            )
+        else:
+            return "\n".join(self.reasons)
 
     def __int__(self) -> int:
         if self.score is None:

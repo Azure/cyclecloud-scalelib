@@ -23,7 +23,7 @@ from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
-from frozendict import frozendict
+from immutabledict import ImmutableOrderedDict
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
@@ -77,6 +77,7 @@ class MockClusterBinding(ClusterBindingInterface):
         max_count: int = 100_000,
         spot: bool = False,
         software_configuration: Dict = {},
+        max_placement_group_size: int = 100,
     ) -> ClusterNodearrayStatus:
         nodearray_status = ClusterNodearrayStatus()
         nodearray_status.buckets = []
@@ -88,11 +89,15 @@ class MockClusterBinding(ClusterBindingInterface):
             "Status": self.state,
             "Region": location,
             "SubnetId": self.subnet_id,
-            "Configuration": {"autoscale": {"resources": resources}},
+            "Configuration": {},
             "Interruptible": spot,
+            "Azure": {"MaxScalesetSize": max_placement_group_size},
         }
-
-        nodearray_status.nodearray["Configuration"].update(software_configuration)
+        config = nodearray_status.nodearray["Configuration"]
+        config.update(software_configuration)
+        config["autoscale"] = autoscale = config.get("autoscale", {})
+        autoscale["resources"] = config_resources = autoscale.get("autoscale", {})
+        config_resources.update(resources)
 
         for attr in dir(nodearray_status):
             if attr[0].isalpha() and "count" in attr:
@@ -115,7 +120,6 @@ class MockClusterBinding(ClusterBindingInterface):
         regional_consumed_core_count: Optional[int] = None,
         regional_quota_core_count: Optional[int] = 1_000_000,
         regional_quota_count: Optional[int] = 10_000,
-        max_placement_group_size: int = 100,
         placement_groups: Optional[List[str]] = None,
     ) -> NodearrayBucketStatus:
         def pick(a: Optional[int], b: Optional[int]) -> int:
@@ -150,7 +154,10 @@ class MockClusterBinding(ClusterBindingInterface):
 
         bucket_status.active_count = max_count - available_count
         bucket_status.active_nodes = []
-        bucket_status.max_placement_group_size = max_placement_group_size
+
+        bucket_status.max_placement_group_size = nodearray_status.nodearray.get(
+            "Azure", {}
+        ).get("MaxScalesetSize", 100)
         bucket_status.family_consumed_core_count = pick(
             family_consumed_core_count, bucket_status.active_count * vcpu_count
         )
@@ -193,7 +200,7 @@ class MockClusterBinding(ClusterBindingInterface):
         bucket_status.definition.machine_type = vm_size
         bucket_status.virtual_machine = NodearrayBucketStatusVirtualMachine()
         bucket_status.virtual_machine.vcpu_count = vcpu_count
-        bucket_status.virtual_machine.memory = aux_info.memory.convert_to("m").value
+        bucket_status.virtual_machine.memory = aux_info.memory.convert_to("g").value
 
         bucket_status.virtual_machine.infiniband = aux_info.infiniband
 
@@ -238,6 +245,7 @@ class MockClusterBinding(ClusterBindingInterface):
         hostname: Optional[Hostname] = None,
         spot: bool = False,
         placement_group: str = None,
+        keep_alive: bool = False,
     ) -> Node:
         assert nodearray in self.nodearrays
         nodearray_status = self.nodearrays[nodearray]
@@ -296,9 +304,10 @@ class MockClusterBinding(ClusterBindingInterface):
             placement_group=placement_group,
             managed=True,
             resources=resources,
-            software_configuration=frozendict(
+            software_configuration=ImmutableOrderedDict(
                 nodearray_record.get("Configuration", {})
             ),
+            keep_alive=keep_alive,
         )
         op_id = OperationId(str(uuid4()))
         self.operations[op_id] = MockNodeManagementResult(op_id, [self.nodes[name]])
@@ -483,6 +492,12 @@ class MockClusterBinding(ClusterBindingInterface):
     ) -> None:
         raise NotImplementedError()
 
+    def update_state(self, state: str, node_names: Optional[List[str]] = None) -> None:
+        """For test purposes only"""
+        node_names = node_names or list(self.nodes.keys())
+        for node_name in node_names:
+            self.nodes[NodeName(node_name)].state = NodeStatus(state)
+
     def __str__(self) -> str:
         return "MockBindings()"
 
@@ -512,7 +527,7 @@ class MockNodeManagementResult(NodeManagementResult):
 
 
 def _node_to_ccnode(n: Node) -> NodeRecord:
-    return {
+    ret = {
         "Name": n.name,
         "Template": n.nodearray,
         "MachineType": n.vm_size,
@@ -526,10 +541,10 @@ def _node_to_ccnode(n: Node) -> NodeRecord:
         "Status": n.state,
         "PlacementGroupId": n.placement_group,
         "Infiniband": n.infiniband,
-        "Configuration": {
-            "Configuration": {"autoscale": {"resources": deepcopy(n.resources)}}
-        },
+        "Configuration": {},
     }
+    ret["Configuration"].update(deepcopy(n.software_configuration))
+    return ret
 
 
 def _nodes_to_ccnode(nodes: List[Node]) -> List[NodeRecord]:

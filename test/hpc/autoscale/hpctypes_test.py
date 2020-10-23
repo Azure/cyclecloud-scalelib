@@ -19,3 +19,9 @@ def test_memory() -> None:
     assert m("100g") == m("102400m").convert_to("g")
     assert m("102400m") == m("100g").convert_to("m")
     assert m("100g") == m("100g").convert_to("m").convert_to("g")
+
+    assert m("100g") > m("100k")
+    assert m("100k") < m("100g")
+
+    assert m("100g") // 9.99 == m("10g")
+    assert m("100g") // 10.01 == m("9g")

@@ -1,6 +1,7 @@
 import typing
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from uuid import uuid4
 
 import hpc  # noqa: F401
 import hpc.autoscale.hpclogging as logging
@@ -21,6 +22,11 @@ if typing.TYPE_CHECKING:
 
 # TODO split by job and node constraints (job being a subclass of node constraint)
 class NodeConstraint(ABC):
+    def weight_buckets(
+        self, bucket_weights: List[Tuple["NodeBucket", float]]
+    ) -> List[Tuple["NodeBucket", float]]:
+        return bucket_weights
+
     @abstractmethod
     def satisfied_by_bucket(self, bucket: "NodeBucket") -> SatisfiedResult:
         raise RuntimeError()
@@ -39,6 +45,9 @@ class NodeConstraint(ABC):
     @abstractmethod
     def to_dict(self) -> dict:
         raise RuntimeError()
+
+    def get_children(self) -> Iterable["NodeConstraint"]:
+        return []
 
     @abstractmethod
     def __str__(self) -> str:
@@ -67,10 +76,48 @@ class NodeResourceConstraint(BaseNodeConstraint):
     def __init__(self, attr: str, *values: ht.ResourceTypeAtom) -> None:
         self.attr = attr
         self.values: List[ResourceType] = list(values)
+        self.weight = 100
+
+    def weight_buckets(
+        self, bucket_weights: List[Tuple["NodeBucket", float]]
+    ) -> List[Tuple["NodeBucket", float]]:
+        ret: List[Tuple["NodeBucket", float]] = []
+
+        for bucket, b_weight in bucket_weights:
+            new_weight = 0.0
+            if self.attr not in bucket.example_node.available:
+                ret.append((bucket, 0.0))
+                continue
+            target = bucket.example_node.available[self.attr]
+
+            for n, value in enumerate(self.values):
+                if target == value:
+                    new_weight = (
+                        float(len(self.values) * self.weight - n * self.weight)
+                        + b_weight
+                    )
+                    break
+
+            ret.append((bucket, new_weight))
+
+        return ret
+
+    def _satisfied(self, node: "Node", target: ht.ResourceTypeAtom) -> Optional[str]:
+        target = node.available[self.attr]
+
+        if target not in self.values:
+            if len(self.values) > 1:
+                return "Resource[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
+                    self.attr, target, self.values, node.name, self.attr,
+                )
+            else:
+                return "Resource[name={} value={}] != node[name={} {}={}]".format(
+                    self.attr, target, node.name, self.attr, self.values[0]
+                )
+        return None
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
         if self.attr not in node.available:
-
             return SatisfiedResult(
                 "UndefinedResource",
                 self,
@@ -94,9 +141,9 @@ class NodeResourceConstraint(BaseNodeConstraint):
                 )
 
             return SatisfiedResult("InvalidOption", self, node, [msg],)
-        return SatisfiedResult(
-            "success", self, node, score=len(self.values) - self.values.index(target),
-        )
+        # so we want
+        score = len(self.values) - self.values.index(target) + 1
+        return SatisfiedResult("success", self, node, score=score,)
 
     def __str__(self) -> str:
         if len(self.values) == 1:
@@ -104,7 +151,7 @@ class NodeResourceConstraint(BaseNodeConstraint):
         return "(Node.{} in {})".format(self.attr, self.values)
 
     def __repr__(self) -> str:
-        return "NodeConstraint" + str(self)
+        return "NodeResourceConstraint" + str(self)
 
     def to_dict(self) -> dict:
         return {self.attr: self.values}
@@ -112,9 +159,10 @@ class NodeResourceConstraint(BaseNodeConstraint):
 
 @hpcwrapclass
 class MinResourcePerNode(BaseNodeConstraint):
-    def __init__(self, attr: str, value: Union[int, float]) -> None:
+    def __init__(self, attr: str, value: Union[int, float, ht.Memory]) -> None:
         self.attr = attr
         self.value = value
+        assert isinstance(self.value, (int, float, ht.Memory))
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
 
@@ -130,7 +178,8 @@ class MinResourcePerNode(BaseNodeConstraint):
                 return SatisfiedResult("success", self, node,)
         except TypeError as e:
             logging.warning(
-                "Could not evaluate %s >= %s because they are different types: %s",
+                "For attribute %s: Could not evaluate %s >= %s because they are different types: %s",
+                self.attr,
                 node.available[self.attr],
                 self.value,
                 e,
@@ -153,7 +202,7 @@ class MinResourcePerNode(BaseNodeConstraint):
         # TODO type checking here.
         if remaining < self.value:
             raise RuntimeError(
-                "Attempted to allocate more {} than is available for node {}: {} < {} ({})".format(
+                "Attempted to allocate more {} than is available for {}: {} < {} ({})".format(
                     self.attr, node.name, remaining, self.value, str(self),
                 )
             )
@@ -170,7 +219,7 @@ class MinResourcePerNode(BaseNodeConstraint):
         return "(Node.{} >= {})".format(self.attr, self.value)
 
     def __repr__(self) -> str:
-        return "NodeConstraint" + str(self)
+        return "NodeMinResourceConstraint" + str(self)
 
     def to_dict(self) -> dict:
         return ConstraintDict({self.attr: self.value})
@@ -178,45 +227,62 @@ class MinResourcePerNode(BaseNodeConstraint):
 
 @hpcwrapclass
 class ExclusiveNode(BaseNodeConstraint):
-    def __init__(self, is_exclusive: bool = True) -> None:
+    def __init__(
+        self,
+        is_exclusive: bool = True,
+        job_exclusive: bool = True,
+        assignment_id: str = "",
+    ) -> None:
         self.is_exclusive = is_exclusive
+        assert self.is_exclusive, "Only exclusive=true is supported at this time"
+        self.assignment_id = assignment_id or str(uuid4())
+        self.job_exclusive = job_exclusive
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
-        if node.closed:
-            msg = "[name={} hostname={}]already has an exclusive job".format(
-                node.name, node.hostname
-            )
-            return SatisfiedResult("ExclusiveRequirementFailed", self, node, [msg],)
+        # TODO clean up
+        if node.assignments or node.closed:
 
-        if bool(node.assignments):
-            if self.is_exclusive:
-                msg = "Job is exclusive and Node[name={} hostname={}] already has a match".format(
-                    node.name, node.hostname
+            if self.job_exclusive or self.assignment_id not in node.assignments:
+                msg = "[name={} hostname={}] already has an exclusive job: {}".format(
+                    node.name, node.hostname, node.assignments
                 )
                 return SatisfiedResult("ExclusiveRequirementFailed", self, node, [msg],)
-
         return SatisfiedResult("success", self, node)
 
     def do_decrement(self, node: "Node") -> bool:
-        if node.closed:
-            raise RuntimeError(
-                "Can not call ExclusiveNode.do_decrement on a closed node!"
-            )
+        # if node.closed:
+        #     # the job may not be assigned yet, or we may be packing more than one
+        #     # instance of the job on the machine
+        #     if (not self.is_exclusive) or self.assignment_id not in node.assignments:
+        #         raise RuntimeError(
+        #             "Can not call ExclusiveNode.do_decrement on a closed node! %s %s" % (node, node.assignments)
+        #         )
+        #     # we already marked this node as exclusive
+        #     assert node.closed
+        # elif self.is_exclusive:
+        #     node.closed = True
+        #     assert not node.assignments
         if self.is_exclusive:
+            if self.assignment_id in node.assignments:
+                if self.job_exclusive:
+                    return False
             node.closed = True
         return True
 
     def minimum_space(self, node: "Node") -> int:
-        if node.closed:
-            return 0
-
-        if not self.is_exclusive:
-            return -1
-
-        return 0 if bool(node.assignments) else 1
+        assert self.assignment_id
+        assert node.vcpu_count > 0
+        if node.assignments:
+            if self.assignment_id not in node.assignments:
+                return 0
+            elif self.job_exclusive:
+                return 0
+        return -1
 
     def to_dict(self) -> dict:
-        return ConstraintDict({"exclusive": self.is_exclusive})
+        if self.job_exclusive:
+            return {"exclusive": self.is_exclusive}
+        return {"exclusive_task": self.is_exclusive}
 
     def __str__(self) -> str:
         return "NodeConstraint(exclusive={})".format(self.is_exclusive)
@@ -250,11 +316,26 @@ class InAPlacementGroup(BaseNodeConstraint):
 @hpcwrapclass
 class Or(BaseNodeConstraint):
     def __init__(self, *constraints: Union[NodeConstraint, ConstraintDict]) -> None:
-        #         if len(constraints) == 1 and isinstance(constraints[0], list):
-        #             constraints = constraints[0]
         if len(constraints) <= 1:
             raise AssertionError("Or expression requires at least 2 constraints")
         self.constraints = get_constraints(list(constraints))
+        self.weight = 100
+
+    def weight_buckets(
+        self, bucket_weights: List[Tuple["NodeBucket", float]]
+    ) -> List[Tuple["NodeBucket", float]]:
+        ret: List[Tuple["NodeBucket", float]] = []
+        for bucket, current_weight in bucket_weights:
+            new_weight = None
+            for n, c in enumerate(self.constraints):
+                result = c.satisfied_by_bucket(bucket)
+                if result:
+                    new_weight = (
+                        float(len(self.constraints) - n) * self.weight + current_weight
+                    )
+                    break
+            ret.append((bucket, new_weight or 0.0))
+        return ret
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
         reasons: List[str] = []
@@ -280,11 +361,78 @@ class Or(BaseNodeConstraint):
 
         return False
 
+    def get_children(self) -> Iterable[NodeConstraint]:
+        return self.constraints
+
     def __str__(self) -> str:
         return " or ".join([str(c) for c in self.constraints])
 
     def to_dict(self) -> dict:
         return {"or": [jc.to_dict() for jc in self.constraints]}
+
+
+@hpcwrapclass
+class XOr(BaseNodeConstraint):
+    def __init__(self, *constraints: Union[NodeConstraint, ConstraintDict]) -> None:
+        if len(constraints) <= 1:
+            raise AssertionError("XOr expression requires at least 2 constraints")
+        self.constraints = get_constraints(list(constraints))
+
+    def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        reasons: List[str] = []
+        xor_result: Optional[SatisfiedResult] = None
+
+        for n, c in enumerate(self.constraints):
+            expr_result = c.satisfied_by_node(node)
+
+            if expr_result:
+                # true ^ true == false
+
+                if xor_result:
+                    msg = "Multiple expressions evaluated as true. See below:\n\t{}\n\t{}".format(
+                        xor_result.message, expr_result.message
+                    )
+                    return SatisfiedResult("XORFailed", self, node, [msg] + reasons,)
+                # assign the first true expression as the final result
+                xor_result = expr_result
+            elif hasattr(expr_result, "reasons"):
+                # if this does end up failing for all expressions, keep
+                # track of the set of reasons
+                reasons.extend(expr_result.reasons)
+
+        if xor_result:
+            return xor_result
+
+        return SatisfiedResult("CompoundFailure", self, node, reasons)
+
+    def do_decrement(self, node: "Node") -> bool:
+        xor_result: Union[bool, "SatisfiedResult"] = False
+        first_matched_constraint: Optional[NodeConstraint] = None
+
+        for c in self.constraints:
+            expr_result = c.satisfied_by_node(node)
+            if expr_result:
+                if xor_result:
+                    raise AssertionError(
+                        "XOr expression is invalid but do_decrement was still called."
+                    )
+                xor_result = expr_result
+                assert first_matched_constraint is None
+                first_matched_constraint = c
+
+        if xor_result and first_matched_constraint:
+            return first_matched_constraint.do_decrement(node)
+
+        return False
+
+    def get_children(self) -> Iterable[NodeConstraint]:
+        return self.constraints
+
+    def __str__(self) -> str:
+        return " xor ".join([str(c) for c in self.constraints])
+
+    def to_dict(self) -> dict:
+        return {"xor": [jc.to_dict() for jc in self.constraints]}
 
 
 @hpcwrapclass
@@ -308,6 +456,20 @@ class And(BaseNodeConstraint):
             if c.satisfied_by_node(node):
                 assert c.do_decrement(node)
         return True
+
+    def get_children(self) -> Iterable[NodeConstraint]:
+        return self.constraints
+
+    def minimum_space(self, node: "Node") -> int:
+        m = -1
+        for child in self.get_children():
+            child_min = child.minimum_space(node)
+            if child_min == -1:
+                continue
+            if m == -1:
+                m = child_min
+            m = min(m, child_min)
+        return m
 
     def __str__(self) -> str:
         return " and ".join([str(c) for c in self.constraints])
@@ -337,6 +499,9 @@ class Not(BaseNodeConstraint):
     def to_dict(self) -> dict:
         return {"not": self.condition.to_dict()}
 
+    def get_children(self) -> Iterable[NodeConstraint]:
+        return [self.condition]
+
     def __str__(self) -> str:
         return "Not({})".format(self.condition)
 
@@ -359,25 +524,50 @@ class NodePropertyConstraint(BaseNodeConstraint):
         else:
             self.values = list(values)
 
+    def _get_target_value(
+        self, node: "Node"
+    ) -> typing.Union[None, ht.ResourceTypeAtom]:
+        return getattr(node, self.attr)
+
+    def weight_buckets(
+        self, bucket_weights: List[Tuple["NodeBucket", float]]
+    ) -> List[Tuple["NodeBucket", float]]:
+        ret: List[Tuple["NodeBucket", float]] = []
+        for bucket, weight in bucket_weights:
+            for n, value in enumerate(self.values):
+                err_msg = self._satisfied(bucket.example_node)
+                if err_msg:
+                    new_weight = 0.0
+                else:
+                    new_weight = float(len(self.values) - n)
+                ret.append((bucket, new_weight))
+        return ret
+
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        err_msg = self._satisfied(node)
+
+        if err_msg:
+            return SatisfiedResult("InvalidOption", self, node, [err_msg],)
+
+        # our score is our inverted index - i.e. the first element is the highest score
+        target = getattr(node, self.attr)
+        score = len(self.values) - self.values.index(target)
+        return SatisfiedResult("success", self, node, score=score,)
+
+    def _satisfied(self, node: "Node") -> Optional[str]:
         target = getattr(node, self.attr)
 
         if target not in self.values:
 
             if len(self.values) > 1:
-                msg = "Property[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
+                return "Property[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
                     self.attr, target, self.values, node.name, self.attr,
                 )
             else:
-                msg = "Property[name={} value={}] != node[name={} {}={}]".format(
+                return "Property[name={} value={}] != node[name={} {}={}]".format(
                     self.attr, self.values[0], node.name, self.attr, target
                 )
-
-            return SatisfiedResult("InvalidOption", self, node, [msg],)
-
-        # our score is our inverted index - i.e. the first element is the highest score
-        score = len(self.values) - self.values.index(target)
-        return SatisfiedResult("success", self, node, score=score,)
+        return None
 
     def __str__(self) -> str:
         if len(self.values) == 1:
@@ -385,7 +575,7 @@ class NodePropertyConstraint(BaseNodeConstraint):
         return "(Node.{} in {})".format(self.attr, self.values)
 
     def __repr__(self) -> str:
-        return "NodeConstraint" + str(self)
+        return "NodePropertyConstraint" + str(self)
 
     def to_dict(self) -> dict:
         return {self.attr: self.values}
@@ -409,6 +599,62 @@ class NotAllocated(BaseNodeConstraint):
 
     def to_dict(self) -> dict:
         raise RuntimeError()
+
+
+class Never(BaseNodeConstraint):
+    """
+    If you need to insert a constraint that rejects every node.
+    """
+
+    def __init__(self, message: str) -> None:
+        self.__message = message
+
+    @property
+    def message(self) -> str:
+        return self.__message
+
+    def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        return SatisfiedResult("Never", self, node, reasons=[self.message])
+
+    def do_decrement(self, node: "Node") -> bool:
+        return False
+
+    def to_dict(self) -> dict:
+        return {"never": self.message}
+
+    def __str__(self) -> str:
+        return "Never({})".format(self.message)
+
+
+class ReadOnlyAlias(BaseNodeConstraint):
+    def __init__(self, alias: str, resource_name: str) -> None:
+        self.alias = alias
+        self.resource_name = resource_name
+
+    def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        if self.resource_name not in node.resources:
+            return SatisfiedResult(
+                "MissingResourceForAlias",
+                self,
+                node,
+                reasons=[
+                    "{} does not have resource {}".format(node, self.resource_name)
+                ],
+            )
+        return SatisfiedResult("success", self, node)
+
+    def do_decrement(self, node: "Node") -> bool:
+        node.available[self.alias] = node.resources[self.resource_name]
+        return True
+
+    def minimum_space(self, node: "Node") -> int:
+        return -1
+
+    def __str__(self) -> str:
+        return "Alias({}, {})".format(self.alias, self.resource_name)
+
+    def to_dict(self) -> dict:
+        return {"class": self.__class__.__name__, self.alias: self.resource_name}
 
 
 def _parse_node_property_constraint(
@@ -448,7 +694,10 @@ def new_job_constraint(
     if isinstance(value, NodeConstraint):
         return value
 
-    if attr == "exclusive":
+    if attr in ["exclusive", "exclusive_task"]:
+        if isinstance(value, str) and value.isdigit():
+            value = int(value)
+
         if isinstance(value, str):
             if value.lower() not in ["true", "false"]:
                 raise RuntimeError("Unexpected value for exclusive: {}".format(value))
@@ -456,14 +705,21 @@ def new_job_constraint(
         elif isinstance(value, int):
             value = bool(value)
         if not isinstance(value, bool):
-
-            raise RuntimeError("Unexpected value for exclusive: {}".format(value))
-        return ExclusiveNode(is_exclusive=value)
+            raise RuntimeError(
+                "Unexpected value for exclusive: {} {}".format(value, type(format))
+            )
+        # exclusive_tasks = multiple tasks from the same job run on the same node
+        # exclusive = only a single task from the same job can run on the same node
+        job_exclusive = attr == "exclusive"
+        return ExclusiveNode(is_exclusive=value, job_exclusive=job_exclusive)
 
     if attr == "not":
         not_cons = get_constraint(value)
         job_cons = new_job_constraint("_", not_cons)
         return Not(job_cons)
+
+    if attr == "never":
+        return Never(str(value))
 
     if attr.startswith("node."):
         assert value is None or isinstance(
@@ -479,7 +735,7 @@ def new_job_constraint(
 
     elif isinstance(value, list):
 
-        if attr == "or":
+        if attr in ["or", "xor"]:
             child_values: List[NodeConstraint] = []
             for child in value:
                 and_cons = get_constraints([child])
@@ -489,7 +745,9 @@ def new_job_constraint(
                     child_values.append(And(*and_cons))
                 else:
                     child_values.append(and_cons[0])
-            return Or(*child_values)
+            if attr == "or":
+                return Or(*child_values)
+            return XOr(*child_values)
 
         elif attr == "and":
             child_values = []
@@ -499,7 +757,11 @@ def new_job_constraint(
 
         return NodeResourceConstraint(attr, *value)
 
-    elif isinstance(value, int) or isinstance(value, float):
+    elif (
+        isinstance(value, int)
+        or isinstance(value, float)
+        or isinstance(value, ht.Memory)
+    ):
         return MinResourcePerNode(attr, value)
 
     elif value is None:
@@ -523,8 +785,8 @@ def get_constraint(constraint_expression: Constraint) -> NodeConstraint:
 
 @hpcwrap
 def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConstraint]:
-    #     if isinstance(constraint_expressions, dict):
-    #         constraint_expressions = [constraint_expressions]
+    if isinstance(constraint_expressions, dict):
+        constraint_expressions = [constraint_expressions]
 
     if isinstance(constraint_expressions, tuple):
         constraint_expressions = list(constraint_expressions)

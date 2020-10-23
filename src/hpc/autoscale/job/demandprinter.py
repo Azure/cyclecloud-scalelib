@@ -6,7 +6,6 @@ import sys
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, TextIO, Tuple
 
-import frozendict
 from typing_extensions import Literal
 
 from hpc.autoscale import hpclogging as logging
@@ -109,12 +108,21 @@ class DemandPrinter:
             columns.insert(0, "name")
 
         # sort by private ip or the node name
-        ordered_nodes = sorted(
-            demand_result.compute_nodes,
-            key=lambda n: tuple(map(int, n.private_ip.split(".")))
-            if n.private_ip
-            else tuple([2 ** 31] + [ord(l) for l in n.name]),  # noqa: E741
-        )
+
+        def sort_by_ip_or_name(node: Node) -> Any:
+            if node.private_ip:
+                return tuple(map(int, node.private_ip.split(".")))
+
+            name_toks = node.name.split("-")
+            if name_toks[-1].isdigit():
+                node_index = int(name_toks[-1])
+                nodearray_ord = [ord(l) for l in node.nodearray]
+                # 2**31 to make these come after private ips
+                # then nodearray name, then index
+                return tuple([2 ** 31] + nodearray_ord + [node_index])
+            return tuple([-1] + name_toks)
+
+        ordered_nodes = sorted(demand_result.compute_nodes, key=sort_by_ip_or_name)
 
         for node in ordered_nodes:
             row: List[str] = []
@@ -124,7 +132,8 @@ class DemandPrinter:
 
                 value: Any = None
                 is_from_available = column.startswith("*")
-                if is_from_available:
+                is_ratio = column.startswith("/")
+                if is_from_available or is_ratio:
                     column = column[1:]
 
                 if column == "hostname":
@@ -145,6 +154,10 @@ class DemandPrinter:
                 else:
                     if is_from_available:
                         value = node.available.get(column)
+                    elif is_ratio:
+                        value = "{}/{}".format(
+                            node.available.get(column), node.resources.get(column)
+                        )
                     else:
                         value = node.resources.get(column)
 
@@ -161,9 +174,9 @@ class DemandPrinter:
                 # for table* we will output a string for every value.
                 if self.output_format != "json":
                     if isinstance(value, list):
-                        value = ",".join(value)
+                        value = ",".join(sorted(value))
                     elif isinstance(value, set):
-                        value = ",".join(value)
+                        value = ",".join(sorted(list(value)))
                     elif value is None:
                         value = ""
                     elif isinstance(value, float):
@@ -174,24 +187,14 @@ class DemandPrinter:
                 else:
                     if hasattr(value, "to_json"):
                         value = value.to_json()
-                    elif isinstance(value, frozendict.frozendict):
+                    elif hasattr(value, "keys"):
                         value = dict(value)
 
                 row.append(value)
 
-        if self.output_format == "json":
-            json.dump(
-                [dict(zip(columns, row)) for row in rows], self.stream, indent=2,
-            )
-        else:
-            widths = self._calc_width(columns, rows)
-            formats = " ".join(["{:%d}" % x for x in widths])
-            if self.output_format == "table":
-                print(formats.format(*[c.upper() for c in columns]), file=self.stream)
-
-            for row in rows:
-                print(formats.format(*[str(r) for r in row]), file=self.stream)
-        self.stream.flush()
+        # remove /
+        columns = [c.lstrip("/") for c in columns]
+        print_rows(columns, rows, self.stream, self.output_format)
 
     def __str__(self) -> str:
         return "DemandPrinter(columns={}, output_format={}, stream={})".format(
@@ -300,3 +303,36 @@ class ExcludeDemandPrinterFilter(logginglib.Filter):
 
     def filter(self, record: logginglib.LogRecord) -> bool:
         return record.name != "demandprinter"
+
+
+def calculate_column_widths(
+    columns: List[str], rows: List[List[str]]
+) -> Tuple[int, ...]:
+    maxes = [len(c) for c in columns]
+    for row in rows:
+        for n in range(len(row)):
+            maxes[n] = max(len(row[n]), maxes[n])
+    return tuple(maxes)
+
+
+def print_rows(
+    columns: List[str],
+    rows: List[List[str]],
+    stream: Optional[TextIO] = None,
+    output_format: str = "table",
+) -> None:
+    stream = stream or sys.stdout
+
+    if output_format.lower() == "json":
+        json.dump(
+            [dict(zip(columns, row)) for row in rows], stream, indent=2,
+        )
+    else:
+        widths = calculate_column_widths(columns, rows)
+        formats = " ".join(["{:%d}" % x for x in widths])
+        if output_format == "table":
+            print(formats.format(*[c.upper() for c in columns]), file=stream)
+
+        for row in rows:
+            print(formats.format(*[str(r) for r in row]), file=stream)
+    stream.flush()

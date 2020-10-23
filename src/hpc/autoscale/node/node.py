@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
-from frozendict import frozendict
+from immutabledict import ImmutableOrderedDict
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
@@ -55,7 +55,8 @@ class Node(ABC):
         placement_group: Optional[ht.PlacementGroup],
         managed: bool,
         resources: ht.ResourceDict,
-        software_configuration: frozendict,
+        software_configuration: ImmutableOrderedDict,
+        keep_alive: bool,
     ) -> None:
         self.__name = name
         self.__nodearray = nodearray
@@ -99,14 +100,19 @@ class Node(ABC):
 
         self.__create_time = self.__last_match_time = self.__delete_time = 0.0
         self.__create_time_remaining = self.__idle_time_remaining = 0.0
+        self.__keep_alive = keep_alive
 
     @property
     def required(self) -> bool:
-        return self._allocated
+        return self.__keep_alive or self._allocated or bool(self.assignments)
 
     @required.setter
     def required(self, value: bool) -> None:
         self._allocated = value
+
+    @property
+    def keep_alive(self) -> bool:
+        return self.__keep_alive
 
     @nodeproperty
     def name(self) -> ht.NodeName:
@@ -215,7 +221,7 @@ class Node(ABC):
 
     @property
     def resources(self) -> ht.ResourceDict:
-        return frozendict(self._resources)
+        return ImmutableOrderedDict(self._resources)
 
     @property
     def managed(self) -> bool:
@@ -266,7 +272,7 @@ class Node(ABC):
             Cyclecloud
         """
         if self.exists:
-            return frozendict(self.__node_attribute_overrides)
+            return ImmutableOrderedDict(self.__node_attribute_overrides)
         return self.__node_attribute_overrides
 
     @property
@@ -323,7 +329,7 @@ class Node(ABC):
 
     @nodeproperty
     def delete_time(self) -> datetime:
-        return datetime.fromtimestamp(self.delete_time_unix)
+        return datetime.fromtimestamp(self.delete_time_unix or 0)
 
     def clone(self) -> "Node":
         ret = Node(
@@ -346,6 +352,7 @@ class Node(ABC):
             managed=self.managed,
             resources=ht.ResourceDict(deepcopy(self._resources)),
             software_configuration=self.software_configuration,
+            keep_alive=self.__keep_alive,
         )
         ret.available.update(self.available)
         return ret
@@ -424,13 +431,13 @@ class Node(ABC):
         return self.__assignments
 
     @property
-    def software_configuration(self) -> frozendict:
+    def software_configuration(self) -> Dict:
         overrides = self.node_attribute_overrides
         if overrides and overrides.get("Configuration"):
             ret: Dict = {}
             ret.update(self.__software_configuration)
             ret.update(overrides["Configuration"])
-            return frozendict(ret)
+            return ImmutableOrderedDict(ret)
         return self.__software_configuration
 
     def update(self, snode: "Node") -> None:
@@ -454,13 +461,20 @@ class Node(ABC):
         # TODO RDH test coverage
         self.required = self.required or snode.required or bool(snode.assignments)
         self.__assignments.update(snode.assignments)
+        self.metadata.update(deepcopy(snode.metadata))
 
     def __str__(self) -> str:
+        if self.name.endswith("-0"):
+            return "NodeBucket(nodearray={}, vm_size={}, pg={})".format(
+                self.nodearray, self.vm_size, self.placement_group
+            )
         hostname = self.hostname if self.exists else "..."
         node_id = self.delayed_node_id.node_id
         if node_id:
-            return "Node({}, {}, {})".format(self.name, hostname, node_id)
-        return "Node({}, {})".format(self.name, hostname)
+            return "Node({}, {}, {}, {})".format(
+                self.name, hostname, self.vm_size, node_id
+            )
+        return "Node({}, {}, {})".format(self.name, hostname, self.vm_size)
 
     def __repr__(self) -> str:
         hostname = self.hostname if self.exists else "..."
@@ -509,7 +523,8 @@ class UnmanagedNode(Node):
             placement_group=placement_group,
             managed=False,
             resources=ht.ResourceDict(resources),
-            software_configuration=frozendict({}),
+            software_configuration=ImmutableOrderedDict({}),
+            keep_alive=True,
         )
         assert self.exists
 

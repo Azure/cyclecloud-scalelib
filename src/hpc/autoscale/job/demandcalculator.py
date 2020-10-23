@@ -1,4 +1,3 @@
-import json
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import hpc.autoscale.hpclogging as logging
@@ -20,6 +19,7 @@ from hpc.autoscale.results import AllocationResult, BootupResult, DeleteResult, 
 from hpc.autoscale.util import (
     NullSingletonLock,
     SingletonLock,
+    json_load,
     new_singleton_lock,
     partition_single,
 )
@@ -52,8 +52,10 @@ class DemandCalculator:
             node_queue = NodeQueue()
 
         self.__scheduler_nodes_queue: NodeQueue = node_queue
+
         for node in self.node_mgr.get_non_failed_nodes():
             self.__scheduler_nodes_queue.push(node)
+
         self.__set_buffer_delayed_invocations: List[Tuple[Any, ...]] = []
 
         self.node_history.decorate(list(self.__scheduler_nodes_queue))
@@ -61,6 +63,10 @@ class DemandCalculator:
         if not singleton_lock:
             singleton_lock = new_singleton_lock({})
         self.__singleton_lock = singleton_lock
+        logging.debug(
+            "Calculating demand using the following pre-existing nodes: %s",
+            [n.name for n in self.__scheduler_nodes_queue],
+        )
 
     @apitrace
     def add_jobs(self, jobs: List[Job]) -> None:
@@ -89,19 +95,11 @@ class DemandCalculator:
         4) tell the bucket to allocate X nodes - let the bucket figure out what is new and what is not.
         """
         slots_to_allocate = job.iterations_remaining
-        # available_buckets = self.node_mgr.get_buckets()
-        # candidates_result = job.bucket_candidates(available_buckets)
 
-        # if not candidates_result:
-        #     # TODO log or something
-        #     logging.warn("There are no resources to scale up for job %s", job)
-        #     return candidates_result
-
-        # failure_reasons: List[str] = []
-
-        # for candidate in candidates_result.candidates:
         allocated_nodes: List[Node] = []
-        failure_reasons = self._handle_allocate(job, allocated_nodes, True)
+        failure_reasons = self._handle_allocate(
+            job, allocated_nodes, all_or_nothing=True
+        )
         if failure_reasons:
             return AllocationResult(
                 "CompoundFailure",
@@ -109,11 +107,12 @@ class DemandCalculator:
                 slots_allocated=slots_to_allocate,
             )
         else:
+            assert len(allocated_nodes) == job.node_count, "{} != {}".format(
+                len(allocated_nodes), job.node_count
+            )
             return AllocationResult(
                 "success", nodes=allocated_nodes, slots_allocated=slots_to_allocate
             )
-
-        return AllocationResult("CompoundFailure", reasons=failure_reasons)
 
     def _pack_job(self, job: Job) -> Result:
         """
@@ -123,66 +122,24 @@ class DemandCalculator:
         4) tell the bucket to allocate X nodes - let the bucket figure out what is new and what is not.
         """
         # TODO break non-exclusive
-        allocated_nodes = []
+        allocated_nodes: List[Node] = []
         slots_to_allocate = job.iterations_remaining
         assert job.iterations_remaining > 0
 
-        for snode in self.__scheduler_nodes_queue:
-            # TODO
-            if snode.state == "Failed":
-                continue
-
-            if snode.closed:
-                continue
-
-            bailout_result = self.__scheduler_nodes_queue.early_bailout(snode)
-            if not bailout_result:
-                logging.warning("Bailing out early - %s", bailout_result)
-                break
-
-            node_added = False
-
-            while job.iterations_remaining > 0:
-                # TODO this is ugly and hokey RDH
-                still_valid = True
-                for constraint in job._constraints:
-                    still_valid = still_valid and constraint.satisfied_by_node(snode)
-
-                # TODO hokey
-                if not still_valid:
-                    break
-
-                add_job_result = snode.decrement(
-                    job._constraints, job.iterations_remaining, job.name
-                )
-
-                if not add_job_result:
-                    break
-
-                if not node_added:
-                    allocated_nodes.append(snode)
-                    node_added = True
-
-                job.iterations_remaining -= add_job_result.total_slots
-
-                if job.iterations_remaining <= 0:
-                    break
-
-        if job.iterations_remaining == 0:
-            return AllocationResult(
-                "success", nodes=allocated_nodes, slots_allocated=slots_to_allocate
-            )
-
         available_buckets = self.node_mgr.get_buckets()
-
-        candidates_result = job.bucket_candidates(available_buckets)
+        # I don't want to fill up the log with rejecting placement groups
+        # so just filter them here
+        filter_by_colocated = [
+            b for b in available_buckets if bool(b.placement_group) == job.colocated
+        ]
+        candidates_result = job.bucket_candidates(filter_by_colocated)
 
         if not candidates_result:
             # TODO log or something
             logging.warning("There are no resources to scale up for job %s", job)
             logging.warning("See below:")
-            for line in repr(candidates_result).splitlines():
-                logging.warning("    %s", line)
+            for child_result in candidates_result.child_results or []:
+                logging.warning("    %s", child_result.message)
             return candidates_result
 
         failure_reasons = self._handle_allocate(
@@ -190,7 +147,7 @@ class DemandCalculator:
         )
 
         # we have allocated at least some tasks
-        if job.iterations_remaining < job.iterations:
+        if allocated_nodes:
             assert allocated_nodes
             return AllocationResult(
                 "success", nodes=allocated_nodes, slots_allocated=slots_to_allocate
@@ -201,25 +158,18 @@ class DemandCalculator:
     def _handle_allocate(
         self, job: Job, allocated_nodes_out: List[Node], all_or_nothing: bool,
     ) -> Optional[List[str]]:
+        result = job.do_allocate(
+            self.node_mgr, all_or_nothing=all_or_nothing, allow_existing=True,
+        )
 
-        failure_reasons: List[str] = []
-        max_loop_iters = 1_000_000
-        while job.iterations_remaining > 0:
-            max_loop_iters -= 1
-            assert max_loop_iters > 0, "Caught in an infinite loop!"
+        if not result:
+            return result.reasons
 
-            result = job.do_allocate(
-                self.node_mgr, all_or_nothing=all_or_nothing, allow_existing=True,
-            )
-
-            if not result:
-                failure_reasons.extend(result.reasons)
-                return failure_reasons
-
-            job.iterations_remaining -= result.total_slots
-            for node in result.nodes:
+        for node in result.nodes:
+            if not node.exists and node.metadata.get("__demand_allocated") is None:
                 self.__scheduler_nodes_queue.push(node)
-            allocated_nodes_out.extend(result.nodes)
+                node.metadata["__demand_allocated"] = True
+        allocated_nodes_out.extend(result.nodes)
 
         return None
 
@@ -267,7 +217,11 @@ class DemandCalculator:
             for_at_least=at_least
         ):
             if node_id and node_id in by_id and idle_time > at_least:
-                ret.append(by_id[node_id])
+                node = by_id[node_id]
+                if node.assignments:
+                    continue
+
+                ret.append(node)
         return ret
 
     @apitrace
@@ -275,11 +229,12 @@ class DemandCalculator:
         self, at_least: float = 1800, booting_nodes: Optional[List[Node]] = None,
     ) -> List[Node]:
         if not booting_nodes:
-            booting_nodes = [
-                n for n in self.node_mgr.get_nodes() if n.state != "Started"
-            ]
+            booting_nodes = self.node_mgr.get_nodes()
 
-        booting_nodes = [n for n in booting_nodes if n.exists]
+        # filter out nodes that have converged.
+        booting_nodes = [
+            n for n in booting_nodes if n.exists and n.state not in ["Ready", "Started"]
+        ]
 
         by_id = partition_single(booting_nodes, lambda n: n.delayed_node_id.node_id)
 
@@ -329,6 +284,8 @@ class DemandCalculator:
                 )
                 by_hostname[new_snode.hostname] = new_snode
                 self.__scheduler_nodes_queue.push(new_snode)
+                self.node_mgr.add_unmanaged_nodes([new_snode])
+
                 # TODO inform bucket catalog?
             else:
                 old_snode = by_hostname[new_snode.hostname_or_uuid]
@@ -385,21 +342,13 @@ def new_demand_calculator(
     node_queue: Optional[NodeQueue] = None,
     singleton_lock: Optional[SingletonLock] = NullSingletonLock(),
 ) -> DemandCalculator:
-
-    if isinstance(config, str):
-        with open(config) as fr:
-            config_dict = json.load(fr)
-    else:
-        config_dict = config
+    config_dict = json_load(config)
 
     existing_nodes = existing_nodes or []
-    if isinstance(config, str):
-        with open(config) as fr:
-            config = json.load(fr)
 
     if node_mgr is None:
         node_mgr = new_node_manager(
-            config_dict, disable_default_resources=disable_default_resources
+            config_dict, disable_default_resources=disable_default_resources,
         )
     else:
         logging.initialize_logging(config_dict)
@@ -413,5 +362,6 @@ def new_demand_calculator(
         singleton_lock = new_singleton_lock(config_dict)
 
     dc = DemandCalculator(node_mgr, node_history, node_queue, singleton_lock)
+
     dc.update_scheduler_nodes(existing_nodes)
     return dc

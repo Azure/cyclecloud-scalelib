@@ -1,5 +1,7 @@
 from typing import Optional, Union
 
+from hpc.autoscale import hpclogging as logging
+
 
 class _SharedLimit:
     def __init__(
@@ -19,11 +21,15 @@ class _SharedLimit:
         )
         self._consumed_core_count = max(0, consumed_core_count)
         self._max_core_count = max(0, max_core_count)
-        assert (
-            self._consumed_core_count <= self._max_core_count
-        ), "consumed_core_count({}) > max_core_count({}) for {} limit".format(
-            self._consumed_core_count, self._max_core_count, name
-        )
+        if self._consumed_core_count > self._max_core_count:
+            logging.warning(
+                "consumed_core_count(%s) > max_core_count(%s) for %s limit. Flooring it.",
+                self._consumed_core_count,
+                self._max_core_count,
+                name,
+            )
+            self._consumed_core_count = self._max_core_count
+
         if max_count is None:
             assert consumed_count is None
         else:
@@ -60,6 +66,19 @@ class _SharedLimit:
                     self._max_core_count,
                 )
             )
+        new_node_count = self._consumed_core_count / cores_per_node + nodes
+
+        if new_node_count > self._max_count(cores_per_node):
+            raise RuntimeError(
+                "OutOfCapacity: Asked for {} * {} nodes, which would be over the {} limit ({}/{})".format(
+                    nodes,
+                    cores_per_node,
+                    self._name,
+                    self._consumed_core_count // cores_per_node,
+                    self._max_count(cores_per_node),
+                )
+            )
+
         self._consumed_core_count = new_core_count
         if self.__max_count is not None and self.__consumed_count is not None:
             assert self.__consumed_count + nodes <= self.__max_count
@@ -133,6 +152,7 @@ class BucketLimits:
     ) -> None:
         assert vcpu_count is not None
         self.__vcpu_count = vcpu_count
+        self.__decrement_counter = 0
 
         assert isinstance(
             regional_limits, _SharedLimit
@@ -174,21 +194,21 @@ class BucketLimits:
         assert max_count is not None
         self.__max_count = max_count
 
-    def decrement(self, vcpu_count: int, count: int = 1) -> None:
-        self.__active_core_count += count * vcpu_count
+    def decrement(self, count: int = 1) -> None:
+        self.__active_core_count += count * self.__vcpu_count
         self.__active_count += count
-        self.__available_core_count -= vcpu_count * count
+        self.__available_core_count -= self.__vcpu_count * count
         self.__available_count -= count
 
-        self._regional_limits._decrement(count, vcpu_count)
-        self._cluster_limits._decrement(count, vcpu_count)
-        self._nodearray_limits._decrement(count, vcpu_count)
-        self._family_limits._decrement(count, vcpu_count)
+        self._regional_limits._decrement(count, self.__vcpu_count)
+        self._cluster_limits._decrement(count, self.__vcpu_count)
+        self._nodearray_limits._decrement(count, self.__vcpu_count)
+        self._family_limits._decrement(count, self.__vcpu_count)
         if self._placement_group_limits:
-            self._placement_group_limits._decrement(count, vcpu_count)
+            self._placement_group_limits._decrement(count, self.__vcpu_count)
 
-    def increment(self, vcpu_count: int, count: int = 1) -> None:
-        return self.decrement(vcpu_count, -count)
+    def increment(self, count: int = 1) -> None:
+        return self.decrement(-count)
 
     @property
     def active_core_count(self) -> int:
@@ -228,7 +248,8 @@ class BucketLimits:
 
     @property
     def regional_available_count(self) -> int:
-        return self._regional_limits._available_count(self.__vcpu_count)
+        comitted = self._regional_limits._available_count(self.__vcpu_count)
+        return comitted
 
     @property
     def cluster_consumed_core_count(self) -> int:
@@ -244,7 +265,8 @@ class BucketLimits:
 
     @property
     def cluster_available_count(self) -> int:
-        return self._cluster_limits._available_count(self.__vcpu_count)
+        comitted = self._cluster_limits._available_count(self.__vcpu_count)
+        return comitted
 
     @property
     def nodearray_consumed_core_count(self) -> int:
@@ -261,7 +283,8 @@ class BucketLimits:
 
     @property
     def nodearray_available_count(self) -> int:
-        return self._nodearray_limits._available_count(self.__vcpu_count)
+        comitted = self._nodearray_limits._available_count(self.__vcpu_count)
+        return comitted
 
     @property
     def family_consumed_core_count(self) -> int:
@@ -277,7 +300,8 @@ class BucketLimits:
 
     @property
     def family_available_count(self) -> int:
-        return self._family_limits._available_count(self.__vcpu_count)
+        comitted = self._family_limits._available_count(self.__vcpu_count)
+        return comitted
 
     @property
     def placement_group_max_count(self) -> int:
@@ -289,7 +313,8 @@ class BucketLimits:
     def placement_group_available_count(self) -> int:
         if not self._placement_group_limits:
             return -1
-        return self._placement_group_limits._available_count(self.__vcpu_count)
+        comitted = self._placement_group_limits._available_count(self.__vcpu_count)
+        return comitted
 
     def __str__(self) -> str:
 

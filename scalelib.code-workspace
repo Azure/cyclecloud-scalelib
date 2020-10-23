@@ -11,12 +11,12 @@
 		"java.dependency.autoRefresh": false,
 		"java.dependency.syncWithFolderExplorer": false,
 		"java.completion.overwrite": false,
-		"terminal.integrated.env.PYTHONPATH": "${workspaceFolder}/src:${workspaceFolder}/test",
 		"pythonTestExplorer.testFramework": "pytest",
 		"python.envFile": "${workspaceFolder}/.env",
 		"python.testing.pytestArgs": [
 			"--rootdir=test"
-		]
+		],
+		"terminal.integrated.env.osx": {"PYTHONPATH": "src:test"}
 	},
-	"terminal.integrated.env.osx": {"PYTHONPATH": "src:test"}
+	
 }

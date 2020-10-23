@@ -12,6 +12,7 @@ from hpc.autoscale.node.node import Node
 
 
 def setup_function(function) -> None:
+    SchedulerNode.ignore_hostnames = True
     results.register_result_handler(
         results.DefaultContextHandler("[{}]".format(function.__name__))
     )
@@ -39,7 +40,7 @@ def _bindings():
     return mock_bindings
 
 
-def test_basic():
+def test_basic_integration():
     def run_test(scheduler_nodes, jobs, unmatched, matched, new, mock_bindings=None):
         current_frame = inspect.currentframe()
         caller_frame = inspect.getouterframes(current_frame, 2)

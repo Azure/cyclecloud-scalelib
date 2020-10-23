@@ -1,6 +1,6 @@
 import inspect
 import os
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, TypeVar
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.hpclogging import apitrace
@@ -62,7 +62,10 @@ def typecheck_function(
     return typecheck_wrap
 
 
-def hpcwrapclass(cls: type) -> type:
+C = TypeVar("C", bound=type)
+
+
+def hpcwrapclass(cls: C) -> C:
     method: Callable
 
     for method_name, method in inspect.getmembers(cls):  # type: ignore

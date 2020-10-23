@@ -60,7 +60,11 @@ def initialize_db(path: str, read_only: bool) -> sqlite3.Connection:
     try:
         if read_only:
             path = os.path.abspath(path)
-            file_uri = "file://{}?mode=ro".format(path)
+            # just use an in memory db if this is the first time this is run
+            if not os.path.exists(path):
+                file_uri = "mem:temp"
+            else:
+                file_uri = "file://{}?mode=ro".format(path)
             conn = sqlite3.connect(file_uri, uri=True)
         else:
             file_uri = path
@@ -129,9 +133,10 @@ class SQLiteNodeHistory(NodeHistory):
         )
 
         rows_by_id = partition_single(rows, lambda r: r[0])
+        nodes_with_ids = [n for n in nodes if n.delayed_node_id.node_id]
 
         nodes_by_id: typing.Dict[typing.Optional[NodeId], Node] = partition_single(
-            list(nodes), lambda n: n.delayed_node_id.node_id,
+            nodes_with_ids, lambda n: n.delayed_node_id.node_id,
         )
 
         to_delete = set(rows_by_id.keys()) - set(nodes_by_id.keys())
@@ -243,7 +248,7 @@ class SQLiteNodeHistory(NodeHistory):
             # should be impossible because we already filtered by exists
             if not node_id:
                 logging.warning(
-                    "Null node_id for node %s. Leaving create/last_match/delete times as null.",
+                    "Null node_id for %s. Leaving create/last_match/delete times as null.",
                     node,
                 )
                 continue

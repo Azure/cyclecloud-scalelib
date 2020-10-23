@@ -1,7 +1,7 @@
 import functools
+import math
 from copy import deepcopy
-from typing import Callable, Dict, List, Optional, TypeVar, Union
-from uuid import uuid4
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
 
 from cyclecloud.model.ClusterStatusModule import ClusterStatus
 from cyclecloud.model.NodearrayBucketStatusModule import NodearrayBucketStatus
@@ -9,7 +9,8 @@ from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
-from frozendict import frozendict
+from immutabledict import ImmutableOrderedDict
+from typing_extensions import Literal
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
@@ -25,6 +26,7 @@ from hpc.autoscale.node.bucket import (
     bucket_candidates,
     node_from_bucket,
 )
+from hpc.autoscale.node.constraints import NodeConstraint
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import (
     BucketLimits,
@@ -39,6 +41,7 @@ from hpc.autoscale.results import (
     DeallocateResult,
     DeleteResult,
     RemoveResult,
+    SatisfiedResult,
     ShutdownResult,
     StartResult,
     TerminateResult,
@@ -49,6 +52,7 @@ logger = logging.getLogger("cyclecloud.buckets")
 
 
 DefaultValueFunc = Callable[[Node], ht.ResourceTypeAtom]
+ResourceModifier = Literal["add", "subtract", "multiply", "divide", "divide_floor"]
 
 
 T = TypeVar("T")
@@ -72,10 +76,10 @@ class NodeManager:
     ) -> None:
         self.__cluster_bindings = cluster_bindings
         self.__node_buckets = node_buckets
-        self._node_names = set()
+        self._node_names = {}
         for node_bucket in node_buckets:
             for node in node_bucket.nodes:
-                self._node_names.add(node.name)
+                self._node_names[node.name] = True
 
         self.__default_resources: List[_DefaultResource] = []
 
@@ -100,6 +104,14 @@ class NodeManager:
         assignment_id: Optional[str] = None,
     ) -> AllocationResult:
 
+        if int(node_count or 0) <= 0 and int(slot_count or 0) <= 0:
+            return AllocationResult(
+                "NothingRequested",
+                reasons=[
+                    "Either node_count or slot_count must be defined as a positive integer."
+                ],
+            )
+
         if not isinstance(constraints, list):
             constraints = [constraints]
 
@@ -114,14 +126,17 @@ class NodeManager:
         allocated_nodes = {}
         total_slots_allocated = 0
 
-        for candidate in candidates_result.candidates:
+        additional_reasons = []
 
+        for candidate in candidates_result.candidates:
             if slot_count:
+
                 result = self._allocate_slots(
                     candidate,
-                    slot_count,
+                    slot_count - total_slots_allocated,
                     parsed_constraints,
                     allow_existing,
+                    all_or_nothing,
                     assignment_id,
                 )
 
@@ -138,25 +153,34 @@ class NodeManager:
                     break
             else:
                 assert node_count is not None
+
                 node_count_floored = self._get_node_count(
                     candidate,
                     node_count - len(allocated_nodes),
-                    all_or_nothing,
-                    allow_existing,
+                    all_or_nothing=all_or_nothing,
+                    allow_existing=allow_existing,
                 )
 
                 if node_count_floored < 1:
+                    additional_reasons.append(
+                        "Bucket {} does not have capacity: Required={} Available={}".format(
+                            candidate, node_count, candidate.available_count
+                        )
+                    )
                     continue
 
                 result = self._allocate_nodes(
                     candidate,
                     node_count_floored,
+                    -1,
                     parsed_constraints,
                     allow_existing,
                     assignment_id,
                 )
 
                 if not result:
+                    if hasattr(result, "reasons"):
+                        additional_reasons.extend(result.reasons)
                     continue
 
                 for node in result.nodes:
@@ -181,7 +205,8 @@ class NodeManager:
                 "Could not allocate based on the selection criteria: {} all_or_nothing={} allow_existing={}".format(
                     constraints, all_or_nothing, allow_existing
                 )
-            ],
+            ]
+            + additional_reasons,
         )
 
     def _allocate_slots(
@@ -190,55 +215,88 @@ class NodeManager:
         slot_count: int,
         constraints: List[constraintslib.NodeConstraint],
         allow_existing: bool = False,
+        all_or_nothing: bool = False,
         assignment_id: Optional[str] = None,
     ) -> AllocationResult:
         remaining = slot_count
-        allocated_nodes: Dict[str, Node] = {}
+        allocated_nodes: Dict[str, Tuple[Node, Node]] = {}
 
         while remaining > 0:
-            alloc_result = self._allocate_nodes(
-                bucket, 1, constraints, allow_existing, assignment_id
-            )
-            if not alloc_result:
-                return alloc_result
+            min_count = minimum_space(constraints, bucket.example_node)
+            assert min_count, "%s -> %s" % (constraints, bucket.example_node.resources)
+            # -1 is returned when the constraints have no say in how many could fit
+            # like, say, if the only constraint was that a flag was true
+            if min_count <= -1:
+                min_count = remaining
+            elif min_count == 0:
+                break
 
-            assert len(alloc_result.nodes) == 1, alloc_result.nodes
-            node = alloc_result.nodes[0]
-            allocated_nodes[node.name] = node
+            alloc_result = self._allocate_nodes(
+                bucket,
+                1,
+                min(remaining, min_count),
+                constraints,
+                allow_existing=True,
+                assignment_id=assignment_id,
+                commit=False,
+            )
+
+            if not alloc_result:
+                break
+
+            for node in alloc_result.nodes:
+                allocated_nodes[node.name] = (node, node)
+
             remaining -= alloc_result.total_slots
 
-            while remaining > 0:
-                per_node = minimum_space(constraints, node)
+        if all_or_nothing and remaining > 0:
+            self._rollback(bucket)
+            return AllocationResult("OutOfCapacity", reasons=["TODO"])
 
-                if per_node == 0:
-                    break
-
-                if per_node == -1:
-                    per_node = 1
-
-                per_node = min(remaining, per_node)
-
-                if node.decrement(
-                    constraints, iterations=per_node, assignment_id=assignment_id
-                ):
-                    remaining -= per_node
-                else:
-                    break
-
-        return AllocationResult(
-            "success",
-            nodes=list(allocated_nodes.values()),
-            slots_allocated=slot_count - remaining,
-        )
+        # allocated at least one slot
+        if remaining < slot_count:
+            commited_nodes = self._commit(bucket, list(allocated_nodes.values()))
+            return AllocationResult(
+                "success", nodes=commited_nodes, slots_allocated=slot_count - remaining,
+            )
+        self._rollback(bucket)
+        return AllocationResult("Failed", reasons=["TODO"])
 
     def _allocate_nodes(
         self,
         bucket: NodeBucket,
         count: int,
+        total_iterations: int,
         constraints: List[constraintslib.NodeConstraint],
         allow_existing: bool = False,
         assignment_id: Optional[str] = None,
+        commit: bool = True,
     ) -> AllocationResult:
+        ret = self.__allocate_nodes(
+            bucket,
+            count,
+            total_iterations,
+            constraints,
+            allow_existing,
+            assignment_id,
+            commit,
+        )
+        assert bucket.available_count >= 0, bucket
+        return ret
+
+    def __allocate_nodes(
+        self,
+        bucket: NodeBucket,
+        count: int,
+        total_iterations: int,
+        constraints: List[constraintslib.NodeConstraint],
+        allow_existing: bool = False,
+        assignment_id: Optional[str] = None,
+        commit: bool = True,
+    ) -> AllocationResult:
+
+        for node in bucket.nodes:
+            assert node.placement_group == bucket.placement_group
 
         if not allow_existing and bucket.available_count < 1:
             return AllocationResult(
@@ -246,52 +304,101 @@ class NodeManager:
                 reasons=["No more capacity for bucket {}".format(bucket)],
             )
 
-        for constraint in constraints:
-            sat_result = constraint.satisfied_by_bucket(bucket)
-            assert constraint.satisfied_by_node(bucket.example_node)
-            if not sat_result:
-                return AllocationResult(sat_result.status, reasons=sat_result.reasons)
-            min_space = constraint.minimum_space(bucket.example_node)
-            if min_space != -1:
-                assert min_space > 0, constraint
-
         assert count > 0
-        allocated_nodes: Dict[str, Node] = {}
+        allocated_nodes: Dict[str, Tuple[Node, Node]] = {}
         new_nodes = []
         slots_allocated = 0
         available_count_total = self._availabe_count(bucket, allow_existing)
 
-        def remaining() -> int:
+        def remaining_slots() -> int:
+            if total_iterations > 0:
+                return total_iterations - slots_allocated
             return count - len(allocated_nodes)
 
-        if remaining() > available_count_total:
+        initial_slot_count = remaining_slots()
+
+        def remaining_nodes() -> int:
+            return count - len(allocated_nodes)
+
+        def _per_node(node: Node, constraints: List[NodeConstraint]) -> int:
+            min_space = minimum_space(constraints, node)
+
+            if min_space == -1:
+                min_space = remaining_slots()
+            else:
+                for constraint in constraints:
+                    res = constraint.satisfied_by_node(node)
+                    assert res, "{} {} {}".format(res, constraint, node.vcpu_count)
+                    m = constraint.minimum_space(node)
+                    assert (
+                        m != 0
+                    ), "{} satisfies node {} but minimum_space was {}".format(
+                        constraint, node.name, m
+                    )
+
+            per_node = 1 if total_iterations < 0 else min(remaining_slots(), min_space)
+            if per_node == 0:
+                for constraint in constraints:
+                    res = constraint.satisfied_by_node(node)
+                    assert res, "{} {} {}".format(res, constraint, node.vcpu_count)
+                    m = constraint.minimum_space(node)
+                    assert (
+                        m != 0
+                    ), "{} satisfies node {} but minimum_space was {}".format(
+                        constraint, node.name, m
+                    )
+
+            assert per_node > 0, "{} {} {} {}".format(
+                per_node, remaining_slots(), node.resources, constraints
+            )
+            return per_node
+
+        assert remaining_slots() > 0
+
+        if remaining_nodes() > available_count_total:
             return AllocationResult(
                 "NoCapacity",
                 reasons=[
                     "Not enough {} availability for request: Available {} requested {}".format(
-                        bucket.vm_size, available_count_total, count
+                        bucket.vm_size,
+                        available_count_total,
+                        count - len(allocated_nodes),
                     )
                 ],
             )
 
         for node in bucket.nodes:
+
             if node.closed:
                 continue
 
+            satisfied: Union[SatisfiedResult, bool]
+
             if constraints:
+                for c in constraints:
+
+                    result = c.satisfied_by_node(node)
+                    if not result:
+                        satisfied = result
+
                 satisfied: bool = functools.reduce(lambda a, b: bool(a) and bool(b), [c.satisfied_by_node(node) for c in constraints])  # type: ignore
             else:
                 satisfied = True
 
             if satisfied:
-                match_result = node.decrement(constraints, assignment_id=assignment_id)
+                temp_node = node.clone()
+                per_node = _per_node(node, constraints)
+                match_result = node.decrement(
+                    constraints, per_node, assignment_id=assignment_id
+                )
                 assert match_result
                 slots_allocated += match_result.total_slots
-                allocated_nodes[node.name] = node
-                if remaining() <= 0:
+                allocated_nodes[node.name] = (node, temp_node)
+
+                if remaining_slots() <= 0:
                     break
 
-        while remaining() > 0:
+        while remaining_slots() > 0 and bucket.available_count > 0:
 
             node_name = self._next_node_name(bucket)
             new_node = node_from_bucket(
@@ -303,28 +410,14 @@ class NodeManager:
                 placement_group=bucket.placement_group,
                 new_node_name=node_name,
             )
-
             self._apply_defaults(new_node)
 
             assert new_node.vcpu_count == bucket.vcpu_count
 
-            min_space = minimum_space(constraints, new_node)
-            if min_space == 0:
-                continue
-            elif min_space == -1:
-                min_space = remaining()
-            else:
-                for constraint in constraints:
-                    res = constraint.satisfied_by_node(new_node)
-                    assert res, "{} {} {}".format(res, constraint, new_node.vcpu_count)
-
-            per_node = min(remaining(), min_space)
-
-            assert per_node > 0, "{} {} {} {}".format(
-                per_node, remaining(), new_node.resources, constraints
-            )
+            per_node = _per_node(new_node, constraints)
 
             match_result = new_node.decrement(constraints, per_node, assignment_id)
+
             assert match_result
             slots_allocated += match_result.total_slots
 
@@ -332,19 +425,76 @@ class NodeManager:
 
             assert new_node.name not in allocated_nodes
 
-            allocated_nodes[new_node.name] = new_node
+            allocated_nodes[new_node.name] = (new_node, new_node)
             if not new_node.exists:
                 bucket.decrement(1)
 
-        bucket.nodes.extend(new_nodes)
-        self.new_nodes.extend(new_nodes)
+        if remaining_slots() == initial_slot_count:
+            return AllocationResult(
+                "InsufficientResources",
+                reasons=[
+                    "Could not allocate {} slots for bucket {}".format(
+                        remaining_slots(), bucket
+                    )
+                ],
+            )
 
-        for node in allocated_nodes.values():
-            node._allocated = True
+        if not allocated_nodes:
+            raise RuntimeError(
+                "Empty but successful node allocation for {} with constraints {}".format(
+                    bucket, constraints
+                )
+            )
 
+        # assert len(allocated_nodes) <= count
+
+        if len(allocated_nodes) < count:
+            msg = "Could only allocate {}/{} nodes".format(len(allocated_nodes), count)
+            return AllocationResult("InsufficientCapacity", reasons=[msg])
+
+        if commit:
+            self._commit(bucket, list(allocated_nodes.values()))
+
+        allocated_result_nodes = [n[1] for n in allocated_nodes.values()]
         return AllocationResult(
-            "success", list(allocated_nodes.values()), slots_allocated=slots_allocated
+            "success", allocated_result_nodes, slots_allocated=slots_allocated
         )
+
+    def _commit(
+        self, bucket: NodeBucket, allocated_nodes: List[Tuple[Node, Node]]
+    ) -> List[Node]:
+        # TODO put this logic into the bucket.
+        by_name = partition(bucket.nodes, lambda n: n.name)
+        new_nodes = [n[0] for n in allocated_nodes if not n[0].exists]
+
+        for new_node in new_nodes:
+            if new_node.name not in by_name:
+                bucket.add_nodes([new_node])
+                by_name[new_node.name] = [new_node]
+
+        for node in new_nodes:
+            self._node_names[node.name] = True
+
+        for old_node, new_node in allocated_nodes:
+            old_node._allocated = True
+            if old_node is not new_node:
+                assert old_node.bucket_id == new_node.bucket_id
+                assert old_node.bucket_id == bucket.bucket_id
+                assert new_node not in bucket.nodes
+                if old_node in bucket.nodes:
+                    index = bucket.nodes.index(old_node)
+                    bucket.nodes[index] = new_node
+                else:
+                    bucket.nodes.append(new_node)
+
+        bucket.commit()
+        return [n[1] for n in allocated_nodes]
+
+    def _rollback(self, bucket: NodeBucket) -> None:
+        bucket.rollback()
+        for name in list(self._node_names.keys()):
+            if not self._node_names[name]:
+                self._node_names.pop(name)
 
     @apitrace
     def allocate_at_least(
@@ -365,9 +515,11 @@ class NodeManager:
     ) -> int:
 
         available_count_total = self._availabe_count(bucket, allow_existing)
-
-        count = node_count
-        if not all_or_nothing:
+        if all_or_nothing:
+            count = node_count
+            if count > available_count_total:
+                return 0
+        else:
             count = min(node_count, available_count_total)
 
         if count == 0 or count > available_count_total:
@@ -392,26 +544,33 @@ class NodeManager:
         while True:
             name = ht.NodeName("{}-{}".format(bucket.nodearray, index))
             if name not in self._node_names:
-                self._node_names.add(name)
+                self._node_names[name] = False
                 return name
             index += 1
 
     @apitrace
     def add_unmanaged_nodes(self, existing_nodes: List[UnmanagedNode]) -> None:
-        by_key: Dict[str, List[Node]] = partition(
+
+        by_key: Dict[ht.BucketId, List[Node]] = partition(
             # typing will complain that List[Node] is List[UnmanagedNode]
             # just a limitation of python3's typing
             existing_nodes,  # type: ignore
-            lambda n: str((n.vcpu_count, n.memory, n.resources)),
+            lambda n: n.bucket_id,
         )
 
+        buckets = partition_single(self.__node_buckets, lambda b: b.bucket_id)
+
         for key, nodes_list in by_key.items():
+            if key in buckets:
+                buckets[ht.BucketId(key)].add_nodes(nodes_list)
+                continue
+
             a_node = nodes_list[0]
             # create a null definition, limits and bucket for each
             # unique set of unmanaged nodes
             node_def = NodeDefinition(
                 nodearray=ht.NodeArrayName("__unmanaged__"),
-                bucket_id=ht.BucketId(str(uuid4())),
+                bucket_id=key,
                 vm_size=ht.VMSize("unknown"),
                 location=ht.Location("unknown"),
                 spot=False,
@@ -419,14 +578,21 @@ class NodeManager:
                 vcpu_count=a_node.vcpu_count,
                 memory=a_node.memory,
                 placement_group=None,
-                resources=deepcopy(a_node.resources),
-                software_configuration=frozendict(a_node.software_configuration),
+                resources=ht.ResourceDict(dict(deepcopy(a_node.resources))),
+                software_configuration=ImmutableOrderedDict(
+                    a_node.software_configuration
+                ),
             )
 
             limits = null_bucket_limits(len(nodes_list), a_node.vcpu_count)
-            bucket = NodeBucket(node_def, limits, len(nodes_list), nodes_list)
+            bucket = NodeBucket(
+                node_def, limits, len(nodes_list), nodes_list, artificial=True
+            )
 
-        self.__node_buckets.append(bucket)
+            self.__node_buckets.append(bucket)
+            bucket.add_nodes(nodes_list)
+
+        self._apply_defaults_all()
 
     def get_nodes(self) -> List[Node]:
         # TODO slow
@@ -453,6 +619,9 @@ class NodeManager:
     def get_buckets(self) -> List[NodeBucket]:
         return self.__node_buckets
 
+    def get_buckets_by_id(self) -> Dict[ht.BucketId, NodeBucket]:
+        return partition_single(self.get_buckets(), lambda b: b.bucket_id)
+
     @apitrace
     def get_nodes_by_operation(self, operation_id: ht.OperationId) -> List[Node]:
         relevant_node_list = self.__cluster_bindings.get_nodes(
@@ -473,7 +642,7 @@ class NodeManager:
             if name in nodes_by_name:
                 node = nodes_by_name[name]
                 if name not in updated_cc_nodes:
-                    logging.warning("Node %s no longer exists.", name)
+                    logging.warning("%s no longer exists.", name)
                     node.exists = False
                     node.state = ht.NodeStatus("Off")
                 else:
@@ -576,6 +745,8 @@ class NodeManager:
         selection: Union[Dict, List[constraintslib.Constraint]],
         resource_name: str,
         default_value: Union[ht.ResourceTypeAtom, DefaultValueFunc],
+        modifier: Optional[ResourceModifier] = None,
+        modifier_magnitude: Optional[Union[int, float]] = None,
     ) -> None:
         if isinstance(default_value, str):
             if default_value.startswith("node."):
@@ -585,7 +756,14 @@ class NodeManager:
                     alias = attr[len("resources.") :]  # noqa: E203
 
                     def get_from_node_resources(node: Node) -> ht.ResourceTypeAtom:
-                        value = node.resources.get(alias)
+
+                        if alias.endswith(".value"):
+                            rname = alias[: -len(".value")]
+                            value = node.resources.get(rname)
+                        else:
+                            rname = alias
+                            value = node.resources.get(rname)
+
                         if value is None:
                             msg: str = (
                                 "Could not define default resource name=%s with alias=%s"
@@ -595,6 +773,9 @@ class NodeManager:
                                 msg, attr, alias, node, alias,
                             )
                             value = ""
+
+                        if alias.endswith(".value"):
+                            return getattr(value, "value")
 
                         return value
 
@@ -643,13 +824,24 @@ class NodeManager:
 
             def default_value_func(node: Node) -> ht.ResourceTypeAtom:
                 # already checked if it has a call
+                if isinstance(default_value, str):
+                    if default_value.startswith("`") and default_value.endswith("`"):
+                        expr = default_value[1:-1]
+                        return eval(
+                            "(lambda: {})()".format(expr), {"node": node.clone()}
+                        )
                 return default_value  # type: ignore
 
         else:
             default_value_func = default_value  # type: ignore
 
         dr = _DefaultResource(
-            constraints, resource_name, default_value_func, default_value_expr
+            constraints,
+            resource_name,
+            default_value_func,
+            default_value_expr,
+            modifier,
+            modifier_magnitude,
         )
         self.__default_resources.append(dr)
         self._apply_defaults_all()
@@ -704,6 +896,10 @@ class NodeManager:
             nodes, self.__cluster_bindings.terminate_nodes, TerminateResult
         )
 
+    @property
+    def cluster_bindings(self) -> ClusterBindingInterface:
+        return self.__cluster_bindings
+
     def _nodes_operation(
         self,
         nodes: List[Node],
@@ -727,7 +923,7 @@ class NodeManager:
 
         result: NodeManagementResult = function(managed_nodes)
 
-        by_name = partition_single(nodes, lambda n: n.name)
+        by_name = partition_single(nodes, lambda n: n.name, strict=False)
         mgmt_by_name: Dict[ht.NodeName, NodeManagementResultNode]
         mgmt_by_name = partition_single(result.nodes, lambda n: n.name)
 
@@ -778,7 +974,7 @@ class NodeManager:
 
             logging.warning(
                 (
-                    "Somehow node {} is not being tracked by bucket {}. "
+                    "Somehow {} is not being tracked by bucket {}. "
                     + "Did you try to shutdown/terminate/delete a node twice?"
                 ).format(node, bucket)
             )
@@ -790,9 +986,12 @@ class NodeManager:
         self.add_default_resource({}, "ncpus", "node.vcpu_count")
         self.add_default_resource({}, "pcpus", "node.pcpu_count")
         self.add_default_resource({}, "ngpus", "node.gpu_count")
+        self.add_default_resource({}, "memb", MemoryDefault("b"))
+        self.add_default_resource({}, "memkb", MemoryDefault("k"))
         self.add_default_resource({}, "memmb", MemoryDefault("m"))
         self.add_default_resource({}, "memgb", MemoryDefault("g"))
         self.add_default_resource({}, "memtb", MemoryDefault("t"))
+        self.add_default_resource({}, "nodearray", "node.nodearray")
 
     def example_node(self, location: str, vm_size: str) -> Node:
         aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
@@ -816,7 +1015,8 @@ class NodeManager:
             placement_group=None,
             managed=False,
             resources=ht.ResourceDict({}),
-            software_configuration=frozendict({}),
+            software_configuration=ImmutableOrderedDict({}),
+            keep_alive=False,
         )
         self._apply_defaults(node)
         return node
@@ -874,7 +1074,7 @@ class MemoryDefault:
         self.mag = mag
 
     def __call__(self, node: Node) -> ht.ResourceTypeAtom:
-        return node.memory.convert_to(self.mag).value
+        return node.memory.convert_to(self.mag)
 
     def __repr__(self) -> str:
         return "node.memory[{}]".format(self.mag)
@@ -889,32 +1089,42 @@ def new_node_manager(
 
     logging.initialize_logging(config)
 
-    ret = _new_node_manager_79(new_cluster_bindings(config))
+    ret = _new_node_manager_79(new_cluster_bindings(config), config)
     existing_nodes = existing_nodes or []
 
     if not disable_default_resources:
         ret.set_system_default_resources()
 
     for entry in config.get("default_resources", []):
-        if set(["select", "name", "value"]) != set(entry.keys()):
-            raise RuntimeError(
-                "default_resources: Expected select=dict name=str value=str: {}".format(
-                    entry
-                )
-            )
 
         try:
             assert isinstance(entry["select"], dict)
             assert isinstance(entry["name"], str)
-            assert isinstance(entry["value"], str)
+            assert isinstance(entry["value"], (str, int, float, bool))
         except AssertionError as e:
             raise RuntimeError(
-                "default_resources: Expected select=dict name=str value=str: {}".format(
+                "default_resources: Expected select=dict name=str value=str|int|float|bool: {}".format(
                     e
                 )
             )
+        modifier = None
+        for op in ["add", "subtract", "multiply", "divide", "divide_floor"]:
+            if op in entry:
+                if modifier:
+                    raise RuntimeError(
+                        "Can not support more than one modifier for default resources at this time. {}".format(
+                            entry
+                        )
+                    )
+                modifier = op
 
-        ret.add_default_resource(entry["select"], entry["name"], entry["value"])
+        ret.add_default_resource(
+            entry["select"],
+            entry["name"],
+            entry["value"],
+            modifier,
+            entry.get(modifier, None),
+        )
 
     return ret
 
@@ -939,9 +1149,23 @@ def _cluster_limits(cluster_name: str, cluster_status: ClusterStatus) -> _Shared
     )
 
 
-def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeManager:
+def _new_node_manager_79(
+    cluster_bindings: ClusterBindingInterface, autoscale_config: Dict,
+) -> NodeManager:
     cluster_status = cluster_bindings.get_cluster_status(nodes=True)
     nodes_list = cluster_bindings.get_nodes()
+
+    # to make it trivial to mimic 'onprem' nodes by simply filtering them out
+    # of the response.
+    mimic_on_prem = autoscale_config.get("_mimic_on_prem", [])
+    if mimic_on_prem:
+        nodes_list.nodes = [
+            n for n in nodes_list.nodes if n["Name"] not in mimic_on_prem
+        ]
+        cluster_status.nodes = [
+            n for n in cluster_status.nodes if n["Name"] not in mimic_on_prem
+        ]
+
     all_node_names = [n["Name"] for n in nodes_list.nodes]
 
     buckets = []
@@ -1008,15 +1232,31 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                 bucket.placement_groups, lambda p: p.name
             )
 
-            default_pg = nodearray_status.nodearray.get("PlacementGroupId")
+            default_pgs = (
+                autoscale_config.get("nodearrays", {})
+                .get("default", {})
+                .get("placement_groups", [])
+            )
+            nodearray_pgs = (
+                autoscale_config.get("nodearrays", {})
+                .get(nodearray_status.name, {})
+                .get("placement_groups", [])
+            )
+            hardcoded_pg = nodearray_status.nodearray.get("PlacementGroupId")
+            predefined_pgs = default_pgs + nodearray_pgs
+            if hardcoded_pg:
+                predefined_pgs.append(hardcoded_pg)
 
-            if default_pg is None:
+            for predef_pg in predefined_pgs:
+                if predef_pg not in placement_groups:
+                    placement_groups[predef_pg] = PlacementGroupStatus(
+                        active_core_count=0, active_count=0, name=predef_pg
+                    )
+
+            # We allow a non-placement grouped bucket. We simply set it to none here and
+            # downstream understands this
+            if None not in placement_groups:
                 placement_groups[None] = None
-
-            elif default_pg not in placement_groups:
-                placement_groups[default_pg] = PlacementGroupStatus(
-                    active_core_count=0, active_count=0, name=default_pg
-                )
 
             for pg_name, pg_status in placement_groups.items():
 
@@ -1075,7 +1315,8 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                 nodes = []
 
                 for cc_node_rec in cc_node_records:
-                    nodes.append(_node_from_cc_node(cc_node_rec, bucket, region))
+                    node = _node_from_cc_node(cc_node_rec, bucket, region)
+                    nodes.append(node)
 
                 node_def = NodeDefinition(
                     nodearray=nodearray_name,
@@ -1088,16 +1329,24 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
                     memory=bucket_memory,
                     placement_group=pg_name,
                     resources=custom_resources,
-                    software_configuration=frozendict(
+                    software_configuration=ImmutableOrderedDict(
                         nodearray.get("Configuration", {})
                     ),
                 )
+
+                def nodes_key(n: Node) -> Tuple[str, int]:
+
+                    try:
+                        name, index = n.name.rsplit("-", 1)
+                        return (name, int(index))
+                    except Exception:
+                        return (n.name, 0)
 
                 node_bucket = NodeBucket(
                     node_def,
                     limits=bucket_limit,
                     max_placement_group_size=bucket.max_placement_group_size,
-                    nodes=nodes,
+                    nodes=sorted(nodes, key=nodes_key),
                 )
 
                 logging.debug(
@@ -1107,7 +1356,7 @@ def _new_node_manager_79(cluster_bindings: ClusterBindingInterface,) -> NodeMana
 
     ret = NodeManager(cluster_bindings, buckets)
     for name in all_node_names:
-        ret._node_names.add(name)
+        ret._node_names[name] = True
     return ret
 
 
@@ -1132,7 +1381,7 @@ def _node_from_cc_node(
         cc_node_rec.get("Configuration", {}).get("autoscale", {}).get("resources", {})
     )
 
-    software_configuration = frozendict(cc_node_rec.get("Configuration", {}))
+    software_configuration = ImmutableOrderedDict(cc_node_rec.get("Configuration", {}))
 
     return Node(
         node_id=DelayedNodeId(node_name, node_id=node_id),
@@ -1154,6 +1403,7 @@ def _node_from_cc_node(
         managed=True,
         resources=resources,
         software_configuration=software_configuration,
+        keep_alive=cc_node_rec.get("KeepAlive", False),
     )
 
 
@@ -1164,11 +1414,18 @@ class _DefaultResource:
         resource_name: str,
         default_value_function: DefaultValueFunc,
         default_value_expr: str,
+        modifier: Optional[ResourceModifier],
+        modifier_magnitude: Optional[Union[int, float, ht.Memory]],
     ) -> None:
         self.selection = selection
         self.resource_name = resource_name
         self.default_value_function = default_value_function
         self.default_value_expr = default_value_expr
+        assert not (
+            bool(modifier) ^ bool(modifier_magnitude)
+        ), "Please specify both modifier and modifier_magnitude"
+        self.modifier = modifier
+        self.modifier_magnitude = modifier_magnitude
 
     def apply_default(self, node: Node) -> None:
 
@@ -1182,6 +1439,45 @@ class _DefaultResource:
 
         # it met all of our criteria, so set the default
         default_value = self.default_value_function(node)
+        if self.modifier and default_value is not None:
+            if not isinstance(default_value, (float, int, ht.Memory)):
+                raise RuntimeError(
+                    "Can't modify a default resource if the value is not an int, float or memory expression."
+                    + "select={} name={} value={} {}={}".format(
+                        self.selection,
+                        self.resource_name,
+                        default_value,
+                        self.modifier,
+                        self.modifier_magnitude,
+                    )
+                )
+            assert self.modifier_magnitude
+            try:
+                if self.modifier == "add":
+                    default_value = default_value + self.modifier_magnitude  # type: ignore
+                elif self.modifier == "subtract":
+                    default_value = default_value - self.modifier_magnitude  # type: ignore
+                elif self.modifier == "multiply":
+                    default_value = default_value * self.modifier_magnitude  # type: ignore
+                elif self.modifier == "divide":
+                    default_value = default_value / self.modifier_magnitude  # type: ignore
+                elif self.modifier == "divide_floor":
+                    default_value = default_value // self.modifier_magnitude  # type: ignore
+                else:
+                    raise RuntimeError("Unsupported modifier {}".format(self))
+            except Exception as e:
+                logging.error(
+                    "Could not modify default value: 'Error={}' select={} name={} value={} {}={}".format(
+                        e,
+                        self.selection,
+                        self.resource_name,
+                        default_value,
+                        self.modifier,
+                        self.modifier_magnitude,
+                    )
+                )
+                return
+
         node._resources[self.resource_name] = default_value
         node.available[self.resource_name] = default_value
 
