@@ -190,7 +190,7 @@ setup(
     install_requires=[
         "requests >= 2.24.0",
         "typing_extensions",
-        "frozendict==1.2.0",
+        "immutabledict==1.0.0",
         "jsonpickle==1.4.1",
     ]
     + ["urllib3>=1.25.10"],  # noqa: W503

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
-from frozendict import frozendict
+from immutabledict import ImmutableOrderedDict
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
@@ -55,7 +55,7 @@ class Node(ABC):
         placement_group: Optional[ht.PlacementGroup],
         managed: bool,
         resources: ht.ResourceDict,
-        software_configuration: frozendict,
+        software_configuration: ImmutableOrderedDict,
         keep_alive: bool,
     ) -> None:
         self.__name = name
@@ -221,7 +221,7 @@ class Node(ABC):
 
     @property
     def resources(self) -> ht.ResourceDict:
-        return frozendict(self._resources)
+        return ImmutableOrderedDict(self._resources)
 
     @property
     def managed(self) -> bool:
@@ -272,7 +272,7 @@ class Node(ABC):
             Cyclecloud
         """
         if self.exists:
-            return frozendict(self.__node_attribute_overrides)
+            return ImmutableOrderedDict(self.__node_attribute_overrides)
         return self.__node_attribute_overrides
 
     @property
@@ -431,13 +431,13 @@ class Node(ABC):
         return self.__assignments
 
     @property
-    def software_configuration(self) -> frozendict:
+    def software_configuration(self) -> Dict:
         overrides = self.node_attribute_overrides
         if overrides and overrides.get("Configuration"):
             ret: Dict = {}
             ret.update(self.__software_configuration)
             ret.update(overrides["Configuration"])
-            return frozendict(ret)
+            return ImmutableOrderedDict(ret)
         return self.__software_configuration
 
     def update(self, snode: "Node") -> None:
@@ -521,7 +521,7 @@ class UnmanagedNode(Node):
             placement_group=placement_group,
             managed=False,
             resources=ht.ResourceDict(resources),
-            software_configuration=frozendict({}),
+            software_configuration=ImmutableOrderedDict({}),
             keep_alive=True,
         )
         assert self.exists

@@ -23,7 +23,7 @@ from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
-from frozendict import frozendict
+from immutabledict import ImmutableOrderedDict
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
@@ -304,7 +304,7 @@ class MockClusterBinding(ClusterBindingInterface):
             placement_group=placement_group,
             managed=True,
             resources=resources,
-            software_configuration=frozendict(
+            software_configuration=ImmutableOrderedDict(
                 nodearray_record.get("Configuration", {})
             ),
             keep_alive=keep_alive,

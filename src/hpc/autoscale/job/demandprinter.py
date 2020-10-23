@@ -6,7 +6,6 @@ import sys
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, TextIO, Tuple
 
-import frozendict
 from typing_extensions import Literal
 
 from hpc.autoscale import hpclogging as logging
@@ -186,7 +185,7 @@ class DemandPrinter:
                 else:
                     if hasattr(value, "to_json"):
                         value = value.to_json()
-                    elif isinstance(value, frozendict.frozendict):
+                    elif hasattr(value, "keys"):
                         value = dict(value)
 
                 row.append(value)

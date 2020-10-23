@@ -1,7 +1,7 @@
 import socket
 import typing
 
-from frozendict import frozendict
+from immutabledict import ImmutableOrderedDict
 
 from hpc.autoscale import hpclogging as logging
 from hpc.autoscale import hpctypes as ht
@@ -47,7 +47,7 @@ class SchedulerNode(Node):
             placement_group=None,
             managed=False,
             resources=ht.ResourceDict(resources),
-            software_configuration=frozendict({}),
+            software_configuration=ImmutableOrderedDict({}),
             keep_alive=False,
         )
 

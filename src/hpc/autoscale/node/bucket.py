@@ -2,7 +2,7 @@ import typing
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 
-import frozendict
+from immutabledict import ImmutableOrderedDict
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import util
@@ -34,7 +34,7 @@ class NodeDefinition:
         memory: ht.Memory,
         placement_group: Optional[ht.PlacementGroup],
         resources: ht.ResourceDict,
-        software_configuration: frozendict,
+        software_configuration: ImmutableOrderedDict,
     ) -> None:
         assert nodearray is not None
         self.nodearray = nodearray
