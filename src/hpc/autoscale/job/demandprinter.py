@@ -112,6 +112,7 @@ class DemandPrinter:
         def sort_by_ip_or_name(node: Node) -> Any:
             if node.private_ip:
                 return tuple(map(int, node.private_ip.split(".")))
+
             name_toks = node.name.split("-")
             if name_toks[-1].isdigit():
                 node_index = int(name_toks[-1])
@@ -119,6 +120,7 @@ class DemandPrinter:
                 # 2**31 to make these come after private ips
                 # then nodearray name, then index
                 return tuple([2 ** 31] + nodearray_ord + [node_index])
+            return tuple([-1] + name_toks)
 
         ordered_nodes = sorted(demand_result.compute_nodes, key=sort_by_ip_or_name)
 
