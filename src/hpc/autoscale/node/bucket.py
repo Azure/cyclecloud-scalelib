@@ -1,6 +1,6 @@
 import typing
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from immutabledict import ImmutableOrderedDict
 
@@ -11,6 +11,7 @@ from hpc.autoscale.node import constraints as constraintslib  # noqa: F401
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import BucketLimits
 from hpc.autoscale.results import CandidatesResult, Result
+from hpc.autoscale.util import partition
 
 if typing.TYPE_CHECKING:
     from hpc.autoscale.node.node import Node
@@ -85,6 +86,7 @@ class NodeBucket:
         limits: BucketLimits,
         max_placement_group_size: int,
         nodes: List["Node"],
+        artificial: bool = False,
     ) -> None:
         # example node to be used to see if your job would match this
         self.__definition = definition
@@ -97,6 +99,8 @@ class NodeBucket:
         self.nodes = nodes
         self.__decrement_counter = 0
         example_node_name = ht.NodeName("{}-0".format(definition.nodearray))
+        self._artificial = artificial
+
         # TODO infiniband
         from hpc.autoscale.node.node import Node
 
@@ -239,6 +243,22 @@ class NodeBucket:
     def software_configuration(self) -> Dict:
         return self.__definition.software_configuration
 
+    def add_nodes(self, nodes: List["Node"]) -> None:
+        new_by_id = partition(nodes, lambda n: n.delayed_node_id.transient_id)
+        cur_by_id = partition(self.nodes, lambda n: n.delayed_node_id.transient_id)
+
+        filtered = []
+        for new_id, new_nodes in new_by_id.items():
+            if new_id not in cur_by_id:
+                filtered.append(new_nodes[0])
+
+        new_by_hostname = partition(filtered, lambda n: n.hostname_or_uuid)
+        cur_by_hostname = partition(self.nodes, lambda n: n.hostname_or_uuid)
+
+        for new_hostname, new_nodes in new_by_hostname.items():
+            if new_hostname not in cur_by_hostname:
+                self.nodes.append(new_nodes[0])
+
     def __str__(self) -> str:
         if self.placement_group:
             return "NodeBucket({}, available={}, pg={}, size={})".format(
@@ -257,6 +277,9 @@ def bucket_candidates(
 ) -> CandidatesResult:
     if not candidates:
         return CandidatesResult("NoBucketsDefined", child_results=[],)
+
+    for c in candidates:
+        assert isinstance(c, NodeBucket)
 
     satisfied_buckets: List["NodeBucket"] = []
     allocation_failures = []
@@ -296,7 +319,18 @@ def bucket_candidates(
             satisfied_buckets.append(bucket)
 
     if satisfied_buckets:
-        return CandidatesResult("success", candidates=satisfied_buckets)
+        for cc in constraints:
+            for b in satisfied_buckets:
+                assert cc.satisfied_by_bucket(b)
+                assert cc.satisfied_by_node(b.example_node)
+        artificial = []
+        actual = []
+        for c in satisfied_buckets:
+            if c._artificial:
+                artificial.append(c)
+            else:
+                actual.append(c)
+        return CandidatesResult("success", candidates=artificial + actual)
 
     return CandidatesResult("CompoundFailure", child_results=allocation_failures)
 

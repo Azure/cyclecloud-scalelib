@@ -2,7 +2,6 @@ import functools
 import math
 from copy import deepcopy
 from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
-from uuid import uuid4
 
 from cyclecloud.model.ClusterStatusModule import ClusterStatus
 from cyclecloud.model.NodearrayBucketStatusModule import NodearrayBucketStatus
@@ -134,7 +133,7 @@ class NodeManager:
 
                 result = self._allocate_slots(
                     candidate,
-                    slot_count,
+                    slot_count - total_slots_allocated,
                     parsed_constraints,
                     allow_existing,
                     all_or_nothing,
@@ -220,41 +219,24 @@ class NodeManager:
         assignment_id: Optional[str] = None,
     ) -> AllocationResult:
         remaining = slot_count
-        allocated_nodes: Dict[str, Node] = {}
-
-        for node in bucket.nodes:
-            min_count = minimum_space(constraints, node)
-            if min_count > 0:
-                while remaining > 0:
-                    match_result = node.decrement(
-                        constraints, assignment_id=assignment_id
-                    )
-                    if match_result:
-                        allocated_nodes[node.name] = node
-                        if match_result.total_slots <= 0:
-                            msg = "False match result returned negative total slots! node={} constraints={} result={}".format(
-                                node, constraints, match_result
-                            )
-                            raise RuntimeError(msg)
-                        remaining -= match_result.total_slots
-                    else:
-                        break
+        allocated_nodes: Dict[str, Tuple[Node, Node]] = {}
 
         while remaining > 0:
             min_count = minimum_space(constraints, bucket.example_node)
+            assert min_count, "%s -> %s" % (constraints, bucket.example_node.resources)
             # -1 is returned when the constraints have no say in how many could fit
             # like, say, if the only constraint was that a flag was true
-            if min_count == -1:
+            if min_count <= -1:
                 min_count = remaining
-            _num_nodes = int(math.ceil(remaining / min_count))
-            num_nodes = min(_num_nodes, bucket.available_count)
+            elif min_count == 0:
+                break
 
             alloc_result = self._allocate_nodes(
                 bucket,
-                num_nodes,
-                remaining,
+                1,
+                min(remaining, min_count),
                 constraints,
-                allow_existing=False,
+                allow_existing=True,
                 assignment_id=assignment_id,
                 commit=False,
             )
@@ -263,7 +245,7 @@ class NodeManager:
                 break
 
             for node in alloc_result.nodes:
-                allocated_nodes[node.name] = node
+                allocated_nodes[node.name] = (node, node)
 
             remaining -= alloc_result.total_slots
 
@@ -273,13 +255,10 @@ class NodeManager:
 
         # allocated at least one slot
         if remaining < slot_count:
-            self._commit(bucket, list(allocated_nodes.values()))
+            commited_nodes = self._commit(bucket, list(allocated_nodes.values()))
             return AllocationResult(
-                "success",
-                nodes=list(allocated_nodes.values()),
-                slots_allocated=slot_count - remaining,
+                "success", nodes=commited_nodes, slots_allocated=slot_count - remaining,
             )
-
         self._rollback(bucket)
         return AllocationResult("Failed", reasons=["TODO"])
 
@@ -326,7 +305,7 @@ class NodeManager:
             )
 
         assert count > 0
-        allocated_nodes: Dict[str, Node] = {}
+        allocated_nodes: Dict[str, Tuple[Node, Node]] = {}
         new_nodes = []
         slots_allocated = 0
         available_count_total = self._availabe_count(bucket, allow_existing)
@@ -407,13 +386,14 @@ class NodeManager:
                 satisfied = True
 
             if satisfied:
+                temp_node = node.clone()
                 per_node = _per_node(node, constraints)
                 match_result = node.decrement(
                     constraints, per_node, assignment_id=assignment_id
                 )
                 assert match_result
                 slots_allocated += match_result.total_slots
-                allocated_nodes[node.name] = node
+                allocated_nodes[node.name] = (node, temp_node)
 
                 if remaining_slots() <= 0:
                     break
@@ -445,7 +425,7 @@ class NodeManager:
 
             assert new_node.name not in allocated_nodes
 
-            allocated_nodes[new_node.name] = new_node
+            allocated_nodes[new_node.name] = (new_node, new_node)
             if not new_node.exists:
                 bucket.decrement(1)
 
@@ -466,31 +446,49 @@ class NodeManager:
                 )
             )
 
-        if len(allocated_nodes) != count:
+        # assert len(allocated_nodes) <= count
+
+        if len(allocated_nodes) < count:
             msg = "Could only allocate {}/{} nodes".format(len(allocated_nodes), count)
             return AllocationResult("InsufficientCapacity", reasons=[msg])
 
         if commit:
             self._commit(bucket, list(allocated_nodes.values()))
 
+        allocated_result_nodes = [n[1] for n in allocated_nodes.values()]
         return AllocationResult(
-            "success", list(allocated_nodes.values()), slots_allocated=slots_allocated
+            "success", allocated_result_nodes, slots_allocated=slots_allocated
         )
 
-    def _commit(self, bucket: NodeBucket, allocated_nodes: List[Node]) -> None:
+    def _commit(
+        self, bucket: NodeBucket, allocated_nodes: List[Tuple[Node, Node]]
+    ) -> List[Node]:
         # TODO put this logic into the bucket.
         by_name = partition(bucket.nodes, lambda n: n.name)
-        new_nodes = [n for n in allocated_nodes if not n.exists]
+        new_nodes = [n[0] for n in allocated_nodes if not n[0].exists]
+
         for new_node in new_nodes:
             if new_node.name not in by_name:
-                bucket.nodes.append(new_node)
+                bucket.add_nodes([new_node])
                 by_name[new_node.name] = [new_node]
 
         for node in new_nodes:
             self._node_names[node.name] = True
-        for node in allocated_nodes:
-            node._allocated = True
+
+        for old_node, new_node in allocated_nodes:
+            old_node._allocated = True
+            if old_node is not new_node:
+                assert old_node.bucket_id == new_node.bucket_id
+                assert old_node.bucket_id == bucket.bucket_id
+                assert new_node not in bucket.nodes
+                if old_node in bucket.nodes:
+                    index = bucket.nodes.index(old_node)
+                    bucket.nodes[index] = new_node
+                else:
+                    bucket.nodes.append(new_node)
+
         bucket.commit()
+        return [n[1] for n in allocated_nodes]
 
     def _rollback(self, bucket: NodeBucket) -> None:
         bucket.rollback()
@@ -552,20 +550,27 @@ class NodeManager:
 
     @apitrace
     def add_unmanaged_nodes(self, existing_nodes: List[UnmanagedNode]) -> None:
-        by_key: Dict[str, List[Node]] = partition(
+
+        by_key: Dict[ht.BucketId, List[Node]] = partition(
             # typing will complain that List[Node] is List[UnmanagedNode]
             # just a limitation of python3's typing
             existing_nodes,  # type: ignore
-            lambda n: str((n.vcpu_count, n.memory, n.resources)),
+            lambda n: n.bucket_id,
         )
 
+        buckets = partition_single(self.__node_buckets, lambda b: b.bucket_id)
+
         for key, nodes_list in by_key.items():
+            if key in buckets:
+                buckets[ht.BucketId(key)].add_nodes(nodes_list)
+                continue
+
             a_node = nodes_list[0]
             # create a null definition, limits and bucket for each
             # unique set of unmanaged nodes
             node_def = NodeDefinition(
                 nodearray=ht.NodeArrayName("__unmanaged__"),
-                bucket_id=ht.BucketId(str(uuid4())),
+                bucket_id=key,
                 vm_size=ht.VMSize("unknown"),
                 location=ht.Location("unknown"),
                 spot=False,
@@ -580,9 +585,14 @@ class NodeManager:
             )
 
             limits = null_bucket_limits(len(nodes_list), a_node.vcpu_count)
-            bucket = NodeBucket(node_def, limits, len(nodes_list), nodes_list)
+            bucket = NodeBucket(
+                node_def, limits, len(nodes_list), nodes_list, artificial=True
+            )
 
-        self.__node_buckets.append(bucket)
+            self.__node_buckets.append(bucket)
+            bucket.add_nodes(nodes_list)
+
+        self._apply_defaults_all()
 
     def get_nodes(self) -> List[Node]:
         # TODO slow
@@ -608,6 +618,9 @@ class NodeManager:
 
     def get_buckets(self) -> List[NodeBucket]:
         return self.__node_buckets
+
+    def get_buckets_by_id(self) -> Dict[ht.BucketId, NodeBucket]:
+        return partition_single(self.get_buckets(), lambda b: b.bucket_id)
 
     @apitrace
     def get_nodes_by_operation(self, operation_id: ht.OperationId) -> List[Node]:

@@ -103,8 +103,8 @@ class AllocationResult(Result):
 
     def __str__(self) -> str:
         if self:
-            return "AllocationResult(status={}, nodes={})".format(
-                self.status, self.nodes
+            return "AllocationResult(status={}, num_nodes={}, nodes={})".format(
+                self.status, len(self.nodes), [str(x) for x in self.nodes]
             )
         else:
             return "AllocationResult(status={}, reason={})".format(

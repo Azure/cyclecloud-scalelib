@@ -7,6 +7,7 @@ from hypothesis.strategies import SearchStrategy
 
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.node.node import Node, UnmanagedNode
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
@@ -19,6 +20,7 @@ from hpc.autoscale.util import partition, partition_single
 
 
 def setup_function(function: Any) -> None:
+    SchedulerNode.ignore_hostnames = True
     register_result_handler(DefaultContextHandler("[{}]".format(function.__name__)))
 
 
@@ -184,7 +186,7 @@ def test_packing(node_mgr: NodeManager) -> None:
     assert result.nodes[0].available["ncpus"] == 2, result.nodes[0].available["ncpus"]
     assert len(node_mgr.new_nodes) == 1, len(node_mgr.new_nodes)
 
-    # htc node can fit 4 ncpus, so only allocate one node
+    # htc node can fit 4 ncpus, but 2 are used up on the first node, so allocate a second
     result = node_mgr.allocate({"node.nodearray": "htc", "ncpus": 1}, slot_count=4)
     assert result
     assert len(result.nodes) == 2, result.nodes
@@ -607,7 +609,7 @@ def test_overscaling_error() -> None:
         assignment_id="slots",
     )
     assert result
-    assert len(result.nodes) > 1
+    assert len(result.nodes) == 3
 
     result = node_mgr.allocate(
         {"exclusive": True, "node.vm_size": "Standard_D16s_v3"},
@@ -619,7 +621,7 @@ def test_overscaling_error() -> None:
     by_size = partition(node_mgr.new_nodes, lambda b: b.vm_size)
 
     assert "Standard_E2s_v3" in by_size
-    assert len(by_size["Standard_E2s_v3"]) == 4
+    assert len(by_size["Standard_E2s_v3"]) == 2
     assert len(by_size["Standard_E16_v3"]) == 1
     assert len(by_size["Standard_D16s_v3"]) == 10
 
@@ -630,7 +632,7 @@ def test_overscaling_error() -> None:
 
     # recreate it - the bindings 'remembers' that we already created nodes
     node_mgr = _node_mgr(bindings)
-    assert len(node_mgr.get_nodes()) == 15
+    assert len(node_mgr.get_nodes()) == 13
 
     result = node_mgr.allocate({"ncpus": 1}, slot_count=100, assignment_id="slots")
     assert result
@@ -647,12 +649,12 @@ def test_overscaling_error() -> None:
         print(node.name, node.vm_size, node.assignments)
 
     assert len(node_mgr.new_nodes) == 0
-    assert len(node_mgr.get_nodes()) == 15
+    assert len(node_mgr.get_nodes()) == 13
 
     by_size = partition(node_mgr.get_nodes(), lambda b: b.vm_size)
 
     assert "Standard_E2s_v3" in by_size
-    assert len(by_size["Standard_E2s_v3"]) == 4
+    assert len(by_size["Standard_E2s_v3"]) == 2
     assert len(by_size["Standard_E16_v3"]) == 1
     assert len(by_size["Standard_D16s_v3"]) == 10
 
@@ -747,6 +749,23 @@ def test_node_software_configuration_alias(node_mgr: NodeManager) -> None:
     )
     b = node_mgr.get_buckets()[0]
     assert b.resources["int_alias"] == b.software_configuration["custom_int"]
+
+
+def test_unmanaged_nodes(node_mgr: NodeManager) -> None:
+    assert len(node_mgr.get_buckets()) == 2
+    tux = SchedulerNode("tux", bucket_id=ht.BucketId("tuxid"))
+    node_mgr.add_unmanaged_nodes([tux])
+    assert len(node_mgr.get_buckets()) == 3
+    assert node_mgr.get_buckets_by_id()[tux.bucket_id].nodes == [tux]
+
+    tux2 = SchedulerNode("tux2", bucket_id=tux.bucket_id)
+    node_mgr.add_unmanaged_nodes([tux2])
+    assert len(node_mgr.get_buckets()) == 3
+    assert node_mgr.get_buckets_by_id()[tux.bucket_id].nodes == [tux, tux2]
+
+    node_mgr.add_unmanaged_nodes([tux, tux2])
+    assert len(node_mgr.get_buckets()) == 3
+    assert node_mgr.get_buckets_by_id()[tux.bucket_id].nodes == [tux, tux2]
 
 
 if __name__ == "__main__":

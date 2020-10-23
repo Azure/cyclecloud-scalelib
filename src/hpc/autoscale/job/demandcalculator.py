@@ -284,6 +284,8 @@ class DemandCalculator:
                 )
                 by_hostname[new_snode.hostname] = new_snode
                 self.__scheduler_nodes_queue.push(new_snode)
+                self.node_mgr.add_unmanaged_nodes([new_snode])
+
                 # TODO inform bucket catalog?
             else:
                 old_snode = by_hostname[new_snode.hostname_or_uuid]

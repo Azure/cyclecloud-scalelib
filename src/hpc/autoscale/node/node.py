@@ -471,8 +471,10 @@ class Node(ABC):
         hostname = self.hostname if self.exists else "..."
         node_id = self.delayed_node_id.node_id
         if node_id:
-            return "Node({}, {}, {})".format(self.name, hostname, node_id)
-        return "Node({}, {})".format(self.name, hostname)
+            return "Node({}, {}, {}, {})".format(
+                self.name, hostname, self.vm_size, node_id
+            )
+        return "Node({}, {}, {})".format(self.name, hostname, self.vm_size)
 
     def __repr__(self) -> str:
         hostname = self.hostname if self.exists else "..."

@@ -151,7 +151,7 @@ class NodeResourceConstraint(BaseNodeConstraint):
         return "(Node.{} in {})".format(self.attr, self.values)
 
     def __repr__(self) -> str:
-        return "NodeConstraint" + str(self)
+        return "NodeResourceConstraint" + str(self)
 
     def to_dict(self) -> dict:
         return {self.attr: self.values}
@@ -219,7 +219,7 @@ class MinResourcePerNode(BaseNodeConstraint):
         return "(Node.{} >= {})".format(self.attr, self.value)
 
     def __repr__(self) -> str:
-        return "NodeConstraint" + str(self)
+        return "NodeMinResourceConstraint" + str(self)
 
     def to_dict(self) -> dict:
         return ConstraintDict({self.attr: self.value})
@@ -575,7 +575,7 @@ class NodePropertyConstraint(BaseNodeConstraint):
         return "(Node.{} in {})".format(self.attr, self.values)
 
     def __repr__(self) -> str:
-        return "NodeConstraint" + str(self)
+        return "NodePropertyConstraint" + str(self)
 
     def to_dict(self) -> dict:
         return {self.attr: self.values}
