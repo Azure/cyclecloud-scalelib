@@ -1,4 +1,4 @@
-__version__ = "7.9.5-SNAPSHOT"
+__version__ = "0.1.1"
 __release_version__ = __version__.replace("-SNAPSHOT", "")
 
 
@@ -21,7 +21,7 @@ def _append_build_number() -> None:
         pass
 
     if build_number:
-        global __version__
+        global __version__ 
         __version__ = __version__.replace("-SNAPSHOT", "-%s" % build_number)
 
 
