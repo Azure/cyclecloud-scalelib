@@ -33,6 +33,7 @@ The instructions below assume that you have copied the cyclecloud-api.tar.gz to 
     pip install -r ./dev-requirements.txt
     pip install ./cyclecloud_api*.whl
     python setup.py build
+    pip install -e .
 ```
 
 ## Testing the project:
