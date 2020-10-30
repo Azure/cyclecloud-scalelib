@@ -36,12 +36,12 @@ class ReadOnlyModeException(RuntimeError):
 
 
 def notreadonly(method: Callable) -> Callable:
-    def readonlywrapper(*args: Any) -> Optional[Any]:
+    def readonlywrapper(*args: Any, **kwargs: Any) -> Optional[Any]:
         if args[0].read_only:
             raise ReadOnlyModeException(
                 "Can not call {} in read only mode.".format(method.__name__)
             )
-        return method(*args)
+        return method(*args, **kwargs)
 
     return readonlywrapper
 
@@ -118,10 +118,11 @@ class ClusterBinding(ClusterBindingInterface):
         hostnames: Optional[List[ht.Hostname]] = None,
         ip_addresses: Optional[List[ht.IpAddress]] = None,
         custom_filter: str = None,
+        request_id: Optional[str] = None,
     ) -> NodeManagementResult:
 
         request = self._node_management_request(
-            nodes, names, node_ids, hostnames, ip_addresses, custom_filter
+            nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
         )
         http_response, result = self.clusters_module.deallocate_nodes(
             self.session, self.cluster_name, request
@@ -157,10 +158,11 @@ class ClusterBinding(ClusterBindingInterface):
         hostnames: Optional[List[ht.Hostname]] = None,
         ip_addresses: Optional[List[ht.IpAddress]] = None,
         custom_filter: str = None,
+        request_id: Optional[str] = None,
     ) -> NodeManagementResult:
 
         request = self._node_management_request(
-            nodes, names, node_ids, hostnames, ip_addresses, custom_filter
+            nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
         )
         http_response, result = self.clusters_module.remove_nodes(
             self.session, self.cluster_name, request
@@ -195,10 +197,11 @@ class ClusterBinding(ClusterBindingInterface):
         hostnames: Optional[List[ht.Hostname]] = None,
         ip_addresses: Optional[List[ht.IpAddress]] = None,
         custom_filter: str = None,
+        request_id: Optional[str] = None,
     ) -> NodeManagementResult:
 
         request = self._node_management_request(
-            nodes, names, node_ids, hostnames, ip_addresses, custom_filter
+            nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
         )
         http_response, result = self.clusters_module.shutdown_nodes(
             self.session, self.cluster_name, request
@@ -216,10 +219,11 @@ class ClusterBinding(ClusterBindingInterface):
         hostnames: Optional[List[ht.Hostname]] = None,
         ip_addresses: Optional[List[ht.IpAddress]] = None,
         custom_filter: str = None,
+        request_id: Optional[str] = None,
     ) -> NodeManagementResult:
 
         request = self._node_management_request(
-            nodes, names, node_ids, hostnames, ip_addresses, custom_filter
+            nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
         )
         http_response, result = self.clusters_module.start_nodes(
             self.session, self.cluster_name, request
@@ -236,10 +240,11 @@ class ClusterBinding(ClusterBindingInterface):
         hostnames: Optional[List[ht.Hostname]] = None,
         ip_addresses: Optional[List[ht.IpAddress]] = None,
         custom_filter: str = None,
+        request_id: Optional[str] = None,
     ) -> NodeManagementResult:
 
         request = self._node_management_request(
-            nodes, names, node_ids, hostnames, ip_addresses, custom_filter
+            nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
         )
         http_response, result = self.clusters_module.terminate_nodes(
             self.session, self.cluster_name, request
@@ -283,6 +288,7 @@ class ClusterBinding(ClusterBindingInterface):
         hostnames: Optional[List[ht.Hostname]] = None,
         ip_addresses: Optional[List[ht.IpAddress]] = None,
         custom_filter: str = None,
+        request_id: Optional[str] = None,
     ) -> NodeManagementRequest:
 
         args = [
@@ -296,6 +302,7 @@ class ClusterBinding(ClusterBindingInterface):
             )
 
         request = NodeManagementRequest()
+
         if names:
             request.names = names
 
@@ -313,6 +320,9 @@ class ClusterBinding(ClusterBindingInterface):
 
         if nodes:
             request.ids = [n.delayed_node_id.node_id for n in nodes]
+
+        if request_id:
+            request.request_id = request_id
 
         request.validate()
 
