@@ -1,4 +1,4 @@
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __release_version__ = __version__.replace("-SNAPSHOT", "")
 
 
