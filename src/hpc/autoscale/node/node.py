@@ -337,7 +337,7 @@ class Node(ABC):
             name=self.name,
             nodearray=self.nodearray,
             bucket_id=self.bucket_id,
-            hostname=self.hostname,
+            hostname=self.hostname_or_uuid,
             private_ip=self.private_ip,
             vm_size=self.vm_size,
             location=self.location,
@@ -354,7 +354,8 @@ class Node(ABC):
             software_configuration=self.software_configuration,
             keep_alive=self.__keep_alive,
         )
-        ret.available.update(self.available)
+        ret.available.update(deepcopy(self.available))
+        ret.metadata.update(deepcopy(self.metadata))
         return ret
 
     @property

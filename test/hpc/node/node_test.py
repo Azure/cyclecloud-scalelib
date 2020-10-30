@@ -4,6 +4,10 @@ from hpc.autoscale.job.job import Job
 from hpc.autoscale.node.nodemanager import new_node_manager
 
 
+def setup_module() -> None:
+    SchedulerNode.ignore_hostnames = True
+
+
 def test_placement_group() -> None:
     node = SchedulerNode("", {})
     node.exists = False
@@ -77,6 +81,7 @@ def test_custom_node_attrs_and_node_config() -> None:
 
 def test_clone() -> None:
     orig = SchedulerNode("lnx0", {"ncpus": 4})
+    orig.metadata["exists_in_both"] = True
     new = orig.clone()
     assert new.available["ncpus"] == 4
     assert new.resources["ncpus"] == 4
@@ -90,3 +95,14 @@ def test_clone() -> None:
     assert orig.available["ncpus"] == 4
     assert new.assignments == set(["1"])
     assert orig.assignments == set()
+
+    orig.metadata["exists_in_orig"] = True
+    new.metadata["exists_in_new"] = True
+
+    assert orig.metadata["exists_in_both"] is True
+    assert "exists_in_new" not in orig.metadata
+    assert orig.metadata["exists_in_orig"] is True
+
+    assert new.metadata["exists_in_both"] is True
+    assert new.metadata["exists_in_new"] is True
+    assert "exists_in_orig" not in new.metadata
