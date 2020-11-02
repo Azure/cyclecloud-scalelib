@@ -361,6 +361,14 @@ class Or(BaseNodeConstraint):
 
         return False
 
+    def minimum_space(self, node: "Node") -> int:
+        for c in self.constraints:
+            result = c.satisfied_by_node(node)
+
+            if result:
+                return c.minimum_space(node)
+        return 0
+
     def get_children(self) -> Iterable[NodeConstraint]:
         return self.constraints
 
@@ -425,6 +433,27 @@ class XOr(BaseNodeConstraint):
 
         return False
 
+    def minimum_space(self, node: "Node") -> int:
+        xor_result: Optional[SatisfiedResult] = None
+        successful_constraint: Optional[NodeConstraint] = None
+
+        for n, c in enumerate(self.constraints):
+            expr_result = c.satisfied_by_node(node)
+
+            if expr_result:
+                # true ^ true == false
+
+                if xor_result:
+                    return 0
+                # assign the first true expression as the final result
+                xor_result = expr_result
+                successful_constraint = c
+
+        if xor_result and successful_constraint:
+            return successful_constraint.minimum_space(node)
+
+        return 0
+
     def get_children(self) -> Iterable[NodeConstraint]:
         return self.constraints
 
@@ -466,8 +495,13 @@ class And(BaseNodeConstraint):
             child_min = child.minimum_space(node)
             if child_min == -1:
                 continue
+
+            if child_min == 0:
+                return child_min
+
             if m == -1:
                 m = child_min
+
             m = min(m, child_min)
         return m
 
