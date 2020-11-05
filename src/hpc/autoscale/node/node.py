@@ -188,6 +188,10 @@ class Node(ABC):
     def exists(self, value: bool) -> None:
         self.__exists = value
 
+    @nodeproperty
+    def colocated(self) -> bool:
+        return bool(self.placement_group)
+
     @property
     def placement_group(self) -> Optional[ht.PlacementGroup]:
         return self.__placement_group
@@ -351,11 +355,15 @@ class Node(ABC):
             placement_group=self.placement_group,
             managed=self.managed,
             resources=ht.ResourceDict(deepcopy(self._resources)),
-            software_configuration=self.software_configuration,
+            software_configuration=deepcopy(self.software_configuration),
             keep_alive=self.__keep_alive,
         )
         ret.available.update(deepcopy(self.available))
         ret.metadata.update(deepcopy(self.metadata))
+
+        if not self.exists:
+            ret.node_attribute_overrides.update(deepcopy(self.node_attribute_overrides))
+
         return ret
 
     @property
@@ -404,6 +412,7 @@ class Node(ABC):
             )
 
         min_space = minimum_space(constraints, self)
+
         assert isinstance(min_space, int)
         assert isinstance(iterations, int)
 
@@ -416,8 +425,8 @@ class Node(ABC):
             for i in range(to_pack):
                 assert constraint.do_decrement(
                     self
-                ), "calculated minimum space of {} but failed at index {}".format(
-                    to_pack, i
+                ), "calculated minimum space of {} but failed at index {} {} {}".format(
+                    to_pack, i, constraint, constraint.satisfied_by_node(self),
                 )
 
         self._allocated = True
@@ -438,8 +447,13 @@ class Node(ABC):
             ret: Dict = {}
             ret.update(self.__software_configuration)
             ret.update(overrides["Configuration"])
+        else:
+            ret = self.__software_configuration
+
+        if self.exists:
             return ImmutableOrderedDict(ret)
-        return self.__software_configuration
+
+        return ret
 
     def update(self, snode: "Node") -> None:
         for attr, new_value in snode.available.items():
@@ -472,10 +486,10 @@ class Node(ABC):
         hostname = self.hostname if self.exists else "..."
         node_id = self.delayed_node_id.node_id
         if node_id:
-            return "Node({}, {}, {}, {}, pg={})".format(
-                self.name, hostname, self.vm_size, node_id, self.placement_group
+            return "Node({}, {}, {}, {})".format(
+                self.name, hostname, self.vm_size, node_id
             )
-        return "Node({}, {}, {}, pg={})".format(
+        return "Node({}, {}, {}, {})".format(
             self.name, hostname, self.vm_size, self.placement_group
         )
 

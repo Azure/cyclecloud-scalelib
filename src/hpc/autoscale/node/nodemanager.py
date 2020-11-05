@@ -233,7 +233,8 @@ class NodeManager:
             alloc_result = self._allocate_nodes(
                 bucket,
                 1,
-                min(remaining, min_count),
+                # min(remaining, min_count),
+                remaining,
                 constraints,
                 allow_existing=True,
                 assignment_id=assignment_id,

@@ -3,7 +3,7 @@
 #
 
 import json
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cyclecloud.api.clusters
 import requests
@@ -85,6 +85,15 @@ class ClusterBinding(ClusterBindingInterface):
             ),
         )
 
+        request_tuples: List[Tuple[Node, NodeCreationRequestSet]] = []
+
+        def _node_key(n: Node) -> Tuple[str, int]:
+            try:
+                index = int(n.name.split("-")[-1])
+                return (n.nodearray, index)
+            except ValueError:
+                return (n.nodearray, -1)
+
         for key, p_nodes in p_nodes_dict.items():
             nodearray, vm_size, pg, _ = key
             request_set = NodeCreationRequestSet()
@@ -98,9 +107,18 @@ class ClusterBinding(ClusterBindingInterface):
             if p_nodes[0].node_attribute_overrides:
                 request_set.node_attributes = p_nodes[0].node_attribute_overrides
 
+            first_node = sorted(p_nodes, key=_node_key)[0]
+
+            request_tuples.append((first_node, request_set))
+
+        sorted_tuples = sorted(request_tuples, key=lambda t: _node_key(t[0]))
+        for _, request_set in sorted_tuples:
             creation_request.sets.append(request_set)
 
         creation_request.validate()
+
+        logging.fine(json.dumps(creation_request.to_dict()))
+
         http_response, result = self.clusters_module.create_nodes(
             self.session, self.cluster_name, creation_request
         )
@@ -124,6 +142,9 @@ class ClusterBinding(ClusterBindingInterface):
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
         )
+
+        logging.fine(json.dumps(request.to_dict()))
+
         http_response, result = self.clusters_module.deallocate_nodes(
             self.session, self.cluster_name, request
         )
@@ -164,6 +185,9 @@ class ClusterBinding(ClusterBindingInterface):
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
         )
+
+        logging.fine(json.dumps(request.to_dict()))
+
         http_response, result = self.clusters_module.remove_nodes(
             self.session, self.cluster_name, request
         )
@@ -203,6 +227,9 @@ class ClusterBinding(ClusterBindingInterface):
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
         )
+
+        logging.fine(json.dumps(request.to_dict()))
+
         http_response, result = self.clusters_module.shutdown_nodes(
             self.session, self.cluster_name, request
         )
@@ -225,6 +252,9 @@ class ClusterBinding(ClusterBindingInterface):
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
         )
+
+        logging.fine(json.dumps(request.to_dict()))
+
         http_response, result = self.clusters_module.start_nodes(
             self.session, self.cluster_name, request
         )
@@ -246,6 +276,9 @@ class ClusterBinding(ClusterBindingInterface):
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
         )
+
+        logging.fine(json.dumps(request.to_dict()))
+
         http_response, result = self.clusters_module.terminate_nodes(
             self.session, self.cluster_name, request
         )
