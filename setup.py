@@ -193,7 +193,7 @@ setup(
         "immutabledict==1.0.0",
         "jsonpickle==1.4.1",
     ]
-    + ["urllib3>=1.25.10"],  # noqa: W503
+    + ["urllib3==1.25.11"],  # noqa: W503
     tests_require=["pytest==3.2.3"],
     cmdclass={
         "test": PyTest,
