@@ -19,7 +19,7 @@ from hpc.autoscale.results import AllocationResult, BootupResult, DeleteResult, 
 from hpc.autoscale.util import (
     NullSingletonLock,
     SingletonLock,
-    json_load,
+    load_config,
     new_singleton_lock,
     partition_single,
 )
@@ -342,7 +342,7 @@ def new_demand_calculator(
     node_queue: Optional[NodeQueue] = None,
     singleton_lock: Optional[SingletonLock] = NullSingletonLock(),
 ) -> DemandCalculator:
-    config_dict = json_load(config)
+    config_dict = load_config(config)
 
     existing_nodes = existing_nodes or []
 

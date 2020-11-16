@@ -1,10 +1,16 @@
+import json
 import os
+import shutil
 import tempfile
+from typing import Dict
 
 from hpc.autoscale.util import (
     AliasDict,
+    CircularIncludeError,
+    ConfigurationException,
     NullSingletonLock,
     SingletonFileLock,
+    load_config,
     new_singleton_lock,
     partition,
     partition_single,
@@ -73,3 +79,127 @@ def test_alias_dict() -> None:
     d["c"] = 80
     assert d["a"] == 80
     assert d["c"] == 80
+
+
+def test_include_json() -> None:
+    # Issue: #5
+    # Feature Request: support multiple autoscale.json files
+    tempdir = tempfile.mkdtemp()
+    try:
+        a = os.path.join(tempdir, "a.json")
+        b = os.path.join(tempdir, "b.json")
+        c = os.path.join(tempdir, "c.json")
+
+        try:
+            load_config(a)
+            assert False
+        except ConfigurationException as e:
+            assert a in str(e)
+
+        with open(a, "w") as fw:
+            json.dump({"include": ["b.json"]}, fw)
+
+        assert os.path.exists(a)
+        assert not os.path.exists(b)
+        assert not os.path.exists(c)
+
+        try:
+            load_config(a)
+            assert False
+        except ConfigurationException as e:
+            assert b in str(e)
+
+        with open(b, "w") as fw:
+            json.dump({"include": [c]}, fw)
+
+        assert os.path.exists(a)
+        assert os.path.exists(b)
+        assert not os.path.exists(c)
+
+        try:
+            load_config(a)
+            assert False
+        except ConfigurationException as e:
+            assert c in str(e)
+
+        with open(a, "w") as fw:
+            json.dump({"include": [b, c], "a": 1}, fw)
+        with open(b, "w") as fw:
+            json.dump({"b": 2}, fw)
+        with open(c, "w") as fw:
+            json.dump({"c": 3}, fw)
+
+        expected = load_config(a)
+        expected.pop("include")
+        assert {"a": 1, "b": 2, "c": 3} == expected
+
+        with open(a, "w") as fw:
+            json.dump({"include": [b, c], "x": 1}, fw)
+        with open(b, "w") as fw:
+            json.dump({"x": 2}, fw)
+        with open(c, "w") as fw:
+            json.dump({"x": 3}, fw)
+
+        expected = load_config(a)
+        expected.pop("include")
+        assert {"x": 3} == expected
+
+        with open(a, "w") as fw:
+            json.dump({"include": [b]}, fw)
+        with open(b, "w") as fw:
+            json.dump({"include": [a]}, fw)
+
+        try:
+            load_config(a)
+            assert False
+        except CircularIncludeError as e:
+            expected = "Circular include found: {} ---> {} ---> {}".format(a, b, a)
+            assert expected == str(e)
+
+        def _rec_merge_test(ad: Dict, bd: Dict, expected: Dict) -> None:
+
+            with open(a, "w") as fw:
+                ad["include"] = [b]
+                json.dump(ad, fw)
+
+            with open(b, "w") as fw:
+                json.dump(bd, fw)
+
+            actual = load_config(a)
+            actual.pop("include")
+            assert actual == expected
+
+        _rec_merge_test(
+            {"d0": {"k0": 0}}, {"d0": {"k1": 1}}, {"d0": {"k0": 0, "k1": 1}}
+        )
+
+        _rec_merge_test(
+            {"d0": {"d1": {"k0": 0}}},
+            {"d0": {"d1": {"k1": 1}}},
+            {"d0": {"d1": {"k0": 0, "k1": 1}}},
+        )
+
+        _rec_merge_test(
+            {"d0": {"d1": [0]}}, {"d0": {"d1": [1]}}, {"d0": {"d1": [0, 1]}},
+        )
+
+        _rec_merge_test(
+            {"d0": {"d1": [0]}}, {"d0": {"d1": {"a": 0}}}, {"d0": {"d1": {"a": 0}}},
+        )
+
+        _rec_merge_test(
+            {"d0": {"d1": [{"k0": 0}]}},
+            {"d0": {"d1": [{"k1": 1}]}},
+            {"d0": {"d1": [{"k0": 0}, {"k1": 1}]}},
+        )
+
+        # check slurm converged
+        # allow multipl configs (abspath them!)
+        with open(a, "w") as fw:
+            json.dump({"a": 1}, fw)
+        with open(b, "w") as fw:
+            json.dump({"b": 2}, fw)
+        assert {"a": 1, "b": 2} == load_config(a, b)
+
+    finally:
+        shutil.rmtree(tempdir, ignore_errors=True)

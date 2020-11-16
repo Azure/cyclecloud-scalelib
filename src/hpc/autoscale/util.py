@@ -1,6 +1,7 @@
 import json
 import os
 import uuid as uuidlib
+import warnings
 from abc import ABC, abstractmethod
 from functools import reduce
 from typing import Any, Callable, Dict, List, TextIO, TypeVar, Union
@@ -194,14 +195,95 @@ class ConfigurationException(RuntimeError):
     pass
 
 
+class CircularIncludeError(ConfigurationException):
+    pass
+
+
 def json_load(config: Union[str, Dict]) -> Dict:
+    warnings.warn("Will be removed in version 0.2")
+    return load_config(config)
+
+
+def load_config(*configs: Union[str, Dict]) -> Dict:
+    ret: Dict = {}
+    for config in configs:
+        child = _load_config(config, [])
+        ret = _dict_merge(ret, child)
+    return ret
+
+
+def _load_config(config: Union[str, Dict], path_stack: List[str]) -> Dict:
     if hasattr(config, "keys"):
         return config  # type: ignore
+
+    assert isinstance(config, str)
+
+    config_abs_path = os.path.abspath(config)
+    if not path_stack:
+        path_stack.append(config_abs_path)
+
+    print([os.path.basename(x) for x in path_stack])
 
     try:
         assert isinstance(config, str)
         with open(config) as fr:
-            return json.load(fr)
+            base_config = json.load(fr)
+
+        for to_import in base_config.get("include", []):
+            child_abs_import: str
+            if os.path.isabs(to_import):
+                child_abs_import = to_import
+            else:
+                directory = os.path.dirname(os.path.abspath(config))
+                child_abs_import = os.path.join(directory, to_import)
+
+            if child_abs_import in path_stack:
+                # append child to complete the circle
+                path_stack.append(child_abs_import)
+                raise CircularIncludeError(
+                    "Circular include found: {}".format(" ---> ".join(path_stack))
+                )
+
+            path_stack.append(child_abs_import)
+            child_config = _load_config(child_abs_import, path_stack)
+            assert child_abs_import == path_stack.pop(-1)
+            base_config = _dict_merge(base_config, child_config)
+        return base_config
+
+    except ConfigurationException:
+        raise
+
     except Exception as e:
         msg = "Could not parse config {}: {}".format(config, str(e))
         raise ConfigurationException(msg)
+
+
+def _dict_merge(d1: Dict, d2: Dict) -> Dict:
+    ret = {}
+
+    for k, v1 in d1.items():
+        if k not in d2:
+            ret[k] = v1
+            continue
+
+        v2 = d2[k]
+        if type(v1) != type(v2):
+            ret[k] = v2
+            continue
+
+        if isinstance(v1, list):
+            ret[k] = []
+            for v0 in v1 + v2:
+                if v0 not in ret[k]:
+                    ret[k].append(v0)
+
+        elif isinstance(v1, dict):
+            ret[k] = _dict_merge(v1, v2)
+        else:
+            ret[k] = v2
+
+    for k, v2 in d2.items():
+        if k not in ret:
+            ret[k] = v2
+
+    return ret
