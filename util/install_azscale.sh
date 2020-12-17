@@ -4,6 +4,14 @@
 venv_bin=$(dirname $0)
 default_config=${1:-$venv_bin/../../autoscale.json}
 
+embedded_log_conf=$($venv_bin/python -c "import os, hpc.autoscale; print(os.path.join(os.path.dirname(hpc.autoscale.__file__), 'logging.conf'))")
+
+log_conf=$(dirname $venv_bin)/logging.conf
+
+if [ ! -e $log_conf ]; then
+    cp $embedded_log_conf $log_conf
+fi
+
 cat > $venv_bin/azscale <<EOF
 #!$venv_bin/python
 import sys

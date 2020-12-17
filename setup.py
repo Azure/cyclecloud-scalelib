@@ -175,17 +175,7 @@ setup(
     name="cyclecloud-scalelib",
     version=__version__,
     packages=find_packages(where="src"),
-    package_dir={"": "src"},
-    package_data={
-        "hpc": [
-            "BUILD_NUMBER",
-            "private-requirements.json",
-            "../NOTICE",
-            "../notices",
-            "vm_sizes.json",
-        ],
-        "": ["vm_sizes.json", "../notices"],
-    },
+    package_dir={"": "src", "conf": "conf"},
     include_package_data=True,
     install_requires=[
         "requests >= 2.24.0",

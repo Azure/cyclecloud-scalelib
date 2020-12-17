@@ -1,2 +1,5 @@
 include README.md
 include src/hpc/autoscale/node/vm_sizes.json
+include src/hpc/autoscale/logging.conf
+include notices/
+include private-requirements.json
