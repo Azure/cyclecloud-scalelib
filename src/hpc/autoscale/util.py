@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import uuid as uuidlib
 import warnings
 from abc import ABC, abstractmethod
@@ -145,6 +146,7 @@ def new_singleton_lock(config: Dict) -> SingletonLock:
     define {"lock_path": null}
     explicitly in the autoscale config file to disable file locking.
     """
+    warnings.warn("Please use driver.new_singleton_lock")
     if os.name == "nt":
         cc_home = os.getenv("CYCLECLOUD_HOME", "c:\\cycle\\jetpack")
     else:
@@ -199,6 +201,19 @@ class CircularIncludeError(ConfigurationException):
     pass
 
 
+def json_dump(obj: object, writer: TextIO = sys.stdout) -> None:
+    def default_json(x: object) -> Any:
+        if hasattr(x, "to_json"):
+            return getattr(x, "to_json")()
+
+        if hasattr(x, "to_dict"):
+            return getattr(x, "to_dict")()
+        assert False, type(x)
+        return str(x)
+
+    json.dump(obj, writer, indent=2, default=default_json)
+
+
 def json_load(config: Union[str, Dict]) -> Dict:
     warnings.warn("Will be removed in version 0.2")
     return load_config(config)
@@ -221,8 +236,6 @@ def _load_config(config: Union[str, Dict], path_stack: List[str]) -> Dict:
     config_abs_path = os.path.abspath(config)
     if not path_stack:
         path_stack.append(config_abs_path)
-
-    print([os.path.basename(x) for x in path_stack])
 
     try:
         assert isinstance(config, str)

@@ -155,7 +155,7 @@ def run_type_checking() -> None:
         ["mypy", os.path.join(os.path.dirname(os.path.abspath(__file__)), "util")]
     )
 
-    check_call(["flake8", "--ignore=F405,E501,W503", "src", "test", "setup.py"])
+    check_call(["flake8", "--ignore=F405,E501,W503,E203", "src", "test", "setup.py"])
 
 
 class TypeChecking(Command):
@@ -192,6 +192,8 @@ setup(
         "typing_extensions",
         "immutabledict==1.0.0",
         "jsonpickle==1.4.1",
+        "argcomplete==1.12.2",
+        "certifi==2020.12.5",
     ]
     + ["urllib3==1.25.11"],  # noqa: W503
     tests_require=["pytest==3.2.3"],
@@ -203,6 +205,7 @@ setup(
         "initcommithook": InitCommitHook,
         "resourcefiles": ResourceFiles,
     },
+    scripts=["util/install_azscale.sh"],
     url="http://www.microsoft.com",
     maintainer="Azure CycleCloud",
 )

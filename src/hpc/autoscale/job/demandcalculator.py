@@ -28,12 +28,12 @@ from hpc.autoscale.util import (
 @hpcwrapclass
 class DemandCalculator:
     """
-        This class is responsible for calculating what the demand for nodes is based on the Jobs fed into it.
+    This class is responsible for calculating what the demand for nodes is based on the Jobs fed into it.
 
-        NOTE: This class itself will NOT actually invoke the REST api calls required to scale up or down nodes,
-        but instead gives the user the information required to decide what actions to take.
+    NOTE: This class itself will NOT actually invoke the REST api calls required to scale up or down nodes,
+    but instead gives the user the information required to decide what actions to take.
 
-        See the examples for more information.
+    See the examples for more information.
 
     """
 

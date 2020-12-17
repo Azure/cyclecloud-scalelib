@@ -17,5 +17,5 @@ def new_cluster_bindings(config: dict,) -> ClusterBindingInterface:
         read_only = False
 
     return legacy.ClusterBinding(
-        cluster.name, cluster._client.session, cluster._client, read_only=read_only
+        config, cluster._client.session, cluster._client, read_only=read_only
     )

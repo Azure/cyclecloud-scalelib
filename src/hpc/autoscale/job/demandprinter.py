@@ -34,7 +34,8 @@ class DemandPrinter:
 
         for n in range(len(column_names_list)):
             expr = column_names_list[n]
-            if ":" in expr:
+
+            if ":" in expr and "[" not in expr:
                 column, default_value = expr.split(":", 1)
                 column_names_list[n] = column
                 self.__defaults[column] = default_value
@@ -107,6 +108,9 @@ class DemandPrinter:
             columns.remove("name")
             columns.insert(0, "name")
 
+        short_columns = [c.split("@")[0] for c in columns]
+        long_columns = [c.split("@")[-1] for c in columns]
+
         # sort by private ip or the node name
 
         def sort_by_ip_or_name(node: Node) -> Any:
@@ -127,14 +131,27 @@ class DemandPrinter:
         for node in ordered_nodes:
             row: List[str] = []
             rows.append(row)
-            for column in columns:
+            for column in long_columns:
                 # TODO justify - this is a printing function, so this value could be lots of things etc.
 
                 value: Any = None
                 is_from_available = column.startswith("*")
                 is_ratio = column.startswith("/")
+                is_slice = "[" in column
+
                 if is_from_available or is_ratio:
                     column = column[1:]
+
+                def _slice(v: str) -> str:
+                    return v
+
+                slice = _slice
+
+                if is_slice:
+                    slice_expr = column[column.index("[") :]
+                    column = column.split("[")[0]
+                    # TODO maybe parse this instead of eval-ing a lambda
+                    slice = eval("lambda v: v%s" % slice_expr)
 
                 if column == "hostname":
                     hostname = node.hostname
@@ -158,8 +175,10 @@ class DemandPrinter:
                         value = "{}/{}".format(
                             node.available.get(column), node.resources.get(column)
                         )
-                    else:
+                    elif column in node.resources:
                         value = node.resources.get(column)
+                    else:
+                        value = node.metadata.get(column)
 
                 if value is None:
                     value = self.__defaults.get(column)
@@ -190,11 +209,14 @@ class DemandPrinter:
                     elif hasattr(value, "keys"):
                         value = dict(value)
 
-                row.append(value)
+                row.append(slice(value))
 
-        # remove /
-        columns = [c.lstrip("/") for c in columns]
-        print_rows(columns, rows, self.stream, self.output_format)
+        # remove / and slice expressions
+
+        stripped_short_names = [c.lstrip("/").split("[")[0] for c in short_columns]
+        if self.output_format != "json":
+            stripped_short_names = [x.upper() for x in stripped_short_names]
+        print_rows(stripped_short_names, rows, self.stream, self.output_format)
 
     def __str__(self) -> str:
         return "DemandPrinter(columns={}, output_format={}, stream={})".format(
@@ -308,7 +330,7 @@ class ExcludeDemandPrinterFilter(logginglib.Filter):
 def calculate_column_widths(
     columns: List[str], rows: List[List[str]]
 ) -> Tuple[int, ...]:
-    maxes = [len(c) for c in columns]
+    maxes = [len(c.split("@")[0]) for c in columns]
     for row in rows:
         for n in range(len(row)):
             maxes[n] = max(len(row[n]), maxes[n])
@@ -321,17 +343,21 @@ def print_rows(
     stream: Optional[TextIO] = None,
     output_format: str = "table",
 ) -> None:
+    output_format = output_format or "table"
+
     stream = stream or sys.stdout
+
+    short_names = [c.split("@")[0] for c in columns]
 
     if output_format.lower() == "json":
         json.dump(
-            [dict(zip(columns, row)) for row in rows], stream, indent=2,
+            [dict(zip(short_names, row)) for row in rows], stream, indent=2,
         )
     else:
-        widths = calculate_column_widths(columns, rows)
+        widths = calculate_column_widths(short_names, rows)
         formats = " ".join(["{:%d}" % x for x in widths])
         if output_format == "table":
-            print(formats.format(*[c.upper() for c in columns]), file=stream)
+            print(formats.format(*short_names), file=stream)
 
         for row in rows:
             print(formats.format(*[str(r) for r in row]), file=stream)

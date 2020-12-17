@@ -66,6 +66,13 @@ def initialize_db(path: str, read_only: bool) -> sqlite3.Connection:
             else:
                 file_uri = "file://{}?mode=ro".format(path)
             conn = sqlite3.connect(file_uri, uri=True)
+            # uninitialized file conns will fail here, so just
+            # use memory instead
+            try:
+                initialize_db(file_uri, read_only=False)
+            except sqlite3.OperationalError:
+                conn = sqlite3.connect("mem:temp", uri=True)
+
         else:
             file_uri = path
             conn = sqlite3.connect(path)

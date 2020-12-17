@@ -10,6 +10,10 @@ from hpc.autoscale.node.constraints import (
     NodePropertyConstraint,
     NodeResourceConstraint,
     Or,
+    SharedConsumableConstraint,
+    SharedConsumableResource,
+    SharedNonConsumableConstraint,
+    SharedNonConsumableResource,
     XOr,
     get_constraint,
     get_constraints,
@@ -254,7 +258,7 @@ def test_register_parser() -> None:
             self.name = name
 
         def satisfied_by_node(self, node: Node) -> SatisfiedResult:
-            return SatisfiedResult("success")
+            return SatisfiedResult("success", self, node)
 
         def to_dict(self) -> Dict:
             return {"custom-parser": self.name}
@@ -286,3 +290,51 @@ def test_never() -> None:
     c = get_constraint({"never": "my other message"})
     assert isinstance(c, Never)
     assert c.message == "my other message"
+
+
+def test_shared_constraint() -> None:
+    qres = SharedConsumableResource("qres", "queue", 100, 100)
+    cons = SharedConsumableConstraint([qres], 40)
+    node = SchedulerNode("tux", {})
+
+    assert cons.satisfied_by_node(node)
+    assert cons.do_decrement(node)
+    assert qres.current_value == 60
+
+    assert cons.satisfied_by_node(node)
+    assert cons.do_decrement(node)
+    assert qres.current_value == 20
+
+    assert not cons.satisfied_by_node(node)
+    assert not cons.do_decrement(node)
+    assert qres.current_value == 20
+
+    cons = SharedConsumableConstraint([qres], 20)
+    assert cons.satisfied_by_node(node)
+    assert cons.do_decrement(node)
+    assert qres.current_value == 0
+
+    qres = SharedNonConsumableResource("qres", "queue", "abc")
+    cons = SharedNonConsumableConstraint(qres, "abc")
+    assert cons.satisfied_by_node(node)
+    assert cons.do_decrement(node)
+    assert qres.current_value == "abc"
+
+    cons = SharedNonConsumableConstraint(qres, "xyz")
+    assert not cons.satisfied_by_node(node)
+    assert not cons.do_decrement(node)
+    assert qres.current_value == "abc"
+
+    global_qres = SharedConsumableResource("qres", "queue", 100, 100)
+    queue_qres = SharedConsumableResource("qres", "queue", 50, 50)
+
+    qcons = SharedConsumableConstraint([global_qres, queue_qres], 30)
+    assert qcons.satisfied_by_node(node)
+    assert qcons.do_decrement(node)
+    assert global_qres.current_value == 70
+    assert queue_qres.current_value == 20
+
+    assert not qcons.satisfied_by_node(node)
+    assert not qcons.do_decrement(node)
+    assert global_qres.current_value == 70
+    assert queue_qres.current_value == 20

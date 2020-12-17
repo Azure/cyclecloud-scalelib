@@ -52,6 +52,6 @@ def test_print_demand_json() -> None:
             "job_ids": ["11", "12"],
             "ncpus": 2,
             "*ncpus": 1,
-            "mem": "1.00g",
+            "mem": "memory::1.00g",
         }
     ]

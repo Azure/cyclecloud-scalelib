@@ -1,4 +1,5 @@
 import functools
+import re
 from copy import deepcopy
 from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
 
@@ -25,7 +26,7 @@ from hpc.autoscale.node.bucket import (
     bucket_candidates,
     node_from_bucket,
 )
-from hpc.autoscale.node.constraints import NodeConstraint
+from hpc.autoscale.node.constraints import NodeConstraint, get_constraints
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.limits import (
     BucketLimits,
@@ -102,6 +103,8 @@ class NodeManager:
         all_or_nothing: bool = False,
         assignment_id: Optional[str] = None,
     ) -> AllocationResult:
+        if not allow_existing:
+            constraints = get_constraints([{"node.exists": False}]) + constraints
 
         if int(node_count or 0) <= 0 and int(slot_count or 0) <= 0:
             return AllocationResult(
@@ -128,8 +131,12 @@ class NodeManager:
         additional_reasons = []
 
         for candidate in candidates_result.candidates:
-            if slot_count:
 
+            if slot_count and slot_count > 0:
+                assert slot_count - total_slots_allocated > 0, "%s - %s <= 0" % (
+                    slot_count,
+                    total_slots_allocated,
+                )
                 result = self._allocate_slots(
                     candidate,
                     slot_count - total_slots_allocated,
@@ -146,6 +153,7 @@ class NodeManager:
                     allocated_nodes[node.name] = node
 
                 assert result.total_slots > 0
+
                 total_slots_allocated += result.total_slots
 
                 if total_slots_allocated >= slot_count:
@@ -219,6 +227,10 @@ class NodeManager:
     ) -> AllocationResult:
         remaining = slot_count
         allocated_nodes: Dict[str, Tuple[Node, Node]] = {}
+        alloc_result: Optional[AllocationResult] = None
+        reasons = []
+
+        assert remaining > 0
 
         while remaining > 0:
             min_count = minimum_space(constraints, bucket.example_node)
@@ -228,6 +240,15 @@ class NodeManager:
             if min_count <= -1:
                 min_count = remaining
             elif min_count == 0:
+                reasons.append(
+                    "Constraints dictate that no slots will fit on a node in {}".format(
+                        bucket
+                    )
+                )
+                for cons in constraints:
+                    res = cons.satisfied_by_bucket(bucket)
+                    if not res:
+                        reasons.extend(res.reasons)
                 break
 
             alloc_result = self._allocate_nodes(
@@ -242,6 +263,7 @@ class NodeManager:
             )
 
             if not alloc_result:
+                reasons.extend(alloc_result.reasons)
                 break
 
             for node in alloc_result.nodes:
@@ -251,7 +273,7 @@ class NodeManager:
 
         if all_or_nothing and remaining > 0:
             self._rollback(bucket)
-            return AllocationResult("OutOfCapacity", reasons=["TODO"])
+            return AllocationResult("OutOfCapacity", reasons=[""])
 
         # allocated at least one slot
         if remaining < slot_count:
@@ -260,7 +282,9 @@ class NodeManager:
                 "success", nodes=commited_nodes, slots_allocated=slot_count - remaining,
             )
         self._rollback(bucket)
-        return AllocationResult("Failed", reasons=["TODO"])
+        if alloc_result:
+            return alloc_result
+        return AllocationResult("Failed", reasons=reasons)
 
     def _allocate_nodes(
         self,
@@ -308,7 +332,7 @@ class NodeManager:
         allocated_nodes: Dict[str, Tuple[Node, Node]] = {}
         new_nodes = []
         slots_allocated = 0
-        available_count_total = self._availabe_count(bucket, allow_existing)
+        available_count_total = self._available_count(bucket, allow_existing)
 
         def remaining_slots() -> int:
             if total_iterations > 0:
@@ -359,10 +383,11 @@ class NodeManager:
             return AllocationResult(
                 "NoCapacity",
                 reasons=[
-                    "Not enough {} availability for request: Available {} requested {}".format(
+                    "Not enough {} availability for request: Available {} requested {}. See {}".format(
                         bucket.vm_size,
                         available_count_total,
                         count - len(allocated_nodes),
+                        bucket.limits,
                     )
                 ],
             )
@@ -514,7 +539,7 @@ class NodeManager:
         allow_existing: bool = True,
     ) -> int:
 
-        available_count_total = self._availabe_count(bucket, allow_existing)
+        available_count_total = self._available_count(bucket, allow_existing)
         if all_or_nothing:
             count = node_count
             if count > available_count_total:
@@ -529,7 +554,7 @@ class NodeManager:
         assert count is not None
         return int(count)
 
-    def _availabe_count(self, bucket: NodeBucket, allow_existing: bool) -> int:
+    def _available_count(self, bucket: NodeBucket, allow_existing: bool) -> int:
         available_count_total = bucket.available_count
 
         if allow_existing:
@@ -550,34 +575,42 @@ class NodeManager:
 
     @apitrace
     def add_unmanaged_nodes(self, existing_nodes: List[UnmanagedNode]) -> None:
+        def _bid_and_pg(n: Node) -> Tuple[ht.BucketId, Optional[ht.PlacementGroup]]:
+            return (n.bucket_id, n.placement_group)
 
-        by_key: Dict[ht.BucketId, List[Node]] = partition(
+        by_key: Dict[
+            Tuple[ht.BucketId, Optional[ht.PlacementGroup]], List[Node]
+        ] = partition(
             # typing will complain that List[Node] is List[UnmanagedNode]
             # just a limitation of python3's typing
             existing_nodes,  # type: ignore
-            lambda n: n.bucket_id,
+            _bid_and_pg,
         )
 
-        buckets = partition_single(self.__node_buckets, lambda b: b.bucket_id)
+        buckets = partition_single(
+            self.__node_buckets, lambda b: (b.bucket_id, b.placement_group)
+        )
 
         for key, nodes_list in by_key.items():
             if key in buckets:
-                buckets[ht.BucketId(key)].add_nodes(nodes_list)
+                buckets[key].add_nodes(nodes_list)
                 continue
+
+            bucket_id, placement_group = key
 
             a_node = nodes_list[0]
             # create a null definition, limits and bucket for each
             # unique set of unmanaged nodes
             node_def = NodeDefinition(
                 nodearray=ht.NodeArrayName("__unmanaged__"),
-                bucket_id=key,
+                bucket_id=bucket_id,
                 vm_size=ht.VMSize("unknown"),
                 location=ht.Location("unknown"),
                 spot=False,
                 subnet=ht.SubnetId("unknown"),
                 vcpu_count=a_node.vcpu_count,
                 memory=a_node.memory,
-                placement_group=None,
+                placement_group=placement_group,
                 resources=ht.ResourceDict(dict(deepcopy(a_node.resources))),
                 software_configuration=ImmutableOrderedDict(
                     a_node.software_configuration
@@ -585,6 +618,7 @@ class NodeManager:
             )
 
             limits = null_bucket_limits(len(nodes_list), a_node.vcpu_count)
+
             bucket = NodeBucket(
                 node_def, limits, len(nodes_list), nodes_list, artificial=True
             )
@@ -824,13 +858,18 @@ class NodeManager:
 
             def default_value_func(node: Node) -> ht.ResourceTypeAtom:
                 # already checked if it has a call
+                ret = default_value
                 if isinstance(default_value, str):
                     if default_value.startswith("`") and default_value.endswith("`"):
                         expr = default_value[1:-1]
                         return eval(
                             "(lambda: {})()".format(expr), {"node": node.clone()}
                         )
-                return default_value  # type: ignore
+                    elif re.match("size::[0-9a-zA-Z]+", default_value):
+                        ret = ht.Size.value_of(default_value)
+                    elif re.match("memory::[0-9a-zA-Z]+", default_value):
+                        ret = ht.Memory.value_of(default_value)
+                return ret  # type: ignore
 
         else:
             default_value_func = default_value  # type: ignore
@@ -859,6 +898,27 @@ class NodeManager:
     def _apply_defaults(self, node: Node) -> None:
         for dr in self.__default_resources:
             dr.apply_default(node)
+
+    def add_placement_group(
+        self, pg_name: ht.PlacementGroup, bucket: NodeBucket
+    ) -> None:
+        by_key = partition(
+            self.__node_buckets, lambda b: (b.nodearray, b.placement_group)
+        )
+
+        key = (bucket.nodearray, pg_name)
+
+        if key in by_key:
+            logging.warning(
+                "Bucket with nodearray=%s, vm_size=%s, location=%s and placement group %s already exists. Ignoring",
+                bucket.nodearray,
+                bucket.vm_size,
+                bucket.location,
+                pg_name,
+            )
+            return
+
+        self.__node_buckets.append(bucket.clone_with_placement_group(pg_name))
 
     @apitrace
     def deallocate_nodes(self, nodes: List[Node]) -> DeallocateResult:
@@ -992,6 +1052,7 @@ class NodeManager:
         self.add_default_resource({}, "memgb", MemoryDefault("g"))
         self.add_default_resource({}, "memtb", MemoryDefault("t"))
         self.add_default_resource({}, "nodearray", "node.nodearray")
+        self.add_default_resource({}, "ccnodeid", lambda n: n.delayed_node_id.node_id)
 
     def example_node(self, location: str, vm_size: str) -> Node:
         aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
@@ -1003,6 +1064,7 @@ class NodeManager:
             bucket_id=ht.BucketId("__example_bucket_id__"),
             hostname=None,
             private_ip=None,
+            instance_id=None,
             vm_size=ht.VMSize(vm_size),
             location=ht.Location(location),
             spot=False,
@@ -1026,7 +1088,7 @@ class NodeManager:
         for attr_name in dir(self):
             if not (attr_name[0].isalpha() or attr_name.startswith("_NodeManager")):
                 continue
-            # TODO RDH - we need a better str
+
             if "core_count" in attr_name:
                 continue
 
@@ -1084,7 +1146,7 @@ class MemoryDefault:
 def new_node_manager(
     config: dict,
     existing_nodes: Optional[List[UnmanagedNode]] = None,
-    disable_default_resources: bool = False,
+    disable_default_resources: bool = True,
 ) -> NodeManager:
 
     logging.initialize_logging(config)
@@ -1092,7 +1154,9 @@ def new_node_manager(
     ret = _new_node_manager_79(new_cluster_bindings(config), config)
     existing_nodes = existing_nodes or []
 
-    if not disable_default_resources:
+    if not disable_default_resources or not config.get(
+        "disable_default_resources", False
+    ):
         ret.set_system_default_resources()
 
     for entry in config.get("default_resources", []):
@@ -1179,6 +1243,19 @@ def _new_node_manager_79(
 
     for nodearray_status in cluster_status.nodearrays:
         nodearray = nodearray_status.nodearray
+        is_autoscale_disabled = (
+            not nodearray.get("Configuration", {})
+            .get("autoscale", {})
+            .get("enabled", True)
+        )
+
+        if is_autoscale_disabled:
+            logging.fine(
+                "Ignoring nodearray %s because autoscale.enabled=true",
+                nodearray.get("Name"),
+            )
+            continue
+
         region = nodearray["Region"]
 
         custom_resources = deepcopy(
@@ -1369,6 +1446,7 @@ def _node_from_cc_node(
     vm_size_node = cc_node_rec["MachineType"]
     hostname = cc_node_rec.get("Hostname")
     private_ip = cc_node_rec.get("PrivateIp")
+    instance_id = cc_node_rec.get("InstanceId")
     vcpu_count = cc_node_rec.get("CoreCount") or bucket.virtual_machine.vcpu_count
     node_memory_gb = cc_node_rec.get("Memory") or (bucket.virtual_machine.memory)
 
@@ -1391,6 +1469,7 @@ def _node_from_cc_node(
         vm_size=vm_size_node,
         hostname=hostname,
         private_ip=private_ip,
+        instance_id=instance_id,
         location=region,
         spot=cc_node_rec.get("Interruptible", False),
         vcpu_count=vcpu_count,

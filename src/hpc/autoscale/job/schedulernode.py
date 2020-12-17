@@ -41,6 +41,7 @@ class SchedulerNode(Node):
             bucket_id=bucket_id or ht.BucketId(str(uuid4())),
             hostname=ht.Hostname(hostname),
             private_ip=private_ip,
+            instance_id=None,
             vm_size=ht.VMSize("unknown"),
             location=ht.Location("unknown"),
             spot=False,
@@ -58,30 +59,11 @@ class SchedulerNode(Node):
         )
 
     def to_dict(self) -> typing.Dict:
-        return {
-            "hostname": self.hostname,
-            "job_ids": list(self.assignments),
-            "resources": dict(self.resources),
-            "available": dict(self.available),
-            "bucket-id": self.bucket_id,
-            "metadata": dict(self.metadata),
-        }
-
-    @staticmethod
-    def from_dict(d: typing.Dict) -> "SchedulerNode":
-        hostname = ht.Hostname(d["hostname"])
-        resources = d.get("resources", {})
-        available = d.get("available", {})
-        metadata = d.get("metadata", {})
-        job_ids = d.get("job_ids", [])
-        bucket_id = d.get("bucket-id")
-        ret = SchedulerNode(hostname, resources, bucket_id)
-
-        for job_id in job_ids:
-            ret.assign(job_id)
-
-        ret.available.update(available)
-        ret.metadata.update(metadata)
+        ret = super().to_dict()
+        ret["memory"] = self.memory
+        ret["vcpu-count"] = self.vcpu_count
+        ret["pcpu-count"] = self.pcpu_count
+        ret["gpu-count"] = self.gpu_count
         return ret
 
     def __lt__(self, node: typing.Any) -> int:

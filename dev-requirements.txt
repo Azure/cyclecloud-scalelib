@@ -5,4 +5,9 @@ pytest
 flake8
 hypothesis
 typeguard
-isort
+isort==4.3.21
+requests >= 2.24.0
+typing_extensions
+immutabledict==1.0.0
+jsonpickle==1.4.1
+gnureadline

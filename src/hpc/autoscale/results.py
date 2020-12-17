@@ -328,35 +328,35 @@ class ResultsHandler(ABC):
 @hpcwrapclass
 class DefaultContextHandler(ResultsHandler):
     """
-        This class does the following:
-            1) Logs each result, with a prefix
-                logging.debug("[my-custom-context]: %s", result)
-            2) Collects each result on a per-context basis
-            3) Adds metadata to the nodes so that you can correlate contexts with nodes.
-                if "my-custom-id" in node.metadata["contexts"]:
-                    ...
+    This class does the following:
+        1) Logs each result, with a prefix
+            logging.debug("[my-custom-context]: %s", result)
+        2) Collects each result on a per-context basis
+        3) Adds metadata to the nodes so that you can correlate contexts with nodes.
+            if "my-custom-id" in node.metadata["contexts"]:
+                ...
 
-            handler = ContextHandler("[relevant-id]")
-            results.register_result_handler(handler)
+        handler = ContextHandler("[relevant-id]")
+        results.register_result_handler(handler)
+        ...
+        handler.set_context("[new-id]")
+        node_mgr.allocate...
+        ...
+        handler.set_context("[booting]")
+        node.bootup(subset_of_nodes)
+
+        for result in handler.by_context["[relevant-id]"]:
             ...
-            handler.set_context("[new-id]")
-            node_mgr.allocate...
+
+        for result in handler.by_context["[new-id]"]:
             ...
-            handler.set_context("[booting]")
-            node.bootup(subset_of_nodes)
 
-            for result in handler.by_context["[relevant-id]"]:
+        for result in handler.by_context["[booting]"]:
+            ...
+
+        for node in node.get_nodes():
+            if "[relevant-id]" in node.metadata["contexts"]:
                 ...
-
-            for result in handler.by_context["[new-id]"]:
-                ...
-
-            for result in handler.by_context["[booting]"]:
-                ...
-
-            for node in node.get_nodes():
-                if "[relevant-id]" in node.metadata["contexts"]:
-                    ...
     """
 
     def __init__(self, ctx: Hashable) -> None:

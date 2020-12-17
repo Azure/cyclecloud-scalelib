@@ -20,6 +20,7 @@ from hpc.autoscale.node.nodehistory import NullNodeHistory
 from hpc.autoscale.node.nodemanager import NodeManager
 
 util.set_uuid_func(util.IncrementingUUID())
+vm_sizes.get_aux_vm_size_info("southcentralus", "Standard_F2")
 
 
 def setup_function(function) -> None:
