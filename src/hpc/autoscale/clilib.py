@@ -1433,7 +1433,7 @@ def create_arg_parser(
 
                     if hasattr(attr, "disabled") and getattr(attr, "disabled"):
                         continue
-                    assert attr_name != "autoscale", hasattr(attr, "disabled")
+
                     configure_parser_functions[attr_name] = lambda parser: 0
 
     for cli_name, ap_func in configure_parser_functions.items():
