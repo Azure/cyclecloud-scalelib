@@ -22,6 +22,6 @@ EOF
 
 cat > /etc/profile.d/azscale_autocomplete.sh <<EOF
   #!/usr/bin/env bash
-  eval "\$(/opt/cycle/pbspro/venv/bin/register-python-argcomplete azscale)" || echo "Warning: Autocomplete is disabled for azscale" 1>&2
+  eval "\$( ${venv_bin}/register-python-argcomplete azscale)" || echo "Warning: Autocomplete is disabled for azscale" 1>&2
 EOF
 chmod +x $venv_bin/azscale
