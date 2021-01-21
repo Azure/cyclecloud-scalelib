@@ -24,6 +24,7 @@ class DemandPrinter:
         column_names: Optional[List[str]] = None,
         stream: Optional[TextIO] = None,
         output_format: OutputFormat = "table",
+        long: bool = False,
     ) -> None:
         column_names_list: List[str] = []
 
@@ -44,6 +45,7 @@ class DemandPrinter:
 
         self.stream = stream or sys.stdout
         self.output_format = output_format
+        self.long = long
 
     def _calc_width(self, columns: List[str], rows: List[List[str]]) -> Tuple[int, ...]:
         maxes = [len(c) for c in columns]
@@ -120,7 +122,7 @@ class DemandPrinter:
             name_toks = node.name.split("-")
             if name_toks[-1].isdigit():
                 node_index = int(name_toks[-1])
-                nodearray_ord = [ord(l) for l in node.nodearray]
+                nodearray_ord = [ord(x) for x in node.nodearray]
                 # 2**31 to make these come after private ips
                 # then nodearray name, then index
                 return tuple([2 ** 31] + nodearray_ord + [node_index])
@@ -151,7 +153,10 @@ class DemandPrinter:
                     slice_expr = column[column.index("[") :]
                     column = column.split("[")[0]
                     # TODO maybe parse this instead of eval-ing a lambda
-                    slice = eval("lambda v: v%s" % slice_expr)
+                    if self.long:
+                        slice = lambda v: v  # noqa: E731
+                    else:
+                        slice = eval("lambda v: v%s if v is not None else v" % slice_expr)
 
                 if column == "hostname":
                     hostname = node.hostname
@@ -242,14 +247,17 @@ def print_demand(
     stream: Optional[TextIO] = None,
     output_format: OutputFormat = "table",
     log: bool = False,
+    long: bool = False,
 ) -> None:
     if log:
         stream = logging_stream(stream or sys.stdout)
-    printer = DemandPrinter(columns, stream=stream, output_format=output_format)
+    printer = DemandPrinter(
+        columns, stream=stream, output_format=output_format, long=long
+    )
     printer.print_demand(demand_result)
 
 
-def wrap_text_io(clz: Any) -> Callable[[TextIO], TextIO]:
+def wrap_text_io(clz: Any) -> Callable[[TextIO, Optional[str]], TextIO]:
     members: Dict[str, Any] = {}
     for attr in dir(TextIO):
         if not attr[0].islower() and attr not in [
@@ -275,9 +283,10 @@ def wrap_text_io(clz: Any) -> Callable[[TextIO], TextIO]:
 
 
 class _LoggingStream:
-    def __init__(self, wrapped: TextIO) -> None:
+    def __init__(self, wrapped: TextIO, logger_name: Optional[str] = None) -> None:
         self.line_buffer = io.StringIO()
         self.wrapped = wrapped
+        self.logger_name = logger_name
 
     def write(self, s: str) -> int:
         self.line_buffer.write(s)
@@ -288,11 +297,8 @@ class _LoggingStream:
         if not buf:
             return
         fact = logginglib.getLogRecordFactory()
-        root = logging.getLogger()
-
-        if not root.filters:
-            root.addFilter(ExcludeDemandPrinterFilter("root"))
-
+        logger = logging.getLogger(self.logger_name)
+        created = None
         for line in buf.splitlines(keepends=False):
             record = fact(
                 name="demandprinter",
@@ -302,8 +308,10 @@ class _LoggingStream:
                 msg=line,
                 args=(),
                 exc_info=None,
+                created=created,
             )
-            root.handle(record)
+            created = created or record.created
+            logger.handle(record)
 
         self.line_buffer = io.StringIO()
 
@@ -315,8 +323,9 @@ class _LoggingStream:
 LoggingStream = wrap_text_io(_LoggingStream)
 
 
-def logging_stream(wrapped: TextIO) -> TextIO:
-    return LoggingStream(wrapped)
+def logging_stream(wrapped: TextIO, logger_name: Optional[str] = None) -> TextIO:
+    logger_name = logger_name or "demand"
+    return LoggingStream(wrapped, logger_name)
 
 
 class ExcludeDemandPrinterFilter(logginglib.Filter):

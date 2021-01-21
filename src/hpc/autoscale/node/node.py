@@ -27,7 +27,6 @@ QUERYABLE_PROPERTIES: List[str] = [
     "last_match_time_unix",
     "delete_time_unix",
     "create_time_remaining",
-    "match_time_remaining",
 ]
 
 
@@ -72,7 +71,7 @@ class Node(ABC):
         self.__location = location
         self.__spot = spot
         self.__vcpu_count = vcpu_count
-        assert isinstance(memory, ht.Memory)
+        assert isinstance(memory, ht.Memory), type(memory)
         self.__memory = memory
         self.__infiniband = infiniband
 
@@ -114,6 +113,7 @@ class Node(ABC):
 
     @property
     def required(self) -> bool:
+        """Is this node required by either a job or other reasons, like being marked keep-alive=true"""
         return self.__keep_alive or self._allocated or bool(self.assignments)
 
     @required.setter
@@ -122,6 +122,7 @@ class Node(ABC):
 
     @property
     def keep_alive(self) -> bool:
+        """Is this node protected by CycleCloud to prevent it from being terminated."""
         return self.__keep_alive
 
     @keep_alive.setter
@@ -134,64 +135,82 @@ class Node(ABC):
 
     @nodeproperty
     def name(self) -> ht.NodeName:
+        """Name of the node in CycleCloud, e.g. `execute-1`"""
         return self.__name
 
     @nodeproperty
     def nodearray(self) -> ht.NodeArrayName:
+        """NodeArray name associated with this node, e.g. `execute`"""
         return self.__nodearray
 
     @nodeproperty
     def bucket_id(self) -> ht.BucketId:
+        """UUID for this combination of NodeArray, VM Size and Placement Group"""
         return self.__bucket_id
 
     @nodeproperty
     def vm_size(self) -> ht.VMSize:
+        """Azure VM Size of this node, e.g. `Standard_F2`"""
         return self.__vm_size
 
     @nodeproperty
     def vm_family(self) -> ht.VMFamily:
+        """Azure VM Family of this node, e.g. `standardFFamily`"""
         return ht.VMFamily(self.__aux_vm_info.vm_family)
 
     @nodeproperty
     def hostname(self) -> Optional[ht.Hostname]:
+        """Hostname for this node. May be `None` if the node has not been given one yet"""
         return self.__hostname
 
     @nodeproperty
     def hostname_or_uuid(self) -> Optional[ht.Hostname]:
+        """Hostname or a UUID. Useful when partitioning a mixture of real and potential nodes by hostname"""
         return ht.Hostname(self.__hostname or self.delayed_node_id.transient_id)
 
     @property
     def hostname_required(self) -> ht.Hostname:
+        """
+        Type safe hostname property - it will always return a hostname or an error.
+        """
         if self.hostname is None:
             raise AssertionError("null hostname")
         return ht.Hostname(str(self.hostname))
 
     @nodeproperty
     def private_ip(self) -> Optional[ht.IpAddress]:
+        """Private IP address of the node, if it has one."""
         return self.__private_ip
 
     @nodeproperty
     def location(self) -> ht.Location:
+        """Azure location for this VM, e.g. `westus2`"""
         return self.__location
 
     @nodeproperty
     def spot(self) -> bool:
+        """If true, this node is taking advantage of unused capacity for a cheaper rate"""
         return self.__spot
 
     @nodeproperty
     def vcpu_count(self) -> int:
+        """Virtual CPU Count"""
         return self.__vcpu_count
 
     @nodeproperty
     def memory(self) -> ht.Memory:
+        """Amount of memory, as reported by the Azure API. OS reported memory will differ."""
         return self.__memory
 
     @nodeproperty
     def infiniband(self) -> bool:
+        """Does the VM Size of this node support infiniband"""
         return self.__infiniband
 
     @property
     def state(self) -> ht.NodeStatus:
+        # TODO list out states
+        """State of the node, as reported by CycleCloud."""
         return self.__state
 
     @state.setter
@@ -200,6 +219,7 @@ class Node(ABC):
 
     @property
     def exists(self) -> bool:
+        """Has this node actually been created in CycleCloud yet"""
         return self.__exists
 
     @exists.setter
@@ -208,10 +228,12 @@ class Node(ABC):
 
     @nodeproperty
     def colocated(self) -> bool:
+        """Will this node be put into a VMSS with a placement group, allowing infiniband"""
         return bool(self.placement_group)
 
     @property
     def placement_group(self) -> Optional[ht.PlacementGroup]:
+        """If set, this node is put into a VMSS where all nodes with the same placement group are tightly coupled"""
         return self.__placement_group
 
     @placement_group.setter
@@ -243,6 +265,9 @@ class Node(ABC):
 
     @property
     def resources(self) -> ht.ResourceDict:
+        """
+        Immutable dictionary (str->value) of the node's resources.
+        """
         # for interactive modes
         from hpc.autoscale.clilib import ShellDict
 
@@ -252,6 +277,7 @@ class Node(ABC):
 
     @property
     def managed(self) -> bool:
+        """Is this a CycleCloud managed node or not. Typically only onprem nodes have this set as false"""
         return self.__managed
 
     @managed.setter
@@ -260,6 +286,7 @@ class Node(ABC):
 
     @nodeproperty
     def version(self) -> str:
+        """Internal version property to handle upgrades"""
         return self.__version
 
     @property
@@ -268,6 +295,7 @@ class Node(ABC):
 
     @property
     def instance_id(self) -> Optional[ht.InstanceId]:
+        """Azure VM Instance Id, if the node has a backing VM."""
         return self.__instance_id
 
     @instance_id.setter
@@ -276,18 +304,22 @@ class Node(ABC):
 
     @property
     def vm_capabilities(self) -> Dict[str, Any]:
+        """Dictionary of raw reported VM capabilities by the Azure VM SKU api"""
         return self.__aux_vm_info.capabilities
 
     @nodeproperty
     def pcpu_count(self) -> int:
+        """Physical CPU count"""
         return self.__aux_vm_info.pcpu_count
 
     @nodeproperty
     def gpu_count(self) -> int:
+        """GPU Count"""
         return self.__gpu_count
 
     @nodeproperty
     def cores_per_socket(self) -> int:
+        """CPU cores per CPU socket"""
         return self.__aux_vm_info.cores_per_socket
 
     @property
@@ -312,6 +344,7 @@ class Node(ABC):
 
     @property
     def create_time_unix(self) -> float:
+        """When was this node created, in unix time"""
         return self.__create_time
 
     @create_time_unix.setter
@@ -320,10 +353,12 @@ class Node(ABC):
 
     @nodeproperty
     def create_time(self) -> datetime:
+        """When was this node created, as a datetime"""
         return datetime.fromtimestamp(self.create_time_unix)
 
     @property
     def create_time_remaining(self) -> float:
+        """How much time is remaining for this node to reach the `Ready` state"""
         if self.state == "Ready":
             return -1
         return self.__create_time_remaining
@@ -334,16 +369,18 @@ class Node(ABC):
 
     @property
     def idle_time_remaining(self) -> float:
+        """How much time is remaining for this node to be assigned a job or be marked ready for termination"""
         if self.assignments:
             return -1
         return self.__idle_time_remaining
 
     @idle_time_remaining.setter
     def idle_time_remaining(self, value: float) -> None:
-        self.__idle_time_remaining = max(0, value)
+        self.__idle_time_remaining = max(-1, value)
 
     @property
     def last_match_time_unix(self) -> float:
+        """The last time this node was matched with a job, in unix time."""
         return self.__last_match_time
 
     @last_match_time_unix.setter
@@ -352,10 +389,12 @@ class Node(ABC):
 
     @nodeproperty
     def last_match_time(self) -> datetime:
+        """The last time this node was matched with a job, as datetime."""
         return datetime.fromtimestamp(self.last_match_time_unix)
 
     @property
     def delete_time_unix(self) -> float:
+        """When was this node deleted, in unix time"""
         return self.__delete_time
 
     @delete_time_unix.setter
@@ -364,6 +403,7 @@ class Node(ABC):
 
     @nodeproperty
     def delete_time(self) -> datetime:
+        """When was this node deleted, as datetime"""
         return datetime.fromtimestamp(self.delete_time_unix or 0)
 
     @property
@@ -404,6 +444,9 @@ class Node(ABC):
         if not self.exists:
             ret.node_attribute_overrides.update(deepcopy(self.node_attribute_overrides))
 
+        # for a_id in self.assignments:
+        #     ret.assign(a_id)
+
         return ret
 
     @property
@@ -430,6 +473,7 @@ class Node(ABC):
         """
         Assigns assignment_id if and only if the host has available resources. If successful, this method will decrement resources.
         """
+
         if self.closed:
             return MatchResult("NodeClosed", node=self, slots=iterations,)
 
@@ -470,7 +514,9 @@ class Node(ABC):
                 )
 
         self._allocated = True
-        self.__assignments.add(assignment_id)
+
+        self.assign(assignment_id)
+
         return MatchResult("success", node=self, slots=to_pack)
 
     def assign(self, assignment_id: str) -> None:
@@ -513,6 +559,7 @@ class Node(ABC):
                     new_value,
                 )
         self.available.update(snode.available)
+        self._resources.update(snode.resources)
         # TODO RDH test coverage
         self.required = self.required or snode.required or bool(snode.assignments)
         self.__assignments.update(snode.assignments)
@@ -542,7 +589,7 @@ class Node(ABC):
 
     def __repr__(self) -> str:
         hostname = self.hostname if self.exists else "..."
-        return "Node({}, {}, {})".format(self.name, hostname, self.available)
+        return "Node({}, {}, {})".format(self.name, hostname, self.placement_group)
 
     def __lt__(self, node: Any) -> int:
         return node.hostname_or_uuid < self.hostname_or_uuid
@@ -600,7 +647,10 @@ class Node(ABC):
                 available[key] = ht.Size.value_of(value)
             elif value.startswith("memory::"):
                 available[key] = ht.Memory.value_of(value)
-
+        if d.get("memory"):
+            memory = ht.Memory.value_of(d["memory"])
+        else:
+            memory = aux_info.memory
         ret = Node(
             node_id=DelayedNodeId(name, node_id),
             name=name,
@@ -613,7 +663,7 @@ class Node(ABC):
             location=location,
             spot=d.get("spot", False),
             vcpu_count=d.get("vcpu-count", aux_info.vcpu_count),
-            memory=d.get("memory", aux_info.memory),
+            memory=memory,
             infiniband=aux_info.infiniband,
             state=ht.NodeStatus(d.get("state", "unknown")),
             power_state=ht.NodeStatus("on"),
@@ -665,8 +715,8 @@ class UnmanagedNode(Node):
             vm_size=vm_size,
             location=location,
             spot=False,
-            vcpu_count=aux.vcpu_count,
-            memory=aux.memory,
+            vcpu_count=vcpu_count or aux.vcpu_count,
+            memory=memory or aux.memory,
             infiniband=False,
             state=ht.NodeStatus("running"),
             power_state=ht.NodeStatus("running"),

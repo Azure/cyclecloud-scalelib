@@ -2,9 +2,9 @@ import io
 import json
 
 from hpc.autoscale.hpctypes import Memory
-from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demand import DemandResult
 from hpc.autoscale.job.demandprinter import OutputFormat, print_demand
+from hpc.autoscale.job.schedulernode import SchedulerNode
 
 
 def _print_demand(output_format: OutputFormat) -> str:

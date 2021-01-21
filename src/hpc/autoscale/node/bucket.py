@@ -307,7 +307,7 @@ class NodeBucket:
             new_limits,
             self.max_placement_group_size,
             nodes=[],
-            artificial=True,
+            artificial=False,
         )
 
     def __str__(self) -> str:

@@ -1,6 +1,6 @@
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
-from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.job import Job
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node.nodemanager import new_node_manager
 
 

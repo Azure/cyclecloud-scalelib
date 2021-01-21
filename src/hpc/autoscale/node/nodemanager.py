@@ -40,6 +40,7 @@ from hpc.autoscale.results import (
     BootupResult,
     DeallocateResult,
     DeleteResult,
+    MatchResult,
     RemoveResult,
     SatisfiedResult,
     ShutdownResult,
@@ -82,7 +83,7 @@ class NodeManager:
                 self._node_names[node.name] = True
 
         self.__default_resources: List[_DefaultResource] = []
-
+        self.__journal: List[_JournalEntry] = []
         # list of nodes a user has 'allocated'.
         # self.new_nodes = []  # type: List[Node]
 
@@ -103,6 +104,7 @@ class NodeManager:
         all_or_nothing: bool = False,
         assignment_id: Optional[str] = None,
     ) -> AllocationResult:
+
         if not allow_existing:
             constraints = get_constraints([{"node.exists": False}]) + constraints
 
@@ -124,6 +126,10 @@ class NodeManager:
             return AllocationResult(
                 "NoCandidatesFound", reasons=candidates_result.reasons,
             )
+
+        logging.debug(
+            "Candidates for job %s: %s", assignment_id, candidates_result.candidates
+        )
 
         allocated_nodes = {}
         total_slots_allocated = 0
@@ -270,6 +276,9 @@ class NodeManager:
                 allocated_nodes[node.name] = (node, node)
 
             remaining -= alloc_result.total_slots
+            # TODO hack -
+            if not all_or_nothing:
+                self._commit(bucket, list(allocated_nodes.values()))
 
         if all_or_nothing and remaining > 0:
             self._rollback(bucket)
@@ -318,7 +327,6 @@ class NodeManager:
         assignment_id: Optional[str] = None,
         commit: bool = True,
     ) -> AllocationResult:
-
         for node in bucket.nodes:
             assert node.placement_group == bucket.placement_group
 
@@ -411,20 +419,21 @@ class NodeManager:
                 satisfied = True
 
             if satisfied:
-                temp_node = node.clone()
                 per_node = _per_node(node, constraints)
-                match_result = node.decrement(
-                    constraints, per_node, assignment_id=assignment_id
+                journal_entry = _JournalEntry(
+                    node, constraints, per_node, assignment_id
                 )
+                match_result = journal_entry.precommit()
                 assert match_result
                 slots_allocated += match_result.total_slots
-                allocated_nodes[node.name] = (node, temp_node)
+
+                self.__journal.append(journal_entry)
+                allocated_nodes[node.name] = (node, node)
 
                 if remaining_slots() <= 0:
                     break
 
         while remaining_slots() > 0 and bucket.available_count > 0:
-
             node_name = self._next_node_name(bucket)
             new_node = node_from_bucket(
                 bucket,
@@ -481,6 +490,7 @@ class NodeManager:
             self._commit(bucket, list(allocated_nodes.values()))
 
         allocated_result_nodes = [n[1] for n in allocated_nodes.values()]
+
         return AllocationResult(
             "success", allocated_result_nodes, slots_allocated=slots_allocated
         )
@@ -489,6 +499,9 @@ class NodeManager:
         self, bucket: NodeBucket, allocated_nodes: List[Tuple[Node, Node]]
     ) -> List[Node]:
         # TODO put this logic into the bucket.
+
+        self.__journal = []
+
         by_name = partition(bucket.nodes, lambda n: n.name)
         new_nodes = [n[0] for n in allocated_nodes if not n[0].exists]
 
@@ -500,22 +513,14 @@ class NodeManager:
         for node in new_nodes:
             self._node_names[node.name] = True
 
-        for old_node, new_node in allocated_nodes:
-            old_node._allocated = True
-            if old_node is not new_node:
-                assert old_node.bucket_id == new_node.bucket_id
-                assert old_node.bucket_id == bucket.bucket_id
-                assert new_node not in bucket.nodes
-                if old_node in bucket.nodes:
-                    index = bucket.nodes.index(old_node)
-                    bucket.nodes[index] = new_node
-                else:
-                    bucket.nodes.append(new_node)
-
         bucket.commit()
         return [n[1] for n in allocated_nodes]
 
     def _rollback(self, bucket: NodeBucket) -> None:
+        for entry in self.__journal:
+            entry.rollback()
+
+        self.__journal = []
         bucket.rollback()
         for name in list(self._node_names.keys()):
             if not self._node_names[name]:
@@ -1251,7 +1256,7 @@ def _new_node_manager_79(
 
         if is_autoscale_disabled:
             logging.fine(
-                "Ignoring nodearray %s because autoscale.enabled=true",
+                "Ignoring nodearray %s because autoscale.enabled=false",
                 nodearray.get("Name"),
             )
             continue
@@ -1501,7 +1506,7 @@ class _DefaultResource:
         self.default_value_function = default_value_function
         self.default_value_expr = default_value_expr
         assert not (
-            bool(modifier) ^ bool(modifier_magnitude)
+            bool(modifier) ^ bool(modifier_magnitude is not None)
         ), "Please specify both modifier and modifier_magnitude"
         self.modifier = modifier
         self.modifier_magnitude = modifier_magnitude
@@ -1567,3 +1572,40 @@ class _DefaultResource:
 
     def __repr__(self) -> str:
         return str(self)
+
+
+class _JournalEntry:
+    def __init__(
+        self,
+        node: Node,
+        constraints: List[NodeConstraint],
+        per_node: int,
+        assignment_id: Optional[str],
+    ) -> None:
+        self.node = node
+        self.constraints = constraints
+        self.per_node = per_node
+        self.assignment_id = assignment_id
+        self.invoked = False
+        self.rollback_node: Optional[Node] = None
+
+    def precommit(self) -> MatchResult:
+        assert not self.invoked
+        assert not self.rollback_node
+        self.rollback_node = self.node.clone()
+        result = self.node.decrement(
+            self.constraints, self.per_node, self.assignment_id
+        )
+        self.invoked = True
+        return result
+
+    def rollback(self) -> None:
+        assert self.invoked
+        assert self.rollback_node
+        self.node.update(self.rollback_node)
+        self.rollback_node = None
+
+    def __repr__(self) -> str:
+        return "JournalEntry({}, {}, {}, {})".format(
+            self.node, self.per_node, self.assignment_id, self.constraints
+        )
