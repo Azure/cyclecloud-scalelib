@@ -85,7 +85,9 @@ class ScaleLibCLI(CommonCLI):
     def _initconfig(self, config: Dict) -> None:
         pass
 
-    def _default_output_columns(self, config: Dict) -> List[str]:
+    def _default_output_columns(
+        self, config: Dict, cmd: Optional[str] = None
+    ) -> List[str]:
         return [
             "name",
             "hostname",

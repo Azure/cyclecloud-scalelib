@@ -1,58 +1,65 @@
+import os
 import sys
 import typing
-from uuid import uuid4
 
 from hpc.autoscale.example.readmeutil import clone_dcalc, example, withcontext
 from hpc.autoscale.hpctypes import Memory
-from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.demandcalculator import DemandCalculator, new_demand_calculator
 from hpc.autoscale.job.demandprinter import print_demand
 from hpc.autoscale.job.job import Job
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node.constraints import BaseNodeConstraint
 from hpc.autoscale.node.node import Node, UnmanagedNode
 from hpc.autoscale.node.nodemanager import new_node_manager
-from hpc.autoscale.results import DefaultContextHandler, SatisfiedResult
+from hpc.autoscale.results import SatisfiedResult
 
-CONFIG = {
-    "cluster_name": "example",
-    "url": "https://localhost:7443",
-    "username": "USERNAME",
-    "password": "PASSWORD",
+CONFIG: typing.Dict[str, typing.Any] = {
+    "cluster_name": "sge",
+    "url": "http://localhost:8080",
+    "username": "ryhamel",
+    "password": ")ya58uRU0#m%",
+    "logging": {
+        "config_file": os.path.abspath(os.path.join(__file__, "..", "logging.conf"))
+    },
 }
 
 DRY_RUN = True
+
+if DRY_RUN:
+    SchedulerNode.ignore_hostnames = True
 
 
 @withcontext
 def target_counts_demand() -> None:
     """
-    TODO
+    Handle a mixture of 'target count' style allocation of ncpus and nodes via the
+    DemandCalculator.
     """
     dcalc = new_demand_calculator(CONFIG)
 
-    # # 100 cores
+    # job requires 10 cores (ncpus)
     dcalc.add_job(
         Job(
-            "tc-10",
-            {"node.nodearray": "htc", "ncpus": 1, "exclusive": False},
+            name="tc-10",
+            constraints={"node.nodearray": "htc", "ncpus": 1, "exclusive": False},
             iterations=10,
         )
     )
 
-    # 10 nodes
+    # job requires 10 nodes with 4 cores (ncpus)
     dcalc.add_job(
         Job(
-            "tn-10",
-            {"node.nodearray": "htc", "ncpus": 4, "exclusive": True},
+            name="tn-10",
+            constraints={"node.nodearray": "htc", "ncpus": 4, "exclusive": True},
             node_count=10,
         )
     )
 
-    # 2 x 5 nodes, non-exclusive so a node from tc-10 can be reused
+    # 2 x 5 nodes
     dcalc.add_job(
         Job(
-            "tn-2x5",
-            {"node.nodearray": "htc", "ncpus": 2, "exclusive": True},
+            name="tn-2x5",
+            constraints={"node.nodearray": "htc", "ncpus": 2, "exclusive": True},
             node_count=5,
         ),
     )
@@ -62,20 +69,20 @@ def target_counts_demand() -> None:
     if not DRY_RUN:
         dcalc.bootup()
 
-    print_demand(["name", "job_ids", "nodearray", "ncpus", "*ncpus"], demand_result)
-
-    assert len(demand_result.new_nodes) == 18
+    # note that /ncpus will display available/total. ncpus will display the total, and
+    # *ncpus will display available.
+    print_demand(["name", "job_ids", "nodearray", "/ncpus"], demand_result)
 
 
 @withcontext
 def default_resources() -> None:
     """
-        have printer print out every resource for ever bucket. (and get_columns)
-        add gpus by default (node.gpu_count, node.gpu_sku, node.gpu_vendor)
+    An example of how to programmatically create default resources.
     """
     # now we will disable the default resources, ncpus/pcpus/gpus etc
     # and define them ourselves.
-    node_mgr = new_node_manager(CONFIG, disable_default_resources=True)
+    CONFIG["disable_default_resources"] = True
+    node_mgr = new_node_manager(CONFIG)
 
     # let's define gpus for every node
     # then, for nodes that actually have a gpu, let's set the pcpus
@@ -89,31 +96,47 @@ def default_resources() -> None:
     # now that ngpus is defined, we can use ngpus: 1 here to filter out nodes that
     # have at least one ngpu. Let's set pcpus to 2 * ngpus
     node_mgr.add_default_resource(
-        {"ngpus": 1}, "pcpus", lambda node: node.resources["ngpus"] * 2
+        selection={"ngpus": 1},
+        resource_name="pcpus",
+        default_value=lambda node: node.resources["ngpus"] * 2,
     )
-
-    # and lastly, for all other nodes, we will apply the system defaults
-    node_mgr.set_system_default_resources()
+    # and for nodes without GPUs, let's just use the actual pcpu_count
+    node_mgr.add_default_resource(
+        selection={"ngpus": 0},
+        resource_name="pcpus",
+        default_value=lambda node: node.pcpu_count,
+    )
+    # note that a blank selection would have accomplished the same thing, as default resources
+    # are processed in order.
+    # node_mgr.add_default_resource({}, "pcpus", lambda node: node.pcpu_count)
 
     has_gpu = node_mgr.example_node("southcentralus", "Standard_NV24")
     no_gpu = node_mgr.example_node("southcentralus", "Standard_F16s")
 
-    print(has_gpu.vm_size, " -> %(ngpus)s ngpus %(pcpus)s pcpus" % has_gpu.resources)
-    print(no_gpu.vm_size, " -> %(ngpus)s ngpus %(pcpus)s pcpus" % no_gpu.resources)
+    print(
+        has_gpu.vm_size,
+        "(pcpu_count=%s)" % has_gpu.pcpu_count,
+        "-> %(ngpus)s ngpus %(pcpus)s pcpus" % has_gpu.resources,
+    )
+    print(
+        no_gpu.vm_size,
+        "(pcpu_count=%s)" % has_gpu.pcpu_count,
+        "-> %(ngpus)s ngpus %(pcpus)s pcpus" % no_gpu.resources,
+    )
 
 
 @withcontext
 def target_counts_node_mgr() -> None:
     """
-        break allocate to add_nodes / scale_to
-
+    Handle a mixture of 'target count' style allocation of ncpus and nodes via the
+    NodeMgr.
     """
     node_mgr = new_node_manager(CONFIG)
 
     result = node_mgr.allocate({"node.nodearray": "htc"}, node_count=2)
 
     if result:
-        print("Allocated {} nodes".format(len(result.nodes)))
+        print("Allocated {} nodes.".format(len(result.nodes)))
     else:
         print("Failed! {}".format(result))
 
@@ -171,7 +194,7 @@ def onprem_burst_demand() -> None:
     # onprem:False, as this is only defined on the onprem nodes and not
     # on the Azure nodes.
     print_demand(
-        ["name", "job_ids", "nodetype", "onprem:False", "*ncpus"], demand_result
+        ["name", "job_ids", "nodetype", "onprem:False", "/ncpus"], demand_result
     )
 
 
@@ -215,17 +238,11 @@ def shutdown_nodes_node_mgr() -> None:
 
 
 @example
-def use_result_handler() -> None:
-    # use request_id in context
-    request_id = str(uuid4())
-    handler = DefaultContextHandler("")
-    handler.set_context("[{}]".format(request_id))
-    # ...
-
-
-@example
 def scaling_down_demand() -> None:
-    columns = ["name", "job_ids", "required", "*ncpus"]
+    """
+    Scale-up with 50 ncpus, then scale-down to 25 ncpu
+    """
+    columns = ["name", "job_ids", "required", "/ncpus"]
 
     @withcontext
     def scale_up() -> DemandCalculator:
@@ -242,10 +259,12 @@ def scaling_down_demand() -> None:
 
         print_demand(columns, demand_result)
 
+        dcalc.node_history.conn.close()
+
         return dcalc
 
     @withcontext
-    def scale_down(dcalc: typing.Optional[DemandCalculator]) -> None:
+    def scale_down(dcalc: typing.Optional[DemandCalculator] = None) -> None:
         dcalc = dcalc or new_demand_calculator(CONFIG)
         dcalc.add_job(
             Job("tc-50", {"node.nodearray": "htc", "ncpus": 1}, iterations=25)

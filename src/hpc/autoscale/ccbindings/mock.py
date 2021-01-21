@@ -421,7 +421,7 @@ class MockClusterBinding(ClusterBindingInterface):
         response.target_state = self.target_state
 
         response.nodearrays = list(self.nodearrays.values())
-        # TODO RDH nodes by bucket
+
         if nodes:
             response.nodes = self.get_nodes().nodes
 

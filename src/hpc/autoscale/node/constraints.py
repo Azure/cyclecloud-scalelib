@@ -75,6 +75,35 @@ class BaseNodeConstraint(NodeConstraint):
 
 @hpcwrapclass
 class NodeResourceConstraint(BaseNodeConstraint):
+    """
+    These are constraints that filter out which node is matched based on
+    read-only resources.
+
+    ```json
+    {"custom_string1": "custom_value"}
+    ```
+    ```json
+    {"custom_string2": ["custom_value1", "custom_value2"]}
+    ```
+
+    For read-only integers you can programmatically call NodeResourceConstraint("custom_int", 16)
+    or use a list of integers
+
+    ```json
+    {"custom_integer": [16, 32]}
+    ```
+
+    For shorthand, you can combine the above expressions
+
+    ```json
+    {
+        "custom_string1": "custom_value",
+        "custom_string2": ["custom_value1", "custom_value2"],
+        "custom_integer": [16, 32]
+    }
+    ```
+    """
+
     def __init__(self, attr: str, *values: ht.ResourceTypeAtom) -> None:
         self.attr = attr
         self.values: List[ResourceType] = list(values)
@@ -173,6 +202,25 @@ class NodeResourceConstraint(BaseNodeConstraint):
 
 @hpcwrapclass
 class MinResourcePerNode(BaseNodeConstraint):
+    """
+    Filters for nodes that have at least a certain amount of a resource left to
+    allocate.
+
+    ```json
+    {"ncpus": 1}
+    ```
+    ```json
+    {"mem": "memory::4g"}
+    ```
+    ```json
+    {"ngpus": 4}
+    ```
+    Or, shorthand for combining the above into one expression
+    ```json
+    {"ncpus": 1, "mem": "memory::4g", "ngpus": 4}
+    ```
+    """
+
     def __init__(self, attr: str, value: Union[int, float, ht.Size]) -> None:
         self.attr = attr
         self.value = value
@@ -234,7 +282,12 @@ class MinResourcePerNode(BaseNodeConstraint):
     def minimum_space(self, node: "Node") -> int:
         if self.attr not in node.available:
             return 0
+
         available = node.available[self.attr]
+
+        if self.value == 0:
+            return 2 ** 31
+
         return int(available // self.value)
 
     def __str__(self) -> str:
@@ -249,6 +302,19 @@ class MinResourcePerNode(BaseNodeConstraint):
 
 @hpcwrapclass
 class ExclusiveNode(BaseNodeConstraint):
+    """
+    Defines whether, when allocating, if a node will exclusively run this job.
+    ```json
+    {"exclusive": true}
+    ```
+    -> One and only one iteration of the job can run on this node.
+
+    ```json
+    {"exclusive-task": true}
+    ```
+    -> One or more iterations of the same job can run on this node.
+    """
+
     def __init__(
         self,
         is_exclusive: bool = True,
@@ -256,7 +322,6 @@ class ExclusiveNode(BaseNodeConstraint):
         assignment_id: str = "",
     ) -> None:
         self.is_exclusive = is_exclusive
-        assert self.is_exclusive, "Only exclusive=true is supported at this time"
         self.assignment_id = assignment_id or str(uuid4())
         self.job_exclusive = job_exclusive
 
@@ -266,6 +331,9 @@ class ExclusiveNode(BaseNodeConstraint):
         return bucket_weights
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        if not self.is_exclusive:
+            return SatisfiedResult("success", self, node)
+
         # TODO clean up
         if node.assignments or node.closed:
 
@@ -277,18 +345,9 @@ class ExclusiveNode(BaseNodeConstraint):
         return SatisfiedResult("success", self, node)
 
     def do_decrement(self, node: "Node") -> bool:
-        # if node.closed:
-        #     # the job may not be assigned yet, or we may be packing more than one
-        #     # instance of the job on the machine
-        #     if (not self.is_exclusive) or self.assignment_id not in node.assignments:
-        #         raise RuntimeError(
-        #             "Can not call ExclusiveNode.do_decrement on a closed node! %s %s" % (node, node.assignments)
-        #         )
-        #     # we already marked this node as exclusive
-        #     assert node.closed
-        # elif self.is_exclusive:
-        #     node.closed = True
-        #     assert not node.assignments
+        if not self.is_exclusive:
+            return True
+
         if self.is_exclusive:
             if self.assignment_id in node.assignments:
                 if self.job_exclusive:
@@ -297,6 +356,9 @@ class ExclusiveNode(BaseNodeConstraint):
         return True
 
     def minimum_space(self, node: "Node") -> int:
+        if not self.is_exclusive:
+            return -1
+
         assert self.assignment_id
         assert node.vcpu_count > 0
         if node.assignments:
@@ -317,6 +379,18 @@ class ExclusiveNode(BaseNodeConstraint):
 
 @hpcwrapclass
 class InAPlacementGroup(BaseNodeConstraint):
+    """
+    Ensures that all nodes allocated will be in any placement group or not. Typically
+    this is most useful to prevent a job from being allocated to a node in a placement group.
+
+    ```json
+    {"in-a-placement-group": true}
+    ```
+    ```json
+    {"in-a-placement-group": false}
+    ```
+    """
+
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
         if node.placement_group:
             return SatisfiedResult("success", self, node,)
@@ -342,12 +416,24 @@ class InAPlacementGroup(BaseNodeConstraint):
 
 @hpcwrapclass
 class Or(BaseNodeConstraint):
+    """
+    Logical 'or' for matching a set of child constraints. Given a list of child constraints,
+    the first constraint that matches is the one used to decrement the node. No
+    further constraints are considered after the first child constraint has been satisfied.
+    For example, say we want to use a GPU instance if we can get a spot instance, otherwise
+    we want to use a non-spot CPU instance.
+    ```json
+    {"or": [{"node.vm_size": "Standard_NC6", "node.spot": true},
+            {"node.vm_size": "Standard_F16", "node.spot": false}]
+    }
+    ```
+    """
+
     def __init__(self, *constraints: Union[NodeConstraint, ConstraintDict]) -> None:
         if len(constraints) <= 1:
             raise AssertionError("Or expression requires at least 2 constraints")
         self.constraints = get_constraints(list(constraints))
         self.weight = 100
-        print(self.constraints)
 
     def weight_buckets(
         self, bucket_weights: List[Tuple["NodeBucket", float]]
@@ -411,6 +497,17 @@ class Or(BaseNodeConstraint):
 
 @hpcwrapclass
 class XOr(BaseNodeConstraint):
+    """
+    Similar to the or operation, however one and only one of the child constraints may satisfy
+    the node. Here is a trivial example where we have a failover for allocating to a second
+    region but we ensure that only one of them is valid at a time.
+    ```json
+    {"xor": [{"node.location": "westus2"},
+             {"node.location": "eastus"}]
+    }
+    ```
+    """
+
     def __init__(self, *constraints: Union[NodeConstraint, ConstraintDict]) -> None:
         if len(constraints) <= 1:
             raise AssertionError("XOr expression requires at least 2 constraints")
@@ -496,6 +593,23 @@ class XOr(BaseNodeConstraint):
 
 @hpcwrapclass
 class And(BaseNodeConstraint):
+    """
+    The logical 'and' operator ensures that all of its child constraints are met.
+    ```json
+    {"and": [{"ncpus": 1}, {"mem": "memory::4g"}]}
+    ```
+    Note that and is implied when combining multiple resource definitions in the same
+    dictionary. e.g. the following have identical semantic meaning, the latter being
+    shorthand for the former.
+
+    ```json
+    {"and": [{"ncpus": 1}, {"mem": "memory::4g"}]}
+    ```
+    ```json
+    {"ncpus": 1, "mem": "memory::4g"}
+    ```
+    """
+
     def __init__(self, *constraints: Constraint) -> None:
         #         if len(constraints) == 1 and isinstance(constraints[0], list):
         #             constraints = constraints[0]
@@ -573,6 +687,19 @@ class And(BaseNodeConstraint):
 
 @hpcwrapclass
 class Not(BaseNodeConstraint):
+    """
+    Logical 'not' operator negates the single child constraint.
+
+    Only allocate machines with GPUs
+    ```json
+    {"not": {"node.gpu_count": 0}}
+    ```
+    Only allocate machines with no GPUs available
+    ```json
+    {"not": {"ngpus": 1}}
+    ```
+    """
+
     def __init__(self, condition: Union[NodeConstraint, ConstraintDict]) -> None:
         self.condition = get_constraints([condition])[0]
 
@@ -598,6 +725,22 @@ class Not(BaseNodeConstraint):
 
 @hpcwrapclass
 class NodePropertyConstraint(BaseNodeConstraint):
+    """
+    Similar to NodeResourceConstraint, but these are constraints based purely
+    on the read only node properties, i.e. those starting with 'node.'
+    ```json
+    {"node.vm_size": ["Standard_F16", "Standard_E32"]}
+    ```
+    ```json
+    {"node.location": "westus2"}
+    ```
+    ```json
+    {"node.pcpu_count": 44}
+    ```
+    Note that the last example does not allocate 44 node.pcpu_count, but simply
+    matches nodes that have a pcpu_count of exactly 44.
+    """
+
     def __init__(
         self, attr: str, *values: typing.Union[None, ht.ResourceTypeAtom]
     ) -> None:
@@ -678,6 +821,10 @@ class NodePropertyConstraint(BaseNodeConstraint):
 
 @hpcwrapclass
 class NotAllocated(BaseNodeConstraint):
+    """
+    Deprecated, do not use.
+    """
+
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
 
         if node._allocated:
@@ -698,7 +845,19 @@ class NotAllocated(BaseNodeConstraint):
 
 class Never(BaseNodeConstraint):
     """
-    If you need to insert a constraint that rejects every node.
+    Rejects every node. Most useful when generating a complex node constraint
+    that cannot be determined to be satisfiable until it is generated.
+    For example, say a scheduler supports an 'excluded_users' list for scheduler specific
+    "projects". When constructing a set of constraints you may realize that this user will
+    never be able to run a job on a node with that project.
+    ```json
+    {"or":
+        [{"project": "open"},
+         {"project": "restricted",
+          "never": "User is denied access to this project"}
+        ]
+    }
+    ```
     """
 
     def __init__(self, message: str) -> None:
@@ -755,7 +914,7 @@ class ReadOnlyAlias(BaseNodeConstraint):
         }
 
 
-class SharedResource:
+class SharedResource(ABC):
     def __init__(self, resource_name: str, source: str, current_value: Any) -> None:
         self.resource_name = resource_name
         self.source = source
@@ -822,6 +981,26 @@ class SharedConstraint(BaseNodeConstraint):
 
 
 class SharedConsumableConstraint(SharedConstraint):
+    """
+    Represent a shared consumable resource, for example a queue
+    quota or number of licenses. Please use the SharedConsumableResource
+    object to represent this resource.
+
+    While there is a json representation of this object, it is up to the
+    author to create the SharedConsumableResources programmatically so
+    programmatic creation of this constraint is recommended.
+    ```python
+    # global value
+    SHARED_RESOURCES = [SharedConsumableConstraint(resource_name="licenses",
+                                                   source="/path/to/license_limits",
+                                                   initial_value=1000,
+                                                   current_value=1000)]
+
+    def make_constraint(value: int) -> SharedConsumableConstraint:
+        return SharedConsumableConstraint(SHARED_RESOURCES, value)
+    ```
+    """
+
     def __init__(
         self,
         shared_resources: List[SharedConsumableResource],
@@ -921,6 +1100,25 @@ class SharedConsumableConstraint(SharedConstraint):
 
 
 class SharedNonConsumableConstraint(SharedConstraint):
+    """
+    Similar to a SharedConsumableConstraint, except that the resource that is shared
+    is not consumable (like a string etc). Please use the SharedNonConsumableResource
+    object to represent this resource.
+
+    While there is a json representation of this object, it is up to the
+    author to create the SharedNonConsumableResource programmatically so
+    programmatic creation of this constraint is recommended.
+    ```python
+    # global value
+    SHARED_RESOURCES = [SharedNonConsumableResource(resource_name="prodversion",
+                                                    source="/path/to/prod_version",
+                                                    current_value="1.2.3")]
+
+    def make_constraint(value: str) -> SharedConstraint:
+        return SharedConstraint(SHARED_RESOURCES, value)
+    ```
+    """
+
     def __init__(
         self, shared_resource: SharedNonConsumableResource, target: Any
     ) -> None:
@@ -990,6 +1188,7 @@ def _parse_node_property_constraint(
                 msg = "Expected string, int or boolean for '{}' but got {} at index {}".format(
                     attr, choice, n
                 )
+
                 raise RuntimeError(msg)
         if not isinstance(value, list):
             value = [value]  # type: ignore

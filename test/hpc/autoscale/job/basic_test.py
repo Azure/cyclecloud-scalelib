@@ -6,8 +6,8 @@ import pytest
 from hpc.autoscale import results
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
 from hpc.autoscale.example.basic import BasicDriver, autoscale_driver
-from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.job import Job
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node.node import Node
 
 

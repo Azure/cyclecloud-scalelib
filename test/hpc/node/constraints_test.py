@@ -1,6 +1,6 @@
 from typing import Dict
 
-from hpc.autoscale.job.computenode import SchedulerNode
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node.constraints import (
     BaseNodeConstraint,
     ExclusiveNode,

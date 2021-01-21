@@ -239,8 +239,8 @@ def _assert_success(result, bucket_names, index_start=1):
 
 def _assert_insufficient_resource(result):
     assert not result
-    for child_result in result.child_results:
-        assert "InsufficientResource" == child_result.status, str(result)
+    for reason in result.reasons:
+        assert "InsufficientResource" in reason, str(result)
 
 
 def _assert_no_capacity(result):

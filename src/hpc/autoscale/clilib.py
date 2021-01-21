@@ -21,12 +21,14 @@ from hpc.autoscale.job.demandprinter import OutputFormat
 from hpc.autoscale.job.driver import SchedulerDriver
 from hpc.autoscale.job.job import Job
 from hpc.autoscale.job.schedulernode import SchedulerNode
+from hpc.autoscale.node import node as nodelib
 from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.node.bucket import NodeBucket
 from hpc.autoscale.node.constraints import NodeConstraint, get_constraints
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import NodeHistory
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
+from hpc.autoscale.results import DefaultContextHandler, register_result_handler
 from hpc.autoscale.util import json_dump, load_config, partition_single
 
 
@@ -161,8 +163,6 @@ def shell(config: Dict, shell_locals: Dict[str, Any], script: Optional[str],) ->
     Provides read only interactive shell. type gehelp()
     in the shell for more information
     """
-    # ctx = DefaultContextHandler("[interactive-readonly]")
-
     banner = "\nCycleCloud Autoscale Shell"
     interpreter = ReraiseAssertionInterpreter(locals=shell_locals)
     try:
@@ -200,9 +200,13 @@ def shell(config: Dict, shell_locals: Dict[str, Any], script: Optional[str],) ->
         )
 
     if script:
+
         with open(script) as fr:
             source = fr.read()
-            exec(source, shell_locals, {})
+            # important - if you pass in a separate globals dict then
+            # any locally defined functions will be stored incorrectly
+            # and you will get unknown func errors
+            exec(source, shell_locals, shell_locals)
     else:
         interpreter.interact(banner=banner)
 
@@ -229,8 +233,8 @@ class CommonCLI(ABC):
 
     def shell(self, config: Dict, script: Optional[str] = None) -> None:
         """
-            Interactive python shell with relevant objects in local scope.
-            Use --script to run python scripts
+        Interactive python shell with relevant objects in local scope.
+        Use --script to run python scripts
         """
         shell_locals = self._setup_shell_locals(config)
 
@@ -325,15 +329,23 @@ class CommonCLI(ABC):
         return dcalc, jobs
 
     def _demand(
-        self, config: Dict, driver: Optional[SchedulerDriver] = None
+        self,
+        config: Dict,
+        driver: Optional[SchedulerDriver] = None,
+        ctx_handler: Optional[DefaultContextHandler] = None,
     ) -> DemandCalculator:
         driver = driver or self._driver(config)
+        if not ctx_handler:
+            ctx_handler = self._ctx_handler(config)
+            register_result_handler(ctx_handler)
+
         dcalc, jobs = self._demand_calc(config, driver)
         logging.info(
             "Calculating demand for %s jobs: %s", len(jobs), [j.name for j in jobs]
         )
 
         for job in jobs:
+            ctx_handler.set_context("[Job {}]".format(job.name))
             logging.info("Adding %s", job)
             dcalc.add_job(job)
 
@@ -347,6 +359,9 @@ class CommonCLI(ABC):
 
         return dcalc
 
+    def _ctx_handler(self, config: Dict) -> DefaultContextHandler:
+        return DefaultContextHandler("[{}]".format(self.project_name))
+
     def autoscale_parser(self, parser: ArgumentParser) -> None:
         parser.set_defaults(read_only=False)
         self._add_output_format(parser)
@@ -357,16 +372,29 @@ class CommonCLI(ABC):
         config: Dict,
         output_columns: Optional[List[str]],
         output_format: OutputFormat,
+        dry_run: bool = False,
+        long: bool = False,
     ) -> None:
-        """Dry-run version of autoscale."""
-        output_columns = output_columns or self._default_output_columns(config)
-        # assert not config.get("read_only", False)
-        # if dry_run:
-        #     logging.warning("Running gridengine autoscaler in dry run mode")
-        #     # allow multiple instances
-        #     config["lock_file"] = None
-        #     # put in read only mode
-        #     config["read_only"] = True
+        """End-to-end autoscale process, including creation, deletion and joining of nodes."""
+        try:
+            self.refresh_autocomplete(config)
+        except Exception as e:
+            logging.error(
+                "Ignoring error that occurred while updating autocomplete refresh: %s",
+                e,
+            )
+        output_columns = output_columns or self._get_default_output_columns(config)
+
+        if dry_run:
+            logging.warning("Running gridengine autoscaler in dry run mode")
+            # allow multiple instances
+            config["lock_file"] = None
+            # put in read only mode
+            config["read_only"] = True
+
+        ctx_handler = self._ctx_handler(config)
+
+        register_result_handler(ctx_handler)
 
         driver = self._driver(config)
         driver.initialize()
@@ -386,14 +414,22 @@ class CommonCLI(ABC):
         # nodes in error state must also be deleted
         nodes_to_delete = driver.handle_failed_nodes(invalid_nodes)
 
-        demand_calculator = self._demand(config, driver)
+        demand_calculator = self._demand(config, driver, ctx_handler)
 
         driver.handle_failed_nodes(demand_calculator.node_mgr.get_failed_nodes())
 
         demand_result = demand_calculator.finish()
 
-        # if ctx_handler:
-        #     ctx_handler.set_context("[joining]")
+        if dry_run:
+            demandprinter.print_demand(
+                output_columns,
+                demand_result,
+                output_format=output_format,
+                log=not dry_run,
+                long=long,
+            )
+            return
+        ctx_handler.set_context("[joining]")
 
         # details here are that we pass in nodes that matter (matched) and the driver figures out
         # which ones are new and need to be added via qconf
@@ -403,8 +439,7 @@ class CommonCLI(ABC):
 
         driver.handle_post_join_cluster(joined)
 
-        # if ctx_handler:
-        #     ctx_handler.set_context("[scaling]")
+        ctx_handler.set_context("[scaling]")
 
         # bootup all nodes. Optionally pass in a filtered list
         if demand_result.new_nodes:
@@ -470,7 +505,11 @@ class CommonCLI(ABC):
                 logging.exception(str(e))
 
         demandprinter.print_demand(
-            output_columns, demand_result, output_format=output_format
+            output_columns,
+            demand_result,
+            output_format=output_format,
+            log=not dry_run,
+            long=long,
         )
 
         return demand_result
@@ -484,13 +523,17 @@ class CommonCLI(ABC):
         config: Dict,
         output_columns: Optional[List[str]],
         output_format: OutputFormat,
+        long: bool = False,
     ) -> None:
         """Dry-run version of autoscale."""
-        dcalc = self._demand(config)
-        output_columns = output_columns or self._default_output_columns(config)
-        demandprinter.print_demand(
-            output_columns, dcalc.get_demand(), output_format=output_format
-        )
+        output_columns = output_columns or self._get_default_output_columns(config)
+        self.autoscale(config, output_columns, output_format, dry_run=True)
+
+        # dcalc = self._demand(config)
+        # output_columns = output_columns or self._default_output_columns(config)
+        # demandprinter.print_demand(
+        #     output_columns, dcalc.get_demand(), output_format=output_format
+        # )
 
     def jobs(self, config: Dict) -> None:
         """
@@ -556,11 +599,12 @@ class CommonCLI(ABC):
         node_attribute_overrides: Optional[Dict],
         output_columns: Optional[List[str]],
         output_format: OutputFormat,
+        long: bool = False,
         keep_alive: bool = False,
         dry_run: bool = False,
     ) -> None:
         """
-            Create a set of nodes given various constraints. A CLI version of the nodemanager interface.
+        Create a set of nodes given various constraints. A CLI version of the nodemanager interface.
         """
 
         if nodes < 0 and slots < 0:
@@ -641,11 +685,12 @@ class CommonCLI(ABC):
                 assert bootup_result.nodes
 
                 demandprinter.print_demand(
-                    columns=output_columns or self._default_output_columns(config),
+                    columns=output_columns or self._get_default_output_columns(config),
                     demand_result=DemandResult(
                         bootup_result.nodes, bootup_result.nodes, [], []
                     ),
                     output_format=output_format,
+                    long=long,
                 )
                 return
             else:
@@ -703,7 +748,17 @@ class CommonCLI(ABC):
                 config = load_config(*config)
 
             self._get_example_nodes(config)
-            default_output_columns = self._default_output_columns(config) + []
+            _print(action)
+            _print(dir(action))
+            _print(parser)
+            _print(dir(parser))
+            _print(parsed_args)
+            _print(dir(parsed_args))
+            cmd = None
+            if hasattr(parsed_args, "cmd"):
+                cmd = getattr(parsed_args, "cmd")
+
+            default_output_columns = self._get_default_output_columns(config, cmd) + []
             for node in self.example_nodes:
                 for res_name in node.resources:
                     if res_name not in default_output_columns:
@@ -711,6 +766,10 @@ class CommonCLI(ABC):
                 for meta_name in node.metadata:
                     if meta_name not in default_output_columns:
                         default_output_columns.append(meta_name)
+                for prop in nodelib.QUERYABLE_PROPERTIES:
+                    if prop not in default_output_columns:
+                        default_output_columns.append(prop)
+
             output_prefix = ""
 
             if "," in prefix:
@@ -823,9 +882,73 @@ class CommonCLI(ABC):
         driver.handle_post_delete(nodes)
         print("Removed from cluster {}".format([str(n) for n in nodes]))
 
+    def default_output_columns_parser(self, parser: ArgumentParser) -> None:
+        cmds = [
+            x
+            for x in dir(self)
+            if x[0].isalpha() and hasattr(getattr(self, x), "__call__")
+        ]
+        parser.add_argument("-d", "--command", choices=cmds)
+
+    def default_output_columns(
+        self, config: Dict, command: Optional[str] = None
+    ) -> None:
+        """
+        Output what are the default output columns for an optional command.
+        """
+        self._get_default_output_columns(config)
+        def_cols = self._default_output_columns(config, command)
+        sys.stdout.write("# cli option\n")
+        sys.stdout.write("--output-columns {}\n".format(",".join(def_cols)))
+        sys.stdout.write("# json snippet for autoscale.json\n")
+        sys.stdout.write('"default-output-columns": ')
+        arg_parser = create_arg_parser(self.project_name, self)
+
+        output_columns = {} if command else {"default": def_cols}
+        assert arg_parser._subparsers
+        assert arg_parser._subparsers._actions
+
+        for action in arg_parser._subparsers._actions:
+            if not action.choices:
+                continue
+
+            choices: Dict[str, Any] = action.choices  # type: ignore
+            for cmd_name, choice in choices.items():
+                # if they specified a specific command, filter for it
+                if command and cmd_name != command:
+                    continue
+                for action in choice._actions:
+                    if "--output-columns" in action.option_strings:
+                        output_columns[cmd_name] = self._default_output_columns(
+                            config, cmd_name
+                        )
+
+        json.dump({"output-columns": output_columns}, sys.stdout, indent=2)
+
     @abstractmethod
-    def _default_output_columns(self, config: Dict) -> List[str]:
+    def _default_output_columns(
+        self, config: Dict, cmd: Optional[str] = None
+    ) -> List[str]:
         ...
+
+    def _get_default_output_columns(
+        self, config: Dict, cmd_name: Optional[str] = None
+    ) -> List[str]:
+        cmd_name = cmd_name or traceback.extract_stack()[-2].name
+
+        cmd_specified = config.get("output-columns", {}).get(cmd_name)
+        if cmd_specified:
+            return cmd_specified
+
+        default_specified = config.get("output-columns", {}).get("default")
+        if default_specified:
+            return default_specified
+
+        default_cmd = self._default_output_columns(config, cmd_name)
+        if default_cmd:
+            return default_cmd
+
+        return self._default_output_columns(config)
 
     def nodes_parser(self, parser: ArgumentParser) -> None:
         self._add_output_columns(parser)
@@ -838,6 +961,7 @@ class CommonCLI(ABC):
         constraint_expr: List[str],
         output_columns: List[str],
         output_format: OutputFormat,
+        long: bool = False,
     ) -> None:
         """Query nodes"""
         writer = io.StringIO()
@@ -845,7 +969,7 @@ class CommonCLI(ABC):
         validated_constraints = writer.getvalue()
 
         driver = self._driver(config)
-        output_columns = output_columns or self._default_output_columns(config)
+        output_columns = output_columns or self._get_default_output_columns(config)
         demand_calc, _ = self._demand_calc(config, driver)
 
         filtered = _query_with_constraints(
@@ -854,7 +978,7 @@ class CommonCLI(ABC):
 
         demand_result = DemandResult([], filtered, [], [])
         demandprinter.print_demand(
-            output_columns, demand_result, output_format=output_format
+            output_columns, demand_result, output_format=output_format, long=long,
         )
 
     def buckets_parser(self, parser: ArgumentParser) -> None:
@@ -867,6 +991,7 @@ class CommonCLI(ABC):
         config: Dict,
         constraint_expr: List[str],
         output_format: OutputFormat,
+        long: bool = False,
         output_columns: Optional[List[str]] = None,
     ) -> None:
         """Prints out autoscale bucket information, like limits etc"""
@@ -911,13 +1036,15 @@ class CommonCLI(ABC):
         config["output_columns"] = output_columns
 
         demandprinter.print_demand(
-            output_columns, demand_result, output_format=output_format
+            output_columns, demand_result, output_format=output_format, long=long,
         )
 
     def limits_parser(self, parser: ArgumentParser) -> None:
         self._add_output_format(parser, default="json")
 
-    def limits(self, config: Dict, output_format: OutputFormat) -> None:
+    def limits(
+        self, config: Dict, output_format: OutputFormat, long: bool = False,
+    ) -> None:
         """
         Writes a detailed set of limits for each bucket. Defaults to json due to number of fields.
         """
@@ -951,7 +1078,7 @@ class CommonCLI(ABC):
         )
 
         demandprinter.print_demand(
-            output_columns, demand_result, output_format=output_format
+            output_columns, demand_result, output_format=output_format, long=long,
         )
 
     def config_parser(self, parser: ArgumentParser) -> None:
@@ -1015,10 +1142,15 @@ class CommonCLI(ABC):
     ) -> Tuple[SchedulerDriver, DemandCalculator, List[Node]]:
         hostnames = hostnames or []
         node_names = node_names or []
+
         driver = self._driver(config)
 
         demand_calc = self._demand(config, driver)
         demand_result = demand_calc.finish()
+
+        if hostnames == ["*"] or node_names == ["*"]:
+            return driver, demand_calc, demand_result.compute_nodes
+
         by_hostname = partition_single(
             demand_result.compute_nodes, lambda n: n.hostname_or_uuid.lower()
         )
@@ -1093,6 +1225,13 @@ class CommonCLI(ABC):
 
         self._initconfig_parser(parser)
 
+        parser.add_argument(
+            "--read-only-resources",
+            dest="pbspro__read_only_resources",
+            type=str_list,
+            default=["host", "vnode"],
+        )
+
     @abstractmethod
     def _initconfig_parser(self, parser: ArgumentParser) -> None:
         ...
@@ -1137,6 +1276,7 @@ class CommonCLI(ABC):
         parser.add_argument(  # type: ignore
             "--output-columns", "-o", type=str_list
         ).completer = self._output_columns_completer  # type: ignore
+        parser.add_argument("--long", "-l", action="store_true", default=False)
 
     def _add_output_format(
         self, parser: ArgumentParser, default: OutputFormat = "table"
@@ -1342,7 +1482,7 @@ def _query_with_constraints(
                 )
             if not result:
                 satisfied = False
-                print(result)
+                logging.warning(result)
                 break
 
         if satisfied:

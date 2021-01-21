@@ -151,7 +151,7 @@ class Job:
                 self._constraints,
                 node_count=self.__node_count,
                 allow_existing=allow_existing,
-                all_or_nothing=self.__colocated,
+                all_or_nothing=all_or_nothing or self.colocated,
                 assignment_id=self.name,
             )
 
