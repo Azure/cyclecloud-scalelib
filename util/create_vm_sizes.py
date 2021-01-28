@@ -15,19 +15,18 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
         raw = open(cache_path).read()
     else:
 
-        if which("labrat"):
-            raw = (
-                check_output(
-                    ["labrat", "exec", """/labrat/scripts/az.sh vm list-skus --all"""]
-                )
-                .decode()
-                .replace("\x1b[0m", "")  # formatting chars show up for some reason
-            )
-
-        elif which("az"):
-            raw = check_output(["az", "vm", "list-skus", "--all"]).decode()
+        if which("az"):
+            raw = check_output(
+                [
+                    os.path.expanduser("~/.virtualenvs/azcli/bin/az"),
+                    "vm",
+                    "list-skus",
+                    "--all",
+                ]
+            ).decode()
         else:
-            print("You need either labrat or az cli installed.")
+            print("You need az cli installed.", file=sys.stderr)
+            sys.exit(1)
 
         if cache_path:
             with open(cache_path, "w") as fw:
@@ -58,6 +57,9 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
             min_sku[key] = sku[key]
 
         assert min_sku["family"], sku
+        if not sku["locationInfo"]:
+            print("WARNING: Missing location info. See", min_sku)
+            continue
         min_sku["location"] = sku["locationInfo"][0]["location"]
 
         cap_list = sku["capabilities"]
@@ -92,17 +94,7 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
     for loc, loc_skus in a:
         vm_sizes[loc] = partition_single(loc_skus, lambda s: s["name"])
 
-    if which("labrat"):
-        cs_mts = json.loads(
-            check_output(
-                [
-                    "labrat",
-                    "exec",
-                    "cycle_server execute --format json 'select * from Azure.MachineType'",
-                ]
-            ).decode()
-        )
-    elif which("cycle_server"):
+    if which("cycle_server"):
         cs_mts = json.loads(
             check_output(
                 [
@@ -116,8 +108,7 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
         )
     else:
         print(
-            "Warning: no labrat or cycle_server found! Skipping validation",
-            file=sys.stderr,
+            "Warning: cycle_server found! Skipping validation", file=sys.stderr,
         )
         cs_mts = []
 
@@ -153,9 +144,6 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
         if row["Location"] not in vm_sizes:
             vm_sizes[row["Location"]] = {}
 
-        vm_sizes[row["Location"]][row["Name"]]
-        vm_sizes[row["Location"]]
-
     final_vm_sizes: Dict = {}
     for loc in sorted(vm_sizes):
         final_vm_sizes[loc] = loc_dict = {}
@@ -164,6 +152,33 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
 
     with open("new_vm_sizes.json", "w") as fw:
         json.dump(final_vm_sizes, fw, indent=2)
+
+    with open("../src/hpc/autoscale/node/vm_sizes.json") as fr:
+        old_data = json.load(fr)
+
+    missing_locations = set(old_data.keys()) - set(final_vm_sizes.keys())
+    new_locations = set(final_vm_sizes.keys()) - set(old_data.keys())
+    if missing_locations:
+        print("WARNING: Missing locations:", ",".join(missing_locations))
+    if missing_locations:
+        print("INFO: New locations:", ",".join(new_locations))
+
+    all_locations = list(old_data.keys()) + list(new_locations)
+
+    for location in all_locations:
+        old_loc_data = old_data.get(location, {})
+        new_loc_data = final_vm_sizes.get(location, {})
+        missing_skus = set(old_loc_data.keys()) - set(new_loc_data.keys())
+        new_skus = set(new_loc_data.keys()) - set(old_loc_data.keys())
+        if missing_skus and location not in missing_locations:
+            print(
+                "WARNING: Missing SKUs for location",
+                location,
+                ":",
+                ",".join(missing_skus),
+            )
+        if new_skus and location not in new_locations:
+            print("INFO: New SKUs for location", location, ":", ",".join(new_skus))
 
     print(
         "Copy ./new_vm_sizes.json to ./src/hpc/autoscale/node/vm_sizes.json to complete the creation."

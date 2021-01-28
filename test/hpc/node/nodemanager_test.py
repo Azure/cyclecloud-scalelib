@@ -18,6 +18,8 @@ from hpc.autoscale.results import (
 )
 from hpc.autoscale.util import partition, partition_single
 
+vm_sizes._inititialize_impl()
+
 
 def setup_function(function: Any) -> None:
     SchedulerNode.ignore_hostnames = True
@@ -220,11 +222,15 @@ def test_or_ordering() -> None:
         assert lo.available_count == 10
         result = node_mgr.allocate(
             {
-                "or": [{"nodetype": ordering[0]}, {"nodetype": ordering[1]}],
+                "or": [
+                    {"nodetype": hi.resources["nodetype"]},
+                    {"nodetype": lo.resources["nodetype"]},
+                ],
                 "exclusive": True,
             },
             node_count=15,
         )
+        assert len(result.nodes) == 15
         assert hi.available_count == 0
         assert lo.available_count == 5
         assert result

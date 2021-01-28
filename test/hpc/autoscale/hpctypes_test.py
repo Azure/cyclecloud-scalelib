@@ -1,4 +1,4 @@
-from hpc.autoscale.hpctypes import Memory
+from hpc.autoscale.hpctypes import Memory, add_magnitude_conversion
 
 
 def test_memory() -> None:
@@ -25,3 +25,7 @@ def test_memory() -> None:
 
     assert m("100g") // 9.99 == m("10g")
     assert m("100g") // 10.01 == m("9g")
+
+    # allow schedulers to add custom conversion
+    add_magnitude_conversion("kw", 8 * 1024)
+    assert m("2kw") == m("16k")

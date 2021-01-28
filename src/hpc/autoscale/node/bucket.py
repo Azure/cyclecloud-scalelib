@@ -7,9 +7,10 @@ from immutabledict import ImmutableOrderedDict
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale import util
 from hpc.autoscale.codeanalysis import hpcwrapclass
+from hpc.autoscale.hpctypes import PlacementGroup
 from hpc.autoscale.node import constraints as constraintslib  # noqa: F401
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
-from hpc.autoscale.node.limits import BucketLimits
+from hpc.autoscale.node.limits import BucketLimits, _SharedLimit
 from hpc.autoscale.results import CandidatesResult, Result
 from hpc.autoscale.util import partition
 
@@ -111,6 +112,7 @@ class NodeBucket:
             bucket_id=definition.bucket_id,
             hostname=None,
             private_ip=None,
+            instance_id=None,
             vm_size=definition.vm_size,
             location=self.location,
             spot=definition.spot,
@@ -243,6 +245,10 @@ class NodeBucket:
     def software_configuration(self) -> Dict:
         return self.__definition.software_configuration
 
+    @property
+    def supports_colocation(self) -> bool:
+        return self.software_configuration.get("autoscale", {}).get("is_hpc", True)
+
     def add_nodes(self, nodes: List["Node"]) -> None:
         new_by_id = partition(nodes, lambda n: n.delayed_node_id.transient_id)
         cur_by_id = partition(self.nodes, lambda n: n.delayed_node_id.transient_id)
@@ -258,6 +264,51 @@ class NodeBucket:
         for new_hostname, new_nodes in new_by_hostname.items():
             if new_hostname not in cur_by_hostname:
                 self.nodes.append(new_nodes[0])
+
+    def clone_with_placement_group(self, pg_name: PlacementGroup) -> "NodeBucket":
+        if self.placement_group:
+            # This will help us avoid available_count issues with existing pg limits
+            # when no placement group is defined, the pg limit will be None so
+            # min(self.max_scaleset_size, self.available_count) is valid
+            raise RuntimeError(
+                "clone_with_placement_group is only supported when invoked on a bucket that has no placement group."
+            )
+        new_def = deepcopy(self.__definition)
+        new_def.placement_group = pg_name
+        lim = self.limits
+
+        new_pg_limits = _SharedLimit(
+            "PlacementGroup({})".format(pg_name),
+            consumed_core_count=0,
+            max_core_count=self.max_placement_group_size * self.vcpu_count,
+            consumed_count=0,
+            max_count=self.max_placement_group_size,
+        )
+
+        available_count = min(self.max_placement_group_size, self.available_count)
+
+        new_limits = BucketLimits(
+            self.vcpu_count,
+            regional_limits=lim._regional_limits,
+            cluster_limits=lim._cluster_limits,
+            nodearray_limits=lim._nodearray_limits,
+            family_limits=lim._family_limits,
+            placement_group_limits=new_pg_limits,
+            active_core_count=0,
+            active_count=0,
+            available_core_count=available_count * self.vcpu_count,
+            available_count=available_count,
+            max_core_count=0,
+            max_count=available_count,
+        )
+
+        return NodeBucket(
+            new_def,
+            new_limits,
+            self.max_placement_group_size,
+            nodes=[],
+            artificial=False,
+        )
 
     def __str__(self) -> str:
         if self.placement_group:
@@ -356,6 +407,7 @@ def node_from_bucket(
         vm_size=bucket.vm_size,
         hostname=hostname,
         private_ip=None,
+        instance_id=None,
         location=bucket.location,
         spot=bucket.spot,
         vcpu_count=bucket.vcpu_count,

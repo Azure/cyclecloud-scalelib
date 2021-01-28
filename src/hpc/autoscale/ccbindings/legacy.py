@@ -3,9 +3,12 @@
 #
 
 import json
+import uuid
+from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cyclecloud.api.clusters
+import cyclecloud.session
 import requests
 import urllib3
 from cyclecloud.model.NodeCreationRequestModule import NodeCreationRequest
@@ -14,6 +17,7 @@ from cyclecloud.model.NodeCreationRequestSetDefinitionModule import (
 )
 from cyclecloud.model.NodeCreationRequestSetModule import NodeCreationRequestSet
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
+from cyclecloud.model.NodeCreationResultSetModule import NodeCreationResultSet
 from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementRequestModule import NodeManagementRequest
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
@@ -24,6 +28,7 @@ from urllib3.exceptions import InsecureRequestWarning
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
+from hpc.autoscale.ccbindings.mock import _node_to_ccnode
 from hpc.autoscale.codeanalysis import hpcwrap, hpcwrapclass
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.util import partition
@@ -50,27 +55,39 @@ def notreadonly(method: Callable) -> Callable:
 class ClusterBinding(ClusterBindingInterface):
     def __init__(
         self,
-        cluster_name: ht.ClusterName,
+        config: Dict,
         session: Any,
         client: Any,
         clusters_module: Any = None,
         read_only: bool = False,
     ) -> None:
-        self.__cluster_name = cluster_name
+        self.config = config
+        self.__cluster_name = config["cluster_name"]
         self.session = session
         self.client = client
         self.clusters_module: cyclecloud.api.clusters = cyclecloud.api.clusters
         if clusters_module:
             self.clusters_module = clusters_module  # type: ignore
         self.read_only = read_only
+        self._read_only_nodes: Dict[ht.OperationId, List[Dict]] = {}
 
     @property
     def cluster_name(self) -> ht.ClusterName:
         return self.__cluster_name
 
     @hpcwrap
-    @notreadonly
     def create_nodes(self, nodes: List[Node]) -> NodeCreationResult:
+        if self.read_only:
+            ret = NodeCreationResult()
+            ret.operation_id = str(uuid.uuid4())
+            ret.sets = [NodeCreationResultSet(added=len(nodes))]
+            for n in nodes:
+                n.exists = True
+                n.delayed_node_id.node_id = ht.NodeId("dryrun-" + str(uuid.uuid4()))
+            node_records = [_node_to_ccnode(n) for n in nodes]
+            self._read_only_nodes[ht.OperationId(ret.operation_id)] = node_records
+            return ret
+
         creation_request = NodeCreationRequest()
         creation_request.sets = []
         # the node attributes aren't hashable, so a string representation
@@ -82,6 +99,7 @@ class ClusterBinding(ClusterBindingInterface):
                 n.vm_size,
                 n.placement_group,
                 str(n.node_attribute_overrides),
+                n.keep_alive,
             ),
         )
 
@@ -95,7 +113,7 @@ class ClusterBinding(ClusterBindingInterface):
                 return (n.nodearray, -1)
 
         for key, p_nodes in p_nodes_dict.items():
-            nodearray, vm_size, pg, _ = key
+            nodearray, vm_size, pg, _, keep_alive = key
             request_set = NodeCreationRequestSet()
 
             request_set.nodearray = nodearray
@@ -105,7 +123,14 @@ class ClusterBinding(ClusterBindingInterface):
             request_set.definition.machine_type = vm_size
 
             if p_nodes[0].node_attribute_overrides:
-                request_set.node_attributes = p_nodes[0].node_attribute_overrides
+                request_set.node_attributes = deepcopy(
+                    p_nodes[0].node_attribute_overrides
+                )
+
+            if keep_alive:
+                if not request_set.node_attributes:
+                    request_set.node_attributes = {}
+                request_set.node_attributes["KeepAlive"] = keep_alive
 
             first_node = sorted(p_nodes, key=_node_key)[0]
 
@@ -156,6 +181,9 @@ class ClusterBinding(ClusterBindingInterface):
         http_response, result = self.clusters_module.get_cluster_status(
             self.session, self.cluster_name, nodes
         )
+        if self.read_only and nodes:
+            for nodes_list in self._read_only_nodes.values():
+                result.nodes.extend(nodes_list)
         return result
 
     def get_nodes(
@@ -163,6 +191,14 @@ class ClusterBinding(ClusterBindingInterface):
         operation_id: Optional[ht.OperationId] = None,
         request_id: Optional[ht.RequestId] = None,
     ) -> NodeList:
+        if self.read_only:
+            if operation_id:
+                nodes = self._read_only_nodes.get(operation_id, [])
+            else:
+                nodes = []
+                for sub_list in self._read_only_nodes.values():
+                    nodes.extend(sub_list)
+            return NodeList(nodes=nodes)
 
         http_response, result = self.clusters_module.get_nodes(
             self.session, self.cluster_name, operation_id, request_id
@@ -288,6 +324,40 @@ class ClusterBinding(ClusterBindingInterface):
     @notreadonly
     def delete_nodes(self, nodes: List[Node]) -> NodeManagementResult:
         return self.shutdown_nodes(nodes)
+
+    @notreadonly
+    def retry_failed_nodes(self) -> NodeManagementResult:
+        _request_context = cyclecloud.api.clusters._RequestContext()
+
+        _path_parameters = {}
+        _path_parameters["cluster"] = self.cluster_name
+        _request_context.path = "/cloud/actions/retry/{cluster}".format(
+            **_path_parameters
+        )
+
+        _query: Dict = {}
+        _headers: Dict = {}
+
+        _body = None
+
+        _responses = []
+        _responses.append((200, "object", lambda v: v))
+
+        _status: cyclecloud.session.ResponseStatus
+        _status, _response = self.session.request(
+            _request_context,
+            "POST",
+            query=_query,
+            headers=_headers,
+            body=_body,
+            expected_responses=_responses,
+        )
+        if _status.status_code < 200 or _status.status_code > 299:
+            raise RuntimeError(
+                "Attempt to retry failed nodes did not succeed: %s" % _response
+            )
+
+        return _status, _response
 
     def _log_response(self, s: ResponseStatus, r: Any) -> None:
         if logging.getLogger().getEffectiveLevel() > logging.DEBUG:

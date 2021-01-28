@@ -20,6 +20,7 @@ from hpc.autoscale.node.nodehistory import NullNodeHistory
 from hpc.autoscale.node.nodemanager import NodeManager
 
 util.set_uuid_func(util.IncrementingUUID())
+vm_sizes.get_aux_vm_size_info("southcentralus", "Standard_F2")
 
 
 def setup_function(function) -> None:
@@ -238,8 +239,8 @@ def _assert_success(result, bucket_names, index_start=1):
 
 def _assert_insufficient_resource(result):
     assert not result
-    for child_result in result.child_results:
-        assert "InsufficientResource" == child_result.status, str(result)
+    for reason in result.reasons:
+        assert "InsufficientResource" in reason, str(result)
 
 
 def _assert_no_capacity(result):

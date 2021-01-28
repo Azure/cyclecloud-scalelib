@@ -26,6 +26,15 @@ class PackingStrategy:
 _default_job_id = 0
 
 
+def _check_type(**kwargs: Any) -> None:
+    expected_type = kwargs.pop("type")
+    assert len(kwargs) == 1
+    name, value = list(kwargs.items())[0]
+    assert isinstance(value, expected_type), "{} must be type {}, not {}: '{}'".format(
+        name, expected_type, type(value), value
+    )
+
+
 @hpcwrapclass
 class Job:
     def __init__(
@@ -43,6 +52,8 @@ class Job:
             _default_job_id = _default_job_id + 1
             name = ht.JobId(str(_default_job_id))
 
+        _check_type(name=name, type=str)
+
         if packing_strategy is not None:
             assert PackingStrategy.is_valid(
                 packing_strategy
@@ -54,10 +65,17 @@ class Job:
             self.__packing_strategy = PackingStrategy.PACK
 
         self.__name = ht.JobId(name)
+
+        _check_type(iterations=iterations, type=int)
+
         self.__iterations = iterations
         self.__iterations_remaining = iterations
+
+        _check_type(node_count=node_count, type=int)
         self.__node_count = node_count
         self.__nodes_remaining = node_count
+
+        _check_type(colocated=colocated, type=bool)
         self.__colocated = colocated
         self.__metadata: Dict[str, Any] = {}
 
@@ -133,7 +151,7 @@ class Job:
                 self._constraints,
                 node_count=self.__node_count,
                 allow_existing=allow_existing,
-                all_or_nothing=self.__colocated,
+                all_or_nothing=all_or_nothing or self.colocated,
                 assignment_id=self.name,
             )
 

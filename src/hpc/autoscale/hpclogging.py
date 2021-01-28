@@ -6,8 +6,6 @@ import sys
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-import jsonpickle
-
 _PID = "%-5s" % os.getpid()
 
 
@@ -68,6 +66,8 @@ def reprolog(func: Callable, args: Dict[str, Any], retval: Any) -> Any:
 
     if hasattr(retval, "to_dict"):
         retval = retval.to_dict()
+
+    import jsonpickle
 
     _REPRO_LOGGER.log(
         REPRO,

@@ -56,7 +56,8 @@ class NullNodeHistory(NodeHistory):
         ]
 
 
-def initialize_db(path: str, read_only: bool) -> sqlite3.Connection:
+def initialize_db(path: str, read_only: bool, uri: bool = False) -> sqlite3.Connection:
+    file_uri = path
     try:
         if read_only:
             path = os.path.abspath(path)
@@ -66,9 +67,15 @@ def initialize_db(path: str, read_only: bool) -> sqlite3.Connection:
             else:
                 file_uri = "file://{}?mode=ro".format(path)
             conn = sqlite3.connect(file_uri, uri=True)
+            # uninitialized file conns will fail here, so just
+            # use memory instead
+            try:
+                conn = sqlite3.connect(file_uri, uri=True)
+            except sqlite3.OperationalError:
+                conn = sqlite3.connect("mem:temp", uri=True)
+
         else:
-            file_uri = path
-            conn = sqlite3.connect(path)
+            conn = sqlite3.connect(path, uri=uri)
     except sqlite3.OperationalError as e:
         logging.exception("Error while opening %s - %s", file_uri, e)
         raise
@@ -266,9 +273,14 @@ class SQLiteNodeHistory(NodeHistory):
                     node.create_time_remaining = create_remaining
 
                 if self.last_match_timeout:
-                    match_elapsed = max(0, now - last_match_time)
-                    match_remaining = max(0, self.last_match_timeout - match_elapsed)
-                    node.idle_time_remaining = match_remaining
+                    if node.keep_alive:
+                        node.idle_time_remaining = -1
+                    else:
+                        match_elapsed = max(0, now - last_match_time)
+                        match_remaining = max(
+                            0, self.last_match_timeout - match_elapsed
+                        )
+                        node.idle_time_remaining = match_remaining
 
     def _execute(self, stmt: str) -> sqlite3.Cursor:
         logging.debug(stmt)

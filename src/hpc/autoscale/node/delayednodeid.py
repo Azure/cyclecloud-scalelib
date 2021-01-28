@@ -6,24 +6,24 @@ from hpc.autoscale import hpctypes as ht
 
 class DelayedNodeId:
     """
-        CycleCloud 7.9 does not support providing the NodeId in the
-        creation call, so unfortunately the node id is not set until
-        after the node is created. This class maintains the following ids
+    CycleCloud 7.9 does not support providing the NodeId in the
+    creation call, so unfortunately the node id is not set until
+    after the node is created. This class maintains the following ids
 
-        name: the name of the node.
-        operation_id: the most recent operation id associated with the node
-                            (creation / deallocation / deletion)
-        transient_id: a unique id for this node during this instance of the
-                        node manager.
-        and finally,
-        node_id: the NodeId value from CycleCloud.
+    name: the name of the node.
+    operation_id: the most recent operation id associated with the node
+                        (creation / deallocation / deletion)
+    transient_id: a unique id for this node during this instance of the
+                    node manager.
+    and finally,
+    node_id: the NodeId value from CycleCloud.
 
-        Logging this should capture enough information to track the lifecycle of the
-        node from internal allocation to external creation. Note that if the node
-        already exists, the node_id will always be present.
+    Logging this should capture enough information to track the lifecycle of the
+    node from internal allocation to external creation. Note that if the node
+    already exists, the node_id will always be present.
 
-        NOTE: In future releases of CycleCloud, this will not be required and we
-        should be able to have one unique NodeId.
+    NOTE: In future releases of CycleCloud, this will not be required and we
+    should be able to have one unique NodeId.
     """
 
     def __init__(

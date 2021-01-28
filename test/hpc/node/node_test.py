@@ -1,6 +1,6 @@
 from hpc.autoscale.ccbindings.mock import MockClusterBinding
-from hpc.autoscale.job.computenode import SchedulerNode
 from hpc.autoscale.job.job import Job
+from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node.nodemanager import new_node_manager
 
 
@@ -57,11 +57,6 @@ def test_custom_node_attrs_and_node_config() -> None:
     assert node.software_configuration.get("test_thing") is None
     node.node_attribute_overrides["Configuration"] = {"test_thing": "is set"}
     assert node.software_configuration.get("test_thing") == "is set"
-    try:
-        node.software_configuration["willfail"] = 123
-        assert False
-    except TypeError:
-        pass
 
     # we won't handle dict merges here.
     assert node.software_configuration.get("myscheduler") == {"A": 1}
@@ -77,6 +72,14 @@ def test_custom_node_attrs_and_node_config() -> None:
     node.node_attribute_overrides["Configuration"]["myscheduler"]["B"] = 2
 
     node.node_attribute_overrides["Configuration"] = {"myscheduler": {"A": 1, "B": 2}}
+
+    node.software_configuration["willsucceed"] = 123
+    node.exists = True
+    try:
+        node.software_configuration["willfail"] = 123
+        assert False
+    except TypeError:
+        pass
 
 
 def test_clone() -> None:

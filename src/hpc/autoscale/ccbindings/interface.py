@@ -116,3 +116,7 @@ class ClusterBindingInterface(ABC):
     @abc.abstractmethod
     def delete_nodes(self, nodes: List[node.Node]) -> NodeManagementResult:
         pass
+
+    @abc.abstractmethod
+    def retry_failed_nodes(self) -> NodeManagementResult:
+        pass

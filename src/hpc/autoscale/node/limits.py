@@ -58,7 +58,7 @@ class _SharedLimit:
         new_core_count = self._consumed_core_count + (nodes * cores_per_node)
         if new_core_count > self._max_core_count:
             raise RuntimeError(
-                "OutOfCapacity: Asked for {} * {} cores, which would be over the {} limit ({}/{})".format(
+                "OutOfCapacity: Asked for {} * {} cores, which would be over the {} limit (consumed {} out of {} cores)".format(
                     nodes,
                     cores_per_node,
                     self._name,
@@ -66,16 +66,16 @@ class _SharedLimit:
                     self._max_core_count,
                 )
             )
-        new_node_count = self._consumed_core_count / cores_per_node + nodes
+        new_node_count = self._consumed_core_count // cores_per_node + nodes
+        effective_max_count = self._max_count(cores_per_node)
 
-        if new_node_count > self._max_count(cores_per_node):
+        if new_node_count > effective_max_count:
             raise RuntimeError(
-                "OutOfCapacity: Asked for {} * {} nodes, which would be over the {} limit ({}/{})".format(
+                "OutOfCapacity: Asked for {} nodes, which would be over the {} limit (consumed {} out of {} nodes)".format(
                     nodes,
-                    cores_per_node,
                     self._name,
                     self._consumed_core_count // cores_per_node,
-                    self._max_count(cores_per_node),
+                    effective_max_count,
                 )
             )
 
@@ -95,10 +95,10 @@ class _SharedLimit:
 
 class _SpotLimit:
     """
-        Enabling spot/interruptible 0's out the family limit response
-        as the regional limit is supposed to be used in its place,
-        however that responsibility is on the caller and not the
-        REST api. For this library we handle that for them.
+    Enabling spot/interruptible 0's out the family limit response
+    as the regional limit is supposed to be used in its place,
+    however that responsibility is on the caller and not the
+    REST api. For this library we handle that for them.
     """
 
     def __init__(self, regional_limits: _SharedLimit) -> None:
@@ -220,18 +220,32 @@ class BucketLimits:
 
     @property
     def available_core_count(self) -> int:
+        if self.placement_group_available_count >= 0:
+            return min(
+                self.__available_count,
+                self.placement_group_available_count * self.__vcpu_count,
+            )
         return self.__available_core_count
 
     @property
     def available_count(self) -> int:
+        if self.placement_group_available_count >= 0:
+            return min(self.__available_count, self.placement_group_available_count)
         return self.__available_count
 
     @property
     def max_core_count(self) -> int:
+        if self.placement_group_max_count >= 0:
+            return min(
+                self.__max_core_count,
+                self.placement_group_max_count * self.__vcpu_count,
+            )
         return self.__max_core_count
 
     @property
     def max_count(self) -> int:
+        if self.placement_group_max_count >= 0:
+            return min(self.__max_count, self.placement_group_max_count,)
         return self.__max_count
 
     @property
@@ -318,7 +332,7 @@ class BucketLimits:
 
     def __str__(self) -> str:
 
-        ret = "BucketLimit(vcpu_count={} cores, region={}/{} cores, family={}/{} cores, cluster={}/{} cores, nodearray={}/{} nodes".format(
+        ret = "BucketLimit(vcpu_count={}, region={}/{} vms, family={}/{} vms, cluster={}/{} vms, nodearray={}/{} vms".format(
             self.__vcpu_count,
             self.regional_available_count,
             self.regional_quota_count,

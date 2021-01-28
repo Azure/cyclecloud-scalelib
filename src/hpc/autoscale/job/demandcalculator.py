@@ -28,12 +28,12 @@ from hpc.autoscale.util import (
 @hpcwrapclass
 class DemandCalculator:
     """
-        This class is responsible for calculating what the demand for nodes is based on the Jobs fed into it.
+    This class is responsible for calculating what the demand for nodes is based on the Jobs fed into it.
 
-        NOTE: This class itself will NOT actually invoke the REST api calls required to scale up or down nodes,
-        but instead gives the user the information required to decide what actions to take.
+    NOTE: This class itself will NOT actually invoke the REST api calls required to scale up or down nodes,
+    but instead gives the user the information required to decide what actions to take.
 
-        See the examples for more information.
+    See the examples for more information.
 
     """
 
@@ -126,21 +126,22 @@ class DemandCalculator:
         slots_to_allocate = job.iterations_remaining
         assert job.iterations_remaining > 0
 
-        available_buckets = self.node_mgr.get_buckets()
-        # I don't want to fill up the log with rejecting placement groups
-        # so just filter them here
-        filter_by_colocated = [
-            b for b in available_buckets if bool(b.placement_group) == job.colocated
-        ]
-        candidates_result = job.bucket_candidates(filter_by_colocated)
+        # available_buckets = self.node_mgr.get_buckets()
+        # # I don't want to fill up the log with rejecting placement groups
+        # # so just filter them here
+        # filter_by_colocated = [
+        #     b for b in available_buckets if bool(b.placement_group) == job.colocated
+        # ]
+        # candidates_result = job.bucket_candidates(filter_by_colocated)
 
-        if not candidates_result:
-            # TODO log or something
-            logging.warning("There are no resources to scale up for job %s", job)
-            logging.warning("See below:")
-            for child_result in candidates_result.child_results or []:
-                logging.warning("    %s", child_result.message)
-            return candidates_result
+        # if not candidates_result:
+        #     logging.warning("There are no resources to scale up for job %s", job)
+        #     logging.warning("See below:")
+        #     for child_result in candidates_result.child_results or []:
+        #         logging.warning("    %s", child_result.message)
+        #     return candidates_result
+
+        # logging.debug("Candidates for job %s: %s", job.name, candidates_result.candidates)
 
         failure_reasons = self._handle_allocate(
             job, allocated_nodes, all_or_nothing=False
@@ -233,7 +234,11 @@ class DemandCalculator:
 
         # filter out nodes that have converged.
         booting_nodes = [
-            n for n in booting_nodes if n.exists and n.state not in ["Ready", "Started"]
+            n
+            for n in booting_nodes
+            if n.exists
+            and n.state not in ["Ready", "Started"]
+            and n.delayed_node_id.node_id
         ]
 
         by_id = partition_single(booting_nodes, lambda n: n.delayed_node_id.node_id)
@@ -276,8 +281,10 @@ class DemandCalculator:
         by_hostname: Dict[str, Node] = partition_single(
             self.__scheduler_nodes_queue, lambda n: n.hostname_or_uuid  # type: ignore
         )
+
         for new_snode in scheduler_nodes:
             if new_snode.hostname not in by_hostname:
+
                 logging.debug(
                     "Found new node[hostname=%s] that does not exist in CycleCloud",
                     new_snode.hostname,
@@ -287,12 +294,21 @@ class DemandCalculator:
                 self.node_mgr.add_unmanaged_nodes([new_snode])
 
                 # TODO inform bucket catalog?
-            else:
+            elif new_snode.metadata.get("override_resources", True):
+
                 old_snode = by_hostname[new_snode.hostname_or_uuid]
                 logging.fine(
                     "Found existing CycleCloud node[hostname=%s]", new_snode.hostname,
                 )
                 old_snode.update(new_snode)
+            else:
+                logging.fine(
+                    "Found existing CycleCloud node[hostname=%s], but node.metadata.override_resources=false"
+                    + " so ignoring the reported resources and only copying metadata",
+                    new_snode.hostname,
+                )
+                old_snode = by_hostname[new_snode.hostname_or_uuid]
+                old_snode.metadata.update(new_snode.metadata)
 
     def __str__(self) -> str:
         attrs = []
@@ -364,4 +380,5 @@ def new_demand_calculator(
     dc = DemandCalculator(node_mgr, node_history, node_queue, singleton_lock)
 
     dc.update_scheduler_nodes(existing_nodes)
+
     return dc

@@ -1,23 +1,37 @@
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 
 RESOURCE_FILE = os.path.join(os.path.dirname(__file__), "vm_sizes.json")
-VM_SIZES = {}
+VM_SIZES: Dict[str, Dict] = {}
 
-try:
-    with open(RESOURCE_FILE) as fr:
-        VM_SIZES = json.load(fr)
-except Exception:
-    logging.exception(
-        (
-            "Could not load resource file {}. Auxiliary vm size information "
-            + "(vm_family, gpu_count, capabilities etc) will be unavailable."
-        ).format(RESOURCE_FILE)
-    )
+
+def _inititialize_impl() -> None:
+    global VM_SIZES
+    if VM_SIZES:
+        return
+
+    try:
+        with open(RESOURCE_FILE) as fr:
+            VM_SIZES = json.load(fr)
+    except Exception:
+        logging.exception(
+            (
+                "Could not load resource file {}. Auxiliary vm size information "
+                + "(vm_family, gpu_count, capabilities etc) will be unavailable."
+            ).format(RESOURCE_FILE)
+        )
+
+
+def _initialize(f: Callable) -> Callable:
+    def call_initialize(*args: Any, **kwargs: Any) -> Any:
+        _inititialize_impl()
+        return f(*args, **kwargs)
+
+    return call_initialize
 
 
 class AuxVMSizeInfo:
@@ -65,12 +79,15 @@ class AuxVMSizeInfo:
 
     @property
     def capabilities(self) -> Dict[str, Any]:
-        return self.__capabilities
+        from hpc.autoscale.clilib import ShellDict
+
+        return ShellDict(self.__capabilities)
 
 
 __AUX_CACHE = {}
 
 
+@_initialize
 def get_aux_vm_size_info(location: str, vm_size: str) -> AuxVMSizeInfo:
     key = (location, vm_size)
     if key not in __AUX_CACHE:
@@ -88,6 +105,30 @@ def get_aux_vm_size_info(location: str, vm_size: str) -> AuxVMSizeInfo:
     return __AUX_CACHE[key]
 
 
+@_initialize
+def all_possible_vm_sizes() -> List[str]:
+    ret = set()
+    for by_name in VM_SIZES.values():
+        for vm_size in by_name.keys():
+            ret.add(vm_size)
+    return sorted(list(ret))
+
+
+@_initialize
+def all_possible_vm_families() -> List[str]:
+    ret = set()
+    for by_name in VM_SIZES.values():
+        for aux_info in by_name.values():
+            ret.add(aux_info["family"])
+    return sorted(list(ret))
+
+
+@_initialize
+def all_possible_locations() -> List[str]:
+    return sorted(list(VM_SIZES.keys()))
+
+
+@_initialize
 def main() -> None:
     record = VM_SIZES["southcentralus"]["Standard_M208ms_v2"]
     for vm_size_name, record in VM_SIZES["southcentralus"].items():

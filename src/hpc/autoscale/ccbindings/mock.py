@@ -42,7 +42,6 @@ from hpc.autoscale.hpctypes import (
     RequestId,
     VMSize,
 )
-from hpc.autoscale.node import vm_sizes
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.util import partition
@@ -134,6 +133,8 @@ class MockClusterBinding(ClusterBindingInterface):
         nodearray_status = self.nodearrays[nodearray_name]
         location = nodearray_status.nodearray["Region"]
 
+        from hpc.autoscale.node import vm_sizes
+
         aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
 
         na_max_count = nodearray_status.max_count
@@ -223,6 +224,8 @@ class MockClusterBinding(ClusterBindingInterface):
     def _get_buckets(
         self, location: str, vm_family: str
     ) -> List[NodearrayBucketStatus]:
+        from hpc.autoscale.node import vm_sizes
+
         ret = []
         for _, cluster_nodearray_status in self.nodearrays.items():
 
@@ -235,6 +238,9 @@ class MockClusterBinding(ClusterBindingInterface):
                 if aux_info.vm_family == vm_family:
                     ret.append(bucket)
         return ret
+
+    def retry_failed_nodes(self) -> NodeManagementResult:
+        raise RuntimeError("Not implemented")
 
     def add_node(
         self,
@@ -292,6 +298,7 @@ class MockClusterBinding(ClusterBindingInterface):
             bucket_id=bucket.bucket_id,
             hostname=hostname,
             private_ip=None,
+            instance_id=None,
             vm_size=vm_size,
             location=nodearray_record["Region"],
             spot=spot,
@@ -414,7 +421,7 @@ class MockClusterBinding(ClusterBindingInterface):
         response.target_state = self.target_state
 
         response.nodearrays = list(self.nodearrays.values())
-        # TODO RDH nodes by bucket
+
         if nodes:
             response.nodes = self.get_nodes().nodes
 

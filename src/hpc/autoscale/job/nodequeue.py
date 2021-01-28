@@ -25,6 +25,8 @@ class NodeQueue:
         return EarlyBailoutResult("success")
 
     def push(self, node: Node) -> None:
+        if node in self:
+            return
         heap_item = (self.node_priority(node), node)
         heapq.heappush(self._heap, heap_item)
 
