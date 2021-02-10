@@ -585,6 +585,9 @@ class Node(ABC):
         self.__available = ShellDict(self.__available)  # type: ignore
         self.__metadata = ShellDict(self.__metadata)  # type: ignore
 
+    def _is_example_node(self) -> bool:
+        return self.name == "{}-0".format(self.nodearray)
+
     def __str__(self) -> str:
         if self.name.endswith("-0"):
             return "NodeBucket(nodearray={}, vm_size={}, pg={})".format(

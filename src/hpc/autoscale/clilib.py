@@ -28,7 +28,14 @@ from hpc.autoscale.node.constraints import NodeConstraint, get_constraints
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import NodeHistory
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
-from hpc.autoscale.results import DefaultContextHandler, register_result_handler
+from hpc.autoscale.results import (
+    AllocationResult,
+    CandidatesResult,
+    DefaultContextHandler,
+    EarlyBailoutResult,
+    MatchResult,
+    register_result_handler,
+)
 from hpc.autoscale.util import json_dump, load_config, partition_single
 
 
@@ -527,13 +534,7 @@ class CommonCLI(ABC):
     ) -> None:
         """Dry-run version of autoscale."""
         output_columns = output_columns or self._get_default_output_columns(config)
-        self.autoscale(config, output_columns, output_format, dry_run=True)
-
-        # dcalc = self._demand(config)
-        # output_columns = output_columns or self._default_output_columns(config)
-        # demandprinter.print_demand(
-        #     output_columns, dcalc.get_demand(), output_format=output_format
-        # )
+        self.autoscale(config, output_columns, output_format, dry_run=True, long=long)
 
     def jobs(self, config: Dict) -> None:
         """
@@ -795,11 +796,14 @@ class CommonCLI(ABC):
             filtered_nodes = self.example_nodes
             if hasattr(parsed_args, "nodearray") and parsed_args.nodearray:
                 filtered_nodes = [
-                    n for n in self.example_nodes if n.nodearray == parsed_args.nodearray
+                    n
+                    for n in self.example_nodes
+                    if n.nodearray == parsed_args.nodearray
                 ]
             return list(set([x.vm_size for x in filtered_nodes]))
         except:
             import traceback
+
             _print(traceback.format_exc())
             raise
 
@@ -878,15 +882,21 @@ class CommonCLI(ABC):
                         node,
                     )
 
-        driver.handle_draining(nodes)
-        print("Drained {}".format([str(n) for n in nodes]))
+        drained_nodes = driver.handle_draining(nodes) or []
+        print("Drained the following nodes that have joined PBS:")
+        for n in drained_nodes:
+            print("   ", n)
 
         if do_delete:
-            demand_calc.delete(nodes)
-            print("Deleting {}".format([str(n) for n in nodes]))
+            result = demand_calc.delete(nodes)
+            print("Deleting the following nodes:")
+            for n in result.nodes or []:
+                print("   ", n)
 
-        driver.handle_post_delete(nodes)
-        print("Removed from cluster {}".format([str(n) for n in nodes]))
+        removed_nodes = driver.handle_post_delete(nodes) or []
+        print("Removed the following nodes from PBS:")
+        for n in removed_nodes:
+            print("   ", n)
 
     def default_output_columns_parser(self, parser: ArgumentParser) -> None:
         cmds = [
@@ -1258,6 +1268,64 @@ class CommonCLI(ABC):
     @abstractmethod
     def _initconfig(self, config: Dict) -> None:
         ...
+
+    def analyze_parser(self, parser: ArgumentParser) -> None:
+        parser.add_argument("--job-id", "-j", required=True)
+        parser.add_argument("--long", "-l", action="store_true", default=False)
+
+    def analyze(self, config: Dict, job_id: str, long: bool = False,) -> None:
+        if not long:
+            try:
+                _, columns_str = os.popen("stty size", "r").read().split()
+            except Exception:
+                columns_str = "120"
+            columns = int(columns_str)
+        else:
+            columns = 2 ** 31
+
+        ctx_handler = DefaultContextHandler("[demand-cli]")
+
+        register_result_handler(ctx_handler)
+        dcalc = self._demand(config, ctx_handler=ctx_handler)
+
+        key = "[Job {}]".format(job_id)
+        if key not in ctx_handler.by_context:
+            found_nodes = []
+            for node in dcalc.get_demand().compute_nodes:
+                if job_id in node.assignments:
+                    found_nodes.append(node)
+            if found_nodes:
+                print("Job {} is assigned to the following nodes:".format(job_id))
+                for node in found_nodes:
+                    print("   ", node)
+                return
+            else:
+                print("Unknown job id {}".format(job_id), file=sys.stderr)
+                sys.exit(1)
+
+        results = ctx_handler.by_context[key]
+        for result in results:
+            if isinstance(result, (EarlyBailoutResult, MatchResult)) and result:
+                continue
+
+            if not long and result.status == "CompoundFailure":
+                continue
+
+            if not result:
+
+                whitespace = " " * max(1, 24 - len(result.status))
+                message_lines = result.message.splitlines()
+                if len(message_lines) > 1:
+                    print()
+                prefix = result.status + whitespace + ":"
+                line_columns = max(20, columns - len(prefix) - 1)
+
+                print(prefix, message_lines[0][:line_columns], end="")
+                print()
+
+                for line in message_lines[1:]:
+                    print(" " * len(prefix), line[:line_columns], end="")
+                    print()
 
     def _add_constraint_expr(self, parser: ArgumentParser) -> None:
         parser.add_argument(  # type: ignore
@@ -1634,8 +1702,10 @@ def main(
         getattr(module, "_initialize")(args.cmd, args.config)
     try:
         args.func(**kwargs)
+    except AssertionError as e:
+        raise
     except Exception as e:
-        print(str(e), file=sys.stderr)
+        print("Error '%s': See the rest in the log file" % str(e), file=sys.stderr)
         if hasattr(e, "message"):
             print(getattr(e, "message"), file=sys.stderr)
 
