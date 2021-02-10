@@ -248,11 +248,13 @@ class MockClusterBinding(ClusterBindingInterface):
         nodearray: NodeArrayName,
         vm_size: VMSize = None,
         state: NodeStatus = NodeStatus("Started"),
+        target_state: Optional[NodeStatus] = None,
         hostname: Optional[Hostname] = None,
         spot: bool = False,
         placement_group: str = None,
         keep_alive: bool = False,
     ) -> Node:
+        target_state = target_state or state
         assert nodearray in self.nodearrays
         nodearray_status = self.nodearrays[nodearray]
         nodearray_record = nodearray_status.nodearray
@@ -306,6 +308,7 @@ class MockClusterBinding(ClusterBindingInterface):
             memory=Memory(bucket.virtual_machine.memory, "g"),
             infiniband=False,
             state=state,
+            target_state=target_state,
             power_state=state,
             exists=True,
             placement_group=placement_group,

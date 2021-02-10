@@ -52,6 +52,7 @@ class Node(ABC):
         memory: ht.Memory,
         infiniband: bool,
         state: ht.NodeStatus,
+        target_state: ht.NodeStatus,
         power_state: ht.NodeStatus,
         exists: bool,
         placement_group: Optional[ht.PlacementGroup],
@@ -79,6 +80,7 @@ class Node(ABC):
         self.__available = deepcopy(self._resources)
 
         self.__state = state
+        self.__target_state = target_state
         self.__exists = exists
         self.__placement_group = None
         # call the setter for extra validation
@@ -216,6 +218,16 @@ class Node(ABC):
     @state.setter
     def state(self, value: ht.NodeStatus) -> None:
         self.__state = value
+
+    @property
+    def target_state(self) -> ht.NodeStatus:
+        # TODO list out states
+        """State of the node, as reported by CycleCloud."""
+        return self.__target_state
+
+    @target_state.setter
+    def target_state(self, value: ht.NodeStatus) -> None:
+        self.__target_state = value
 
     @property
     def exists(self) -> bool:
@@ -430,6 +442,7 @@ class Node(ABC):
             memory=self.memory,
             infiniband=self.infiniband,
             state=self.state,
+            target_state=self.target_state,
             power_state=self.state,
             exists=self.exists,
             placement_group=self.placement_group,
@@ -666,6 +679,7 @@ class Node(ABC):
             memory=memory,
             infiniband=aux_info.infiniband,
             state=ht.NodeStatus(d.get("state", "unknown")),
+            target_state=ht.NodeStatus(d.get("state", "unknown")),
             power_state=ht.NodeStatus("on"),
             exists=d.get("exists", True),
             placement_group=d.get("placement_group"),
@@ -719,6 +733,7 @@ class UnmanagedNode(Node):
             memory=memory or aux.memory,
             infiniband=False,
             state=ht.NodeStatus("running"),
+            target_state=ht.NodeStatus("running"),
             power_state=ht.NodeStatus("running"),
             exists=True,
             placement_group=placement_group,

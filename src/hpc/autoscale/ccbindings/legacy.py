@@ -83,6 +83,7 @@ class ClusterBinding(ClusterBindingInterface):
             ret.sets = [NodeCreationResultSet(added=len(nodes))]
             for n in nodes:
                 n.exists = True
+                n.target_state = "Started"
                 n.delayed_node_id.node_id = ht.NodeId("dryrun-" + str(uuid.uuid4()))
             node_records = [_node_to_ccnode(n) for n in nodes]
             self._read_only_nodes[ht.OperationId(ret.operation_id)] = node_records
