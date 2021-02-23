@@ -781,7 +781,9 @@ class NodeManager:
                 else:
                     node.state = ht.NodeStatus("Unknown")
 
-        return BootupResult("success", operation_id, request_id, booted_nodes)
+        return BootupResult(
+            "success", ht.OperationId(operation_id), request_id, booted_nodes
+        )
 
     @property
     def cluster_max_core_count(self) -> int:
@@ -828,6 +830,7 @@ class NodeManager:
         default_value: Union[ht.ResourceTypeAtom, DefaultValueFunc],
         modifier: Optional[ResourceModifier] = None,
         modifier_magnitude: Optional[Union[int, float]] = None,
+        allow_none: bool = True,
     ) -> None:
         if isinstance(default_value, str):
             if default_value.startswith("node."):
@@ -928,6 +931,7 @@ class NodeManager:
             default_value_expr,
             modifier,
             modifier_magnitude,
+            allow_none,
         )
         self.__default_resources.append(dr)
         self._apply_defaults_all()
@@ -1335,6 +1339,9 @@ def _new_node_manager_79(
         spot = nodearray.get("Interruptible", False)
 
         for bucket in nodearray_status.buckets:
+            if not bucket.valid:
+                continue
+
             vcpu_count = bucket.virtual_machine.vcpu_count
 
             aux_vm_info = vm_sizes.get_aux_vm_size_info(
@@ -1387,8 +1394,9 @@ def _new_node_manager_79(
             if None not in placement_groups:
                 placement_groups[None] = None
 
-            for pg_name, pg_status in placement_groups.items():
+            assert placement_groups
 
+            for pg_name, pg_status in placement_groups.items():
                 placement_group_limit = None
                 if pg_name:
                     placement_group_limit = _SharedLimit(
@@ -1443,6 +1451,12 @@ def _new_node_manager_79(
                 nodes = []
 
                 for cc_node_rec in cc_node_records:
+                    if cc_node_rec.get("TargetState") not in ["Started", "Deallocated"]:
+                        logging.fine(
+                            "Ignoring CycleCloud node %(Name)s (%(NodeId)s) with TargetState=%(TargetState)s"
+                            % cc_node_rec
+                        )
+                        continue
                     node = _node_from_cc_node(cc_node_rec, bucket, region)
                     nodes.append(node)
 
@@ -1548,6 +1562,7 @@ class _DefaultResource:
         default_value_expr: str,
         modifier: Optional[ResourceModifier],
         modifier_magnitude: Optional[Union[int, float, ht.Memory]],
+        allow_none: bool,
     ) -> None:
         self.selection = selection
         self.resource_name = resource_name
@@ -1558,6 +1573,7 @@ class _DefaultResource:
         ), "Please specify both modifier and modifier_magnitude"
         self.modifier = modifier
         self.modifier_magnitude = modifier_magnitude
+        self.allow_none = allow_none
 
     def apply_default(self, node: Node) -> None:
 
@@ -1571,6 +1587,13 @@ class _DefaultResource:
 
         # it met all of our criteria, so set the default
         default_value = self.default_value_function(node)
+
+        if default_value is None and not self.allow_none:
+            logging.fine(
+                "Ignoring default value None for resource %s", self.resource_name
+            )
+            return
+
         if self.modifier and default_value is not None:
             if not isinstance(default_value, (float, int, ht.Memory)):
                 raise RuntimeError(

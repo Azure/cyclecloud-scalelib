@@ -123,11 +123,9 @@ class SingletonFileLock(SingletonLock):
             self.lockfp.write(str(os.getpid()))
             self.lockfp.flush()
         except IOError:
-            with open(self.lockpath) as fr:
-                pid = fr.read()
             raise MultipleInstancesError(
-                "Could not acquire lock ({}) - more than one instance is running (pid {}).".format(
-                    self.lockpath, pid,
+                "Could not acquire lock ({}) - more than one instance is running.".format(
+                    self.lockpath,
                 )
             )
 

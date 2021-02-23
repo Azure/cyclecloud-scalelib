@@ -832,7 +832,7 @@ class NodePropertyConstraint(BaseNodeConstraint):
             node_str = "Node[name={} attr={}]".format(node.name, self.attr)
 
         if len(self.values) > 1:
-            return "Property[name={} value={}] is not one of the options {} for {}}".format(
+            return "Property[name={} value={}] is not one of the options {} for {}".format(
                 self.attr, target, self.values, node_str
             )
         else:

@@ -111,7 +111,6 @@ class Node(ABC):
         self.__gpu_count = (
             gpu_count if gpu_count is not None else self.__aux_vm_info.gpu_count
         )
-        assert self.memory >= 0, self.memory
 
     @property
     def required(self) -> bool:
@@ -664,7 +663,7 @@ class Node(ABC):
             elif value.startswith("memory::"):
                 available[key] = ht.Memory.value_of(value)
         if d.get("memory"):
-            memory = ht.Memory.value_of(d["memory"])
+            memory: ht.Memory = ht.Memory.value_of(d["memory"])  # type: ignore
         else:
             memory = aux_info.memory
         ret = Node(

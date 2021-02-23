@@ -29,8 +29,6 @@ from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import NodeHistory
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
 from hpc.autoscale.results import (
-    AllocationResult,
-    CandidatesResult,
     DefaultContextHandler,
     EarlyBailoutResult,
     MatchResult,
@@ -40,8 +38,11 @@ from hpc.autoscale.util import json_dump, load_config, partition_single
 
 
 def _print(*msg: Any) -> None:
-    with open("/tmp/prefix.log", "a") as fw:
-        print(*msg, file=fw)
+    if os.getenv("SCALELIB_AUTOCOMPLETE_LOG"):
+        log_file = os.getenv("SCALELIB_AUTOCOMPLETE_LOG")
+        assert log_file
+        with open(log_file, "a") as fw:
+            print(*msg, file=fw)
 
 
 def error(msg: Any, *args: Any) -> None:
@@ -82,7 +83,9 @@ def constraint_type(c: Union[str, List[str]]) -> str:
         values_converted = []
         for v in values:
             converted: Union[int, float, bool, str, None] = v
-            if v.lower() in ["true", "false"]:
+            if v.startswith('"') and v.endswith('"'):
+                converted = v.lstrip('"').rstrip('"')
+            elif v.lower() in ["true", "false"]:
                 converted = v.lower() == "true"
             else:
                 try:
@@ -229,6 +232,7 @@ class CommonCLI(ABC):
         self.example_nodes: List[Node] = []
         self.node_names: List[str] = []
         self.hostnames: List[str] = []
+        self.__node_mgr: Optional[NodeManager] = None
 
     @abstractmethod
     def _setup_shell_locals(self, config: Dict) -> Dict:
@@ -305,12 +309,15 @@ class CommonCLI(ABC):
     def _node_mgr(
         self, config: Dict, driver: Optional[SchedulerDriver] = None
     ) -> NodeManager:
+        if self.__node_mgr is not None:
+            return self.__node_mgr
         driver = driver or self._driver(config)
         config = driver.preprocess_config(config)
         jobs, nodes = driver.read_jobs_and_nodes(config)
         node_mgr = new_node_manager(config, existing_nodes=nodes)
         driver.preprocess_node_mgr(config, node_mgr)
-        return node_mgr
+        self.__node_mgr = node_mgr
+        return self.__node_mgr
 
     def _node_history(self, config: Dict) -> NodeHistory:
         return self._driver(config).new_node_history(config)
@@ -383,13 +390,7 @@ class CommonCLI(ABC):
         long: bool = False,
     ) -> None:
         """End-to-end autoscale process, including creation, deletion and joining of nodes."""
-        try:
-            self.refresh_autocomplete(config)
-        except Exception as e:
-            logging.error(
-                "Ignoring error that occurred while updating autocomplete refresh: %s",
-                e,
-            )
+
         output_columns = output_columns or self._get_default_output_columns(config)
 
         if dry_run:
@@ -419,11 +420,14 @@ class CommonCLI(ABC):
                 invalid_nodes.append(snode)
 
         # nodes in error state must also be deleted
+
         nodes_to_delete = driver.handle_failed_nodes(invalid_nodes)
 
         demand_calculator = self._demand(config, driver, ctx_handler)
 
-        driver.handle_failed_nodes(demand_calculator.node_mgr.get_failed_nodes())
+        failed_nodes = demand_calculator.node_mgr.get_failed_nodes()
+        failed_nodes_to_delete = driver.handle_failed_nodes(failed_nodes)
+        nodes_to_delete.extend(failed_nodes_to_delete)
 
         demand_result = demand_calculator.finish()
 
@@ -518,6 +522,14 @@ class CommonCLI(ABC):
             log=not dry_run,
             long=long,
         )
+
+        try:
+            self.refresh_autocomplete(config)
+        except Exception as e:
+            logging.error(
+                "Ignoring error that occurred while updating autocomplete refresh: %s",
+                e,
+            )
 
         return demand_result
 
@@ -801,7 +813,7 @@ class CommonCLI(ABC):
                     if n.nodearray == parsed_args.nodearray
                 ]
             return list(set([x.vm_size for x in filtered_nodes]))
-        except:
+        except Exception:
             import traceback
 
             _print(traceback.format_exc())
@@ -816,8 +828,11 @@ class CommonCLI(ABC):
         self, config: Dict, hostnames: List[str], node_names: List[str]
     ) -> None:
         """Adds selected nodes to the scheduler"""
-        pbs_driver, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
-        pbs_driver.add_nodes_to_cluster(nodes)
+        driver, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
+        joined_nodes = driver.add_nodes_to_cluster(nodes)
+        print("Joined the following nodes:")
+        for n in joined_nodes or []:
+            print("   ", n)
 
     def retry_failed_nodes_parser(self, parser: ArgumentParser) -> None:
         parser.set_defaults(read_only=False)
@@ -981,7 +996,7 @@ class CommonCLI(ABC):
     ) -> None:
         """Query nodes"""
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer=writer)
+        self.validate_constraint(config, constraint_expr, writer=io.StringIO())
         validated_constraints = writer.getvalue()
 
         driver = self._driver(config)
@@ -1110,7 +1125,11 @@ class CommonCLI(ABC):
         self._add_constraint_expr(parser)
 
     def validate_constraint(
-        self, config: Dict, constraint_expr: List[str], writer: TextIO = sys.stdout
+        self,
+        config: Dict,
+        constraint_expr: List[str],
+        writer: TextIO = sys.stdout,
+        quiet: bool = False,
     ) -> Union[List, Dict]:
         """
         Validates then outputs as json one or more constraints.
@@ -1136,16 +1155,17 @@ class CommonCLI(ABC):
 
         as_cons = get_constraints(ret)
 
-        if len(as_cons) == 1:
-            # simple case - just a single dictionary
-            json_dump(as_cons[0], writer)
-        else:
-            json_dump(as_cons, writer)
+        if not quiet:
+            if len(as_cons) == 1:
+                # simple case - just a single dictionary
+                json_dump(as_cons[0], writer)
+            else:
+                json_dump(as_cons, writer)
 
-        writer.write("\n")
+            writer.write("\n")
 
-        for cons in as_cons:
-            sys.stderr.write(str(cons))
+            for cons in as_cons:
+                sys.stderr.write(str(cons))
 
         return ret
 
@@ -1270,10 +1290,14 @@ class CommonCLI(ABC):
         ...
 
     def analyze_parser(self, parser: ArgumentParser) -> None:
+
         parser.add_argument("--job-id", "-j", required=True)
         parser.add_argument("--long", "-l", action="store_true", default=False)
 
     def analyze(self, config: Dict, job_id: str, long: bool = False,) -> None:
+        """
+        Prints out relevant reasons that a job was not matched to any nodes.
+        """
         if not long:
             try:
                 _, columns_str = os.popen("stty size", "r").read().split()
@@ -1288,20 +1312,29 @@ class CommonCLI(ABC):
         register_result_handler(ctx_handler)
         dcalc = self._demand(config, ctx_handler=ctx_handler)
 
+        found_nodes = []
+        for node in dcalc.get_demand().compute_nodes:
+            if job_id in node.assignments:
+                found_nodes.append(node)
+
+        if found_nodes:
+            print("Job {} is assigned to the following nodes:".format(job_id))
+            for node in found_nodes:
+                print("   ", node)
+            return
+
+        if long:
+            jobs, _ = self._driver(config).read_jobs_and_nodes(config)
+            jobs = [x for x in jobs if x.name == job_id]
+            if jobs:
+                sys.stdout.write("Job {}:\n".format(jobs[0].name))
+                json_dump(jobs[0].to_dict(), sys.stdout)
+                sys.stdout.write("\n")
+
         key = "[Job {}]".format(job_id)
         if key not in ctx_handler.by_context:
-            found_nodes = []
-            for node in dcalc.get_demand().compute_nodes:
-                if job_id in node.assignments:
-                    found_nodes.append(node)
-            if found_nodes:
-                print("Job {} is assigned to the following nodes:".format(job_id))
-                for node in found_nodes:
-                    print("   ", node)
-                return
-            else:
-                print("Unknown job id {}".format(job_id), file=sys.stderr)
-                sys.exit(1)
+            print("Unknown job id {}".format(job_id), file=sys.stderr)
+            sys.exit(1)
 
         results = ctx_handler.by_context[key]
         for result in results:
@@ -1702,7 +1735,7 @@ def main(
         getattr(module, "_initialize")(args.cmd, args.config)
     try:
         args.func(**kwargs)
-    except AssertionError as e:
+    except AssertionError:
         raise
     except Exception as e:
         print("Error '%s': See the rest in the log file" % str(e), file=sys.stderr)

@@ -120,6 +120,7 @@ class MockClusterBinding(ClusterBindingInterface):
         regional_quota_core_count: Optional[int] = 1_000_000,
         regional_quota_count: Optional[int] = 10_000,
         placement_groups: Optional[List[str]] = None,
+        valid: bool = True,
     ) -> NodearrayBucketStatus:
         def pick(a: Optional[int], b: Optional[int]) -> int:
             if a is not None:
@@ -149,6 +150,7 @@ class MockClusterBinding(ClusterBindingInterface):
         vcpu_count = aux_info.vcpu_count
 
         bucket_status = NodearrayBucketStatus()
+        bucket_status.valid = valid
         bucket_status.bucket_id = str(uuid.uuid4())
         bucket_status.available_count = available_count
         bucket_status.max_count = max_count
@@ -536,7 +538,7 @@ class MockNodeManagementResult(NodeManagementResult):
         NodeManagementResult.__init__(self, nodes=mgmt_nodes, operation_id=operation_id)
 
 
-def _node_to_ccnode(n: Node) -> NodeRecord:
+def _node_to_ccnode(n: Node, target_state: str = "Started") -> NodeRecord:
     ret = {
         "Name": n.name,
         "Template": n.nodearray,
@@ -549,6 +551,7 @@ def _node_to_ccnode(n: Node) -> NodeRecord:
         # "CoreCount":
         # "Memory":
         "Status": n.state,
+        "TargetState": target_state,
         "PlacementGroupId": n.placement_group,
         "Infiniband": n.infiniband,
         "Configuration": {},

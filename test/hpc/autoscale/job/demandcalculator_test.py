@@ -33,6 +33,7 @@ def teardown_function(function) -> None:
     resultslib.unregister_all_result_handlers()
 
 
+@pytest.mark.skip
 def test_no_buckets():
     node_mgr = NodeManager(MockClusterBinding(), [])
     dc = DemandCalculator(
