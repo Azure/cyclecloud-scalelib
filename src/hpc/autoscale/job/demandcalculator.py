@@ -236,7 +236,7 @@ class DemandCalculator:
         booting_nodes = [
             n
             for n in booting_nodes
-            if n.exists
+            if n.target_state == "Started"
             and n.state not in ["Ready", "Started"]
             and n.delayed_node_id.node_id
         ]

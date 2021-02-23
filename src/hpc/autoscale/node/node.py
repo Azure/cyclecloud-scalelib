@@ -52,6 +52,7 @@ class Node(ABC):
         memory: ht.Memory,
         infiniband: bool,
         state: ht.NodeStatus,
+        target_state: ht.NodeStatus,
         power_state: ht.NodeStatus,
         exists: bool,
         placement_group: Optional[ht.PlacementGroup],
@@ -71,7 +72,7 @@ class Node(ABC):
         self.__location = location
         self.__spot = spot
         self.__vcpu_count = vcpu_count
-        assert isinstance(memory, ht.Memory)
+        assert isinstance(memory, ht.Memory), type(memory)
         self.__memory = memory
         self.__infiniband = infiniband
 
@@ -79,6 +80,7 @@ class Node(ABC):
         self.__available = deepcopy(self._resources)
 
         self.__state = state
+        self.__target_state = target_state
         self.__exists = exists
         self.__placement_group = None
         # call the setter for extra validation
@@ -109,7 +111,6 @@ class Node(ABC):
         self.__gpu_count = (
             gpu_count if gpu_count is not None else self.__aux_vm_info.gpu_count
         )
-        assert self.memory >= 0, self.memory
 
     @property
     def required(self) -> bool:
@@ -216,6 +217,16 @@ class Node(ABC):
     @state.setter
     def state(self, value: ht.NodeStatus) -> None:
         self.__state = value
+
+    @property
+    def target_state(self) -> ht.NodeStatus:
+        # TODO list out states
+        """State of the node, as reported by CycleCloud."""
+        return self.__target_state
+
+    @target_state.setter
+    def target_state(self, value: ht.NodeStatus) -> None:
+        self.__target_state = value
 
     @property
     def exists(self) -> bool:
@@ -430,6 +441,7 @@ class Node(ABC):
             memory=self.memory,
             infiniband=self.infiniband,
             state=self.state,
+            target_state=self.target_state,
             power_state=self.state,
             exists=self.exists,
             placement_group=self.placement_group,
@@ -572,6 +584,9 @@ class Node(ABC):
         self.__available = ShellDict(self.__available)  # type: ignore
         self.__metadata = ShellDict(self.__metadata)  # type: ignore
 
+    def _is_example_node(self) -> bool:
+        return self.name == "{}-0".format(self.nodearray)
+
     def __str__(self) -> str:
         if self.name.endswith("-0"):
             return "NodeBucket(nodearray={}, vm_size={}, pg={})".format(
@@ -647,7 +662,10 @@ class Node(ABC):
                 available[key] = ht.Size.value_of(value)
             elif value.startswith("memory::"):
                 available[key] = ht.Memory.value_of(value)
-
+        if d.get("memory"):
+            memory: ht.Memory = ht.Memory.value_of(d["memory"])  # type: ignore
+        else:
+            memory = aux_info.memory
         ret = Node(
             node_id=DelayedNodeId(name, node_id),
             name=name,
@@ -660,9 +678,10 @@ class Node(ABC):
             location=location,
             spot=d.get("spot", False),
             vcpu_count=d.get("vcpu-count", aux_info.vcpu_count),
-            memory=d.get("memory", aux_info.memory),
+            memory=memory,
             infiniband=aux_info.infiniband,
             state=ht.NodeStatus(d.get("state", "unknown")),
+            target_state=ht.NodeStatus(d.get("state", "unknown")),
             power_state=ht.NodeStatus("on"),
             exists=d.get("exists", True),
             placement_group=d.get("placement_group"),
@@ -716,6 +735,7 @@ class UnmanagedNode(Node):
             memory=memory or aux.memory,
             infiniband=False,
             state=ht.NodeStatus("running"),
+            target_state=ht.NodeStatus("running"),
             power_state=ht.NodeStatus("running"),
             exists=True,
             placement_group=placement_group,

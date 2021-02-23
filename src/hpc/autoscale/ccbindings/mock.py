@@ -120,6 +120,7 @@ class MockClusterBinding(ClusterBindingInterface):
         regional_quota_core_count: Optional[int] = 1_000_000,
         regional_quota_count: Optional[int] = 10_000,
         placement_groups: Optional[List[str]] = None,
+        valid: bool = True,
     ) -> NodearrayBucketStatus:
         def pick(a: Optional[int], b: Optional[int]) -> int:
             if a is not None:
@@ -149,6 +150,7 @@ class MockClusterBinding(ClusterBindingInterface):
         vcpu_count = aux_info.vcpu_count
 
         bucket_status = NodearrayBucketStatus()
+        bucket_status.valid = valid
         bucket_status.bucket_id = str(uuid.uuid4())
         bucket_status.available_count = available_count
         bucket_status.max_count = max_count
@@ -248,11 +250,13 @@ class MockClusterBinding(ClusterBindingInterface):
         nodearray: NodeArrayName,
         vm_size: VMSize = None,
         state: NodeStatus = NodeStatus("Started"),
+        target_state: Optional[NodeStatus] = None,
         hostname: Optional[Hostname] = None,
         spot: bool = False,
         placement_group: str = None,
         keep_alive: bool = False,
     ) -> Node:
+        target_state = target_state or state
         assert nodearray in self.nodearrays
         nodearray_status = self.nodearrays[nodearray]
         nodearray_record = nodearray_status.nodearray
@@ -306,6 +310,7 @@ class MockClusterBinding(ClusterBindingInterface):
             memory=Memory(bucket.virtual_machine.memory, "g"),
             infiniband=False,
             state=state,
+            target_state=target_state,
             power_state=state,
             exists=True,
             placement_group=placement_group,
@@ -533,7 +538,7 @@ class MockNodeManagementResult(NodeManagementResult):
         NodeManagementResult.__init__(self, nodes=mgmt_nodes, operation_id=operation_id)
 
 
-def _node_to_ccnode(n: Node) -> NodeRecord:
+def _node_to_ccnode(n: Node, target_state: str = "Started") -> NodeRecord:
     ret = {
         "Name": n.name,
         "Template": n.nodearray,
@@ -546,6 +551,7 @@ def _node_to_ccnode(n: Node) -> NodeRecord:
         # "CoreCount":
         # "Memory":
         "Status": n.state,
+        "TargetState": target_state,
         "PlacementGroupId": n.placement_group,
         "Infiniband": n.infiniband,
         "Configuration": {},

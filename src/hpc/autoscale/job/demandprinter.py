@@ -156,7 +156,9 @@ class DemandPrinter:
                     if self.long:
                         slice = lambda v: v  # noqa: E731
                     else:
-                        slice = eval("lambda v: v%s" % slice_expr)
+                        slice = eval(
+                            "lambda v: v%s if v is not None else v" % slice_expr
+                        )
 
                 if column == "hostname":
                     hostname = node.hostname
@@ -236,8 +238,9 @@ def print_columns(
     demand_result: DemandResult,
     stream: Optional[TextIO] = None,
     output_format: OutputFormat = "table",
+    long: bool = False,
 ) -> None:
-    printer = DemandPrinter(None, stream=stream, output_format=output_format)
+    printer = DemandPrinter(None, stream=stream, output_format=output_format, long=long)
     printer.print_columns(demand_result)
 
 

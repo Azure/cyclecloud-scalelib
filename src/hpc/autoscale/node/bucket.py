@@ -120,6 +120,7 @@ class NodeBucket:
             memory=self.memory,
             infiniband=False,
             state=ht.NodeStatus("Off"),
+            target_state=ht.NodeStatus("Off"),
             power_state=ht.NodeStatus("Off"),
             exists=False,
             placement_group=definition.placement_group,
@@ -390,6 +391,7 @@ def node_from_bucket(
     bucket: "NodeBucket",
     new_node_name: ht.NodeName,
     state: ht.NodeStatus,
+    target_state: ht.NodeStatus,
     power_state: ht.NodeStatus,
     hostname: Optional[ht.Hostname] = None,
     placement_group: Optional[ht.PlacementGroup] = None,
@@ -414,6 +416,7 @@ def node_from_bucket(
         memory=bucket.memory,
         infiniband=False,  # TODO
         state=state,
+        target_state=target_state,
         power_state=power_state,
         exists=exists,
         placement_group=placement_group,

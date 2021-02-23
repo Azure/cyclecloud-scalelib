@@ -49,6 +49,7 @@ class SchedulerNode(Node):
             memory=ht.Memory(0, "b"),
             infiniband=False,
             state=ht.NodeStatus("running"),
+            target_state=ht.NodeStatus("running"),
             power_state=ht.NodeStatus("running"),
             exists=True,
             placement_group=None,

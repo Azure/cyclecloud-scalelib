@@ -143,11 +143,11 @@ class NodeResourceConstraint(BaseNodeConstraint):
         if value != target:
             if len(self.values) > 1:
                 return "Resource[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
-                    self.attr, target, self.values, node.name, self.attr,
+                    self.attr, repr(target), self.values, node.name, self.attr,
                 )
             else:
                 return "Resource[name={} value={}] != node[name={} {}={}]".format(
-                    self.attr, target, node.name, self.attr, self.values[0]
+                    self.attr, repr(target), node.name, self.attr, repr(self.values[0])
                 )
         return None
 
@@ -174,13 +174,20 @@ class NodeResourceConstraint(BaseNodeConstraint):
                 score = len(self.values) - n
                 return SatisfiedResult("success", self, node, score=score,)
 
-        if len(self.values) > 1:
-            msg = "Resource[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
-                self.attr, target, self.values, node.name, self.attr,
+        if node._is_example_node():
+            node_str = "Bucket[array={} vm_size={} attr={}]".format(
+                node.nodearray, node.vm_size, self.attr
             )
         else:
-            msg = "Resource[name={} value={}] != node[name={} {}={}]".format(
-                self.attr, target, node.name, self.attr, self.values[0]
+            node_str = "Node[name={} attr={}]".format(node.name, self.attr)
+
+        if len(self.values) > 1:
+            msg = "Resource[name={} value={}] is not one of the options {} for {}".format(
+                self.attr, repr(target), self.values, node_str
+            )
+        else:
+            msg = "Resource[name={} value={}] != {} for {}".format(
+                self.attr, repr(target), repr(self.values[0]), node_str
             )
 
         return SatisfiedResult("InvalidOption", self, node, [msg],)
@@ -227,12 +234,16 @@ class MinResourcePerNode(BaseNodeConstraint):
         assert isinstance(self.value, (int, float, ht.Size))
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        if node._is_example_node():
+            node_str = "Bucket[array={} vm_size={} attr={}]".format(
+                node.nodearray, node.vm_size, self.attr
+            )
+        else:
+            node_str = "Node[name={} attr={}]".format(node.name, self.attr)
 
         if self.attr not in node.available:
             # TODO log
-            msg = "Resource[name={}] is not defined for Node[name={}]".format(
-                self.attr, node.name
-            )
+            msg = "Resource[name={}] is not defined for {}".format(self.attr, node_str)
             return SatisfiedResult("UndefinedResource", self, node, [msg],)
 
         try:
@@ -255,9 +266,18 @@ class MinResourcePerNode(BaseNodeConstraint):
                 e,
             )
 
-        msg = "Resource[name={} value={}] < Node[name={} value={}]".format(
-            self.attr, self.value, node.name, node.available[self.attr],
-        )
+        if node._is_example_node():
+            msg = "Resource[name={} value={}] < Bucket[array={} vm_size={} value={}]".format(
+                self.attr,
+                repr(self.value),
+                node.nodearray,
+                node.vm_size,
+                repr(node.available[self.attr]),
+            )
+        else:
+            msg = "Resource[name={} value={}] < Node[name={} value={}]".format(
+                self.attr, repr(self.value), node.name, repr(node.available[self.attr]),
+            )
         return SatisfiedResult("InsufficientResource", self, node, reasons=[msg],)
 
     def do_decrement(self, node: "Node") -> bool:
@@ -394,9 +414,15 @@ class InAPlacementGroup(BaseNodeConstraint):
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
         if node.placement_group:
             return SatisfiedResult("success", self, node,)
-        msg = "Node[name={} hostname={}] is not in a placement group".format(
-            node.name, node.hostname
-        )
+
+        if node.name.endswith("-0"):
+            msg = "Bucket[array={} vm_size={} id={}] is not in a placement group".format(
+                node.nodearray, node.vm_size, node.bucket_id
+            )
+        else:
+            msg = "Node[name={} hostname={}] is not in a placement group".format(
+                node.name, node.hostname
+            )
         return SatisfiedResult("NotInAPlacementGroup", self, node, [msg],)
 
     def minimum_space(self, node: "Node") -> int:
@@ -798,13 +824,20 @@ class NodePropertyConstraint(BaseNodeConstraint):
         elif value == target:
             return None
 
-        if len(self.values) > 1:
-            return "Property[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
-                self.attr, target, self.values, node.name, self.attr,
+        if node._is_example_node():
+            node_str = "Bucket[array={} vm_size={} attr={}]".format(
+                node.nodearray, node.vm_size, self.attr
             )
         else:
-            return "Property[name={} value={}] != node[name={} {}={}]".format(
-                self.attr, self.values[0], node.name, self.attr, target
+            node_str = "Node[name={} attr={}]".format(node.name, self.attr)
+
+        if len(self.values) > 1:
+            return "Property[name={} value={}] is not one of the options {} for {}".format(
+                self.attr, target, self.values, node_str
+            )
+        else:
+            return "Property[name={} value={}] != {} for {}".format(
+                self.attr, self.values[0], target, node_str
             )
 
     def __str__(self) -> str:
