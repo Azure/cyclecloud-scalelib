@@ -92,7 +92,9 @@ class NodeManager:
         return [
             n
             for n in self.get_nodes()
-            if not n.exists and not (n.state == "Deallocated" and not n._allocated)
+            if not n.exists
+            and n.state != "Stopping"
+            and not (n.state == "Deallocated" and not n._allocated)
         ]
 
     def _add_bucket(self, bucket: NodeBucket) -> None:
@@ -730,12 +732,6 @@ class NodeManager:
             )
             operation_id = start_result.operation_id
 
-            for s in start_result.sets:
-                if s.message:
-                    logging.warning(s.message)
-                else:
-                    logging.info("Started %d nodes", s.added)
-
             started_nodes = self.get_nodes_by_operation(start_result.operation_id)
 
             started_node_mappings: Dict[str, Node] = partition_single(
@@ -1322,7 +1318,10 @@ def _new_node_manager_79(
         active_na_core_count = 0
         active_na_count = 0
         for cc_node in cc_nodes_by_template.get(nodearray_name, []):
-            if cc_node["TargetState"] != "Allocation":
+
+            reached_final_state = cc_node["TargetState"] == cc_node["Status"]
+            booting = cc_node["TargetState"] == "Started"
+            if reached_final_state and not booting:
                 continue
             aux_vm_info = vm_sizes.get_aux_vm_size_info(region, cc_node["MachineType"])
             active_na_count += 1
@@ -1422,6 +1421,7 @@ def _new_node_manager_79(
                     for n in nodes_list.nodes
                     if n["Template"] == nodearray_name
                     and n["MachineType"] == bucket.definition.machine_type
+                    and (n["TargetState"] == "Started" or n["Status"] == "Deallocated")
                     and n.get("PlacementGroupId") == pg_name
                 ]
 

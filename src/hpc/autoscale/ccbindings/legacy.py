@@ -274,7 +274,7 @@ class ClusterBinding(ClusterBindingInterface):
         self._log_response(http_response, result)
         return result
 
-    @notreadonly
+    @hpcwrap
     def start_nodes(
         self,
         nodes: Optional[List[Node]] = None,
@@ -285,6 +285,49 @@ class ClusterBinding(ClusterBindingInterface):
         custom_filter: str = None,
         request_id: Optional[str] = None,
     ) -> NodeManagementResult:
+        if self.read_only:
+            ret = NodeCreationResult()
+            ret.operation_id = str(uuid.uuid4())
+
+            node_records: List[Dict]
+            if not nodes:
+
+                all_nodes: List[Dict] = []
+                for rnodes in self._read_only_nodes.values():
+                    all_nodes.extend(rnodes)
+
+                if names:
+                    node_records = [n for n in all_nodes if n["Name"] in names]
+                elif node_ids:
+                    node_records = [n for n in all_nodes if n["NodeId"] in node_ids]
+                elif hostnames:
+                    node_records = [n for n in all_nodes if n["Hostname"] in node_ids]
+                elif ip_addresses:
+                    node_records = [n for n in all_nodes if n["PrivateIp"] in node_ids]
+                elif custom_filter:
+                    raise RuntimeError(
+                        "custom_filter is not supported with run_only mode (--dry-run)"
+                    )
+                elif request_id:
+                    node_records = [n for n in all_nodes if n["RequestId"] in node_ids]
+                else:
+                    raise RuntimeError(
+                        "Please specify at least one of nodes, names, node_ids, hostnames, ip_addresses, custom_filter or request_id"
+                    )
+
+            else:
+                node_records = [_node_to_ccnode(n) for n in nodes]
+
+            ret.sets = [NodeCreationResultSet(added=len(node_records))]
+
+            for n in nodes or []:
+                n.exists = True
+                n.target_state = ht.NodeStatus("Started")
+                if not n.delayed_node_id.node_id:
+                    n.delayed_node_id.node_id = ht.NodeId("dryrun-" + str(uuid.uuid4()))
+                
+            self._read_only_nodes[ht.OperationId(ret.operation_id)] = node_records
+            return ret
 
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id

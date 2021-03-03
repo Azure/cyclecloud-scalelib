@@ -694,7 +694,7 @@ class CommonCLI(ABC):
 
             bootup_result = node_mgr.bootup()
             if bootup_result:
-                assert bootup_result.nodes
+                #assert bootup_result.nodes
 
                 demandprinter.print_demand(
                     columns=output_columns or self._get_default_output_columns(config),
@@ -1642,7 +1642,10 @@ def _query_with_constraints(
 
 def _parse_constraint(constraint_expr: str) -> List[NodeConstraint]:
     try:
-        constraint_parsed = json.loads(constraint_expr)
+        if constraint_expr:
+            constraint_parsed = json.loads(constraint_expr)
+        else:
+            constraint_parsed = []
     except Exception as e:
         print(
             "Could not parse constraint as json '{}' - {}".format(constraint_expr, e),
