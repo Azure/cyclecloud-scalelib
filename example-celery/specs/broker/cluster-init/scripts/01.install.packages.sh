@@ -6,7 +6,7 @@ service rabbitmq-server start
 source /root/.venv/celery/bin/activate
 
 cs_hostname=$(jetpack config cyclecloud.config.web_server)
-CC_VERSION="8.0.2"
+CC_VERSION="8.1.0"
 FILE=cyclecloud-api.tar.gz
 if ! [ -f "$FILE" ]; then
     wget --no-check-certificate ${cs_hostname}/static/tools/cyclecloud_api-${CC_VERSION}-py2.py3-none-any.whl
