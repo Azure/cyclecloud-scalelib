@@ -1261,12 +1261,18 @@ class CommonCLI(ABC):
 
         return driver, demand_calc, found_nodes
 
+    @property
+    def autoscale_home(self) -> str:
+        if os.getenv("AUTOSCALE_HOME"):
+            return os.environ["AUTOSCALE_HOME"]
+        return os.path.join("/opt", "cycle", self.project_name)
+
     def initconfig_parser(self, parser: ArgumentParser) -> None:
         parser.add_argument("--cluster-name", required=True)
         parser.add_argument("--username", required=True)
         parser.add_argument("--password")
         parser.add_argument("--url", required=True)
-        default_home = self._driver({}).autoscale_home
+        default_home = self.autoscale_home
 
         parser.add_argument(
             "--log-config",

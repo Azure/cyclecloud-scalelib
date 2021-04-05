@@ -284,14 +284,19 @@ class DemandCalculator:
 
         for new_snode in scheduler_nodes:
             if new_snode.hostname not in by_hostname:
-
-                logging.debug(
-                    "Found new node[hostname=%s] that does not exist in CycleCloud",
-                    new_snode.hostname,
-                )
                 by_hostname[new_snode.hostname] = new_snode
                 self.__scheduler_nodes_queue.push(new_snode)
                 self.node_mgr.add_unmanaged_nodes([new_snode])
+                if new_snode.resources.get("ccnodeid"):
+                    logging.warning(
+                        "%s has ccnodeid defined, but no longer exists in CycleCloud",
+                        new_snode,
+                    )
+                else:
+                    logging.debug(
+                        "Found new node[hostname=%s] that does not exist in CycleCloud",
+                        new_snode.hostname,
+                    )
 
                 # TODO inform bucket catalog?
             elif new_snode.metadata.get("override_resources", True):

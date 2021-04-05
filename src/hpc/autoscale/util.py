@@ -1,13 +1,19 @@
 import json
 import os
+import re
 import sys
+import typing
 import uuid as uuidlib
 import warnings
 from abc import ABC, abstractmethod
 from functools import reduce
-from typing import Any, Callable, Dict, List, TextIO, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, TextIO, TypeVar, Union
 
 from hpc.autoscale.codeanalysis import hpcwrapclass
+
+if typing.TYPE_CHECKING:
+    from hpc.autoscale.node.node import Node
+    from hpc.autoscale.node.bucket import NodeBucket
 
 
 @hpcwrapclass
@@ -298,3 +304,39 @@ def _dict_merge(d1: Dict, d2: Dict) -> Dict:
             ret[k] = v2
 
     return ret
+
+
+def is_valid_hostname(config: Dict, node: "Node") -> bool:
+    # delayed import, as logging will import this module
+    from hpc.autoscale import hpclogging as logging
+
+    if not node.hostname:
+        return False
+
+    valid_hostnames: Optional[List[str]] = config.get("valid_hostnames")
+
+    if not valid_hostnames:
+        if is_standalone_dns(node):
+            valid_hostnames = ["^ip-[0-9A-Za-z]{8}$"]
+        else:
+            return True
+
+    for valid_hostname in valid_hostnames:
+        if re.match(valid_hostname, node.hostname):
+            return True
+
+    logging.warning(
+        "Rejecting invalid hostname '%s': Did not match any of the following patterns: %s",
+        node.hostname,
+        valid_hostnames,
+    )
+    return False
+
+
+def is_standalone_dns(node_or_bucket: Union["Node", "NodeBucket"]) -> bool:
+    return (
+        node_or_bucket.software_configuration.get("cyclecloud", {})
+        .get("hosts", {})
+        .get("standalone_dns", {})
+        .get("enabled", True)
+    )

@@ -4,17 +4,23 @@ import shutil
 import tempfile
 from typing import Dict
 
+from hpc.autoscale.job.schedulernode import SchedulerNode, TempNode
 from hpc.autoscale.util import (
     AliasDict,
     CircularIncludeError,
     ConfigurationException,
     NullSingletonLock,
     SingletonFileLock,
+    is_valid_hostname,
     load_config,
     new_singleton_lock,
     partition,
     partition_single,
 )
+
+
+def setup_module() -> None:
+    SchedulerNode.ignore_hostnames = True
 
 
 def test_partition_single() -> None:
@@ -203,3 +209,31 @@ def test_include_json() -> None:
 
     finally:
         shutil.rmtree(tempdir, ignore_errors=True)
+
+
+def test_is_valid_hostname() -> None:
+    def _test(hostname: str, standalone_dns: bool, *valid_hostnames: str) -> bool:
+        node = TempNode(
+            hostname,
+            {},
+            software_configuration={
+                "cyclecloud": {"hosts": {"standalone_dns": {"enabled": standalone_dns}}}
+            },
+        )
+        valid_hostnames_list = list(valid_hostnames) if valid_hostnames else None
+        return is_valid_hostname({"valid_hostnames": valid_hostnames_list}, node)
+
+    def _valid(hostname: str, standalone_dns: bool, *valid_hostnames: str) -> None:
+        assert _test(hostname, standalone_dns, *valid_hostnames)
+
+    def _invalid(hostname: str, standalone_dns: bool, *valid_hostnames: str) -> None:
+        assert not _test(hostname, standalone_dns, *valid_hostnames)
+
+    _valid("ip-0A010010", True)
+    _valid("ip-0A010010", False)
+    _invalid("ip-0A0100100", True)
+    _valid("ip-0A0100100", False)
+    _valid("ip-0A0100100", True, "ip-0A0100100")
+    _invalid("ip-0A0100100", True, "ip-0A0100109")
+    _valid("ip-0A0100100", True, "ip-0A0100109", "ip-0A0100100")
+    _valid("ip-0A0100100", True, "^ip-[0-9A-Za-z]{9}$")
