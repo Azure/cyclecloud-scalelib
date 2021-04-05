@@ -234,6 +234,9 @@ class CommonCLI(ABC):
         self.hostnames: List[str] = []
         self.__node_mgr: Optional[NodeManager] = None
 
+    def connect(self, config: Dict) -> None:
+        self._node_mgr(config)
+
     @abstractmethod
     def _setup_shell_locals(self, config: Dict) -> Dict:
         ...
@@ -694,7 +697,7 @@ class CommonCLI(ABC):
 
             bootup_result = node_mgr.bootup()
             if bootup_result:
-                assert bootup_result.nodes
+                # assert bootup_result.nodes
 
                 demandprinter.print_demand(
                     columns=output_columns or self._get_default_output_columns(config),
@@ -1261,12 +1264,18 @@ class CommonCLI(ABC):
 
         return driver, demand_calc, found_nodes
 
+    @property
+    def autoscale_home(self) -> str:
+        if os.getenv("AUTOSCALE_HOME"):
+            return os.environ["AUTOSCALE_HOME"]
+        return os.path.join("/opt", "cycle", self.project_name)
+
     def initconfig_parser(self, parser: ArgumentParser) -> None:
         parser.add_argument("--cluster-name", required=True)
         parser.add_argument("--username", required=True)
         parser.add_argument("--password")
         parser.add_argument("--url", required=True)
-        default_home = self._driver({}).autoscale_home
+        default_home = self.autoscale_home
 
         parser.add_argument(
             "--log-config",
@@ -1642,7 +1651,10 @@ def _query_with_constraints(
 
 def _parse_constraint(constraint_expr: str) -> List[NodeConstraint]:
     try:
-        constraint_parsed = json.loads(constraint_expr)
+        if constraint_expr:
+            constraint_parsed = json.loads(constraint_expr)
+        else:
+            constraint_parsed = []
     except Exception as e:
         print(
             "Could not parse constraint as json '{}' - {}".format(constraint_expr, e),
