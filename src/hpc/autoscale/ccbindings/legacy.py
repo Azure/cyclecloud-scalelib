@@ -325,7 +325,7 @@ class ClusterBinding(ClusterBindingInterface):
                 n.target_state = ht.NodeStatus("Started")
                 if not n.delayed_node_id.node_id:
                     n.delayed_node_id.node_id = ht.NodeId("dryrun-" + str(uuid.uuid4()))
-                
+
             self._read_only_nodes[ht.OperationId(ret.operation_id)] = node_records
             return ret
 

@@ -234,6 +234,9 @@ class CommonCLI(ABC):
         self.hostnames: List[str] = []
         self.__node_mgr: Optional[NodeManager] = None
 
+    def connect(self, config: Dict) -> None:
+        self._node_mgr(config)
+
     @abstractmethod
     def _setup_shell_locals(self, config: Dict) -> Dict:
         ...
@@ -694,7 +697,7 @@ class CommonCLI(ABC):
 
             bootup_result = node_mgr.bootup()
             if bootup_result:
-                #assert bootup_result.nodes
+                # assert bootup_result.nodes
 
                 demandprinter.print_demand(
                     columns=output_columns or self._get_default_output_columns(config),
