@@ -9,8 +9,8 @@ source $INSTALLDIR/venv/bin/activate
 cs_hostname=$(jetpack config cyclecloud.config.web_server)
 CC_VERSION=$(jetpack config cyclecloud.cookbooks.version)
 
-jetpack download cyclecloud-scalelib-0.2.1.tar.gz $CYCLECLOUD_SPEC_PATH/files/
-pip install $CYCLECLOUD_SPEC_PATH/files/cyclecloud-scalelib-0.2.1.tar.gz
+jetpack download cyclecloud-scalelib-0.2.2.tar.gz $CYCLECLOUD_SPEC_PATH/files/
+pip install $CYCLECLOUD_SPEC_PATH/files/cyclecloud-scalelib-0.2.2.tar.gz
 
 LOGGING_CONF=$(python -c 'import hpc.autoscale, os; print(os.path.abspath(os.path.join(hpc.autoscale.__file__, "..", "logging.conf")))')
 cp $LOGGING_CONF $INSTALLDIR
