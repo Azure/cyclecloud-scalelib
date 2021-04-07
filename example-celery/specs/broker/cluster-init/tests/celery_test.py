@@ -10,4 +10,5 @@ def setup_module():
     subprocess.run(['/opt/cycle/scalelib/venv/bin/python3', 'autoscale.py'])
     # wait for nodes
     out = subprocess.run(['/opt/cycle/scalelib/venv/bin/python3', '-m hpc.autoscale.cli', 'nodes'], stdout=subprocess.PIPE).stdout
+    print(out)
     #python3 -m hpc.autoscale.cli
