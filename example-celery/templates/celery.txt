@@ -46,6 +46,7 @@ Category = Applications
     [[nodearray worker]]
     MachineType = $ExecuteMachineType
     MaxCoreCount = $MaxExecuteCoreCount
+    
 
     Interruptible = $UseLowPrio
     AdditionalClusterInitSpecs = $ExecuteClusterInitSpecs
