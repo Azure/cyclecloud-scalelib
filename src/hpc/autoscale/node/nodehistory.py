@@ -63,7 +63,7 @@ def initialize_db(path: str, read_only: bool, uri: bool = False) -> sqlite3.Conn
             path = os.path.abspath(path)
             # just use an in memory db if this is the first time this is run
             if not os.path.exists(path):
-                file_uri = "mem:temp"
+                file_uri = "file:memory"
             else:
                 file_uri = "file://{}?mode=ro".format(path)
             conn = sqlite3.connect(file_uri, uri=True)
@@ -72,7 +72,7 @@ def initialize_db(path: str, read_only: bool, uri: bool = False) -> sqlite3.Conn
             try:
                 conn = sqlite3.connect(file_uri, uri=True)
             except sqlite3.OperationalError:
-                conn = sqlite3.connect("mem:temp", uri=True)
+                conn = sqlite3.connect("file:memory", uri=True)
 
         else:
             conn = sqlite3.connect(path, uri=uri)
