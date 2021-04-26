@@ -958,49 +958,6 @@ class CommonCLI(ABC):
 
         json.dump({"output-columns": output_columns}, sys.stdout, indent=2)
 
-    def default_output_columns_parser(self, parser: ArgumentParser) -> None:
-        cmds = [
-            x
-            for x in dir(self)
-            if x[0].isalpha() and hasattr(getattr(self, x), "__call__")
-        ]
-        parser.add_argument("-d", "--command", choices=cmds)
-
-    def default_output_columns(
-        self, config: Dict, command: Optional[str] = None
-    ) -> None:
-        """
-        Output what are the default output columns for an optional command.
-        """
-        self._get_default_output_columns(config)
-        def_cols = self._default_output_columns(config, command)
-        sys.stdout.write("# cli option\n")
-        sys.stdout.write("--output-columns {}\n".format(",".join(def_cols)))
-        sys.stdout.write("# json snippet for autoscale.json\n")
-        sys.stdout.write('"default-output-columns": ')
-        arg_parser = create_arg_parser(self.project_name, self)
-
-        output_columns = {} if command else {"default": def_cols}
-        assert arg_parser._subparsers
-        assert arg_parser._subparsers._actions
-
-        for action in arg_parser._subparsers._actions:
-            if not action.choices:
-                continue
-
-            choices: Dict[str, Any] = action.choices  # type: ignore
-            for cmd_name, choice in choices.items():
-                # if they specified a specific command, filter for it
-                if command and cmd_name != command:
-                    continue
-                for action in choice._actions:
-                    if "--output-columns" in action.option_strings:
-                        output_columns[cmd_name] = self._default_output_columns(
-                            config, cmd_name
-                        )
-
-        json.dump({"output-columns": output_columns}, sys.stdout, indent=2)
-
     @abstractmethod
     def _default_output_columns(
         self, config: Dict, cmd: Optional[str] = None
@@ -1311,7 +1268,6 @@ class CommonCLI(ABC):
         )
 
         self._initconfig_parser(parser)
-
 
     @abstractmethod
     def _initconfig_parser(self, parser: ArgumentParser) -> None:

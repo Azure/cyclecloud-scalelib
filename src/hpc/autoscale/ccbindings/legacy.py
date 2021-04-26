@@ -301,15 +301,19 @@ class ClusterBinding(ClusterBindingInterface):
                 elif node_ids:
                     node_records = [n for n in all_nodes if n["NodeId"] in node_ids]
                 elif hostnames:
-                    node_records = [n for n in all_nodes if n["Hostname"] in node_ids]
+                    node_records = [n for n in all_nodes if n["Hostname"] in hostnames]
                 elif ip_addresses:
-                    node_records = [n for n in all_nodes if n["PrivateIp"] in node_ids]
+                    node_records = [
+                        n for n in all_nodes if n["PrivateIp"] in ip_addresses
+                    ]
                 elif custom_filter:
                     raise RuntimeError(
                         "custom_filter is not supported with run_only mode (--dry-run)"
                     )
                 elif request_id:
-                    node_records = [n for n in all_nodes if n["RequestId"] in node_ids]
+                    node_records = [
+                        n for n in all_nodes if n["RequestId"] == request_id
+                    ]
                 else:
                     raise RuntimeError(
                         "Please specify at least one of nodes, names, node_ids, hostnames, ip_addresses, custom_filter or request_id"

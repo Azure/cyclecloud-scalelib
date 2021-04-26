@@ -13,7 +13,7 @@ from hpc.autoscale.codeanalysis import hpcwrapclass
 
 if typing.TYPE_CHECKING:
     from hpc.autoscale.node.node import Node
-    from hpc.autoscale.node.bucket import NodeBucket
+    from hpc.autoscale.node.bucket import NodeBucket  # noqa:F401
 
 
 @hpcwrapclass

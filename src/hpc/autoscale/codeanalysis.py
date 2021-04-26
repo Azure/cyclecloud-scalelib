@@ -50,6 +50,7 @@ def typecheck_function(
 
         from hpc.autoscale.node.node import Node  # noqa
         from hpc.autoscale.node.bucket import NodeBucket  # noqa
+        from hpc.autoscale.hpctypes import Size  # noqa
 
         from hpc.autoscale.job.job import Job  # noqa
 
