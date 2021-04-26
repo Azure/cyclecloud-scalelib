@@ -1312,12 +1312,6 @@ class CommonCLI(ABC):
 
         self._initconfig_parser(parser)
 
-        parser.add_argument(
-            "--read-only-resources",
-            dest="pbspro__read_only_resources",
-            type=str_list,
-            default=["host", "vnode"],
-        )
 
     @abstractmethod
     def _initconfig_parser(self, parser: ArgumentParser) -> None:
