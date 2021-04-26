@@ -551,18 +551,22 @@ class NodeManager:
     @apitrace
     def add_unmanaged_nodes(self, existing_nodes: List[UnmanagedNode]) -> None:
 
-        by_key: Dict[ht.BucketId, List[Node]] = partition(
+        by_key: Dict[
+            Tuple[Optional[ht.PlacementGroup], ht.BucketId], List[Node]
+        ] = partition(
             # typing will complain that List[Node] is List[UnmanagedNode]
             # just a limitation of python3's typing
             existing_nodes,  # type: ignore
-            lambda n: n.bucket_id,
+            lambda n: (n.placement_group, n.bucket_id),
         )
-
-        buckets = partition_single(self.__node_buckets, lambda b: b.bucket_id)
+        
+        buckets = partition_single(
+            self.__node_buckets, lambda b: (b.placement_group, b.bucket_id)
+        )
 
         for key, nodes_list in by_key.items():
             if key in buckets:
-                buckets[ht.BucketId(key)].add_nodes(nodes_list)
+                buckets[key].add_nodes(nodes_list)
                 continue
 
             a_node = nodes_list[0]
@@ -570,7 +574,7 @@ class NodeManager:
             # unique set of unmanaged nodes
             node_def = NodeDefinition(
                 nodearray=ht.NodeArrayName("__unmanaged__"),
-                bucket_id=key,
+                bucket_id=key[1],
                 vm_size=ht.VMSize("unknown"),
                 location=ht.Location("unknown"),
                 spot=False,

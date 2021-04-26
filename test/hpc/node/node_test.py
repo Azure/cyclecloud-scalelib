@@ -59,7 +59,7 @@ def test_custom_node_attrs_and_node_config() -> None:
     assert node.software_configuration.get("test_thing") == "is set"
     try:
         node.software_configuration["willfail"] = 123
-        assert False
+        assert not node.software_configuration.get("willfail")
     except TypeError:
         pass
 
