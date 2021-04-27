@@ -161,13 +161,18 @@ class Node(ABC):
 
     @nodeproperty
     def hostname(self) -> Optional[ht.Hostname]:
-        """Hostname for this node. May be `None` if the node has not been given one yet"""
+        if not self.__hostname:
+            return self.__hostname
+        return self.__hostname.split(".")[0]
+    
+    @nodeproperty
+    def fqdn(self) -> Optional[ht.Hostname]:
         return self.__hostname
 
     @nodeproperty
     def hostname_or_uuid(self) -> Optional[ht.Hostname]:
         """Hostname or a UUID. Useful when partitioning a mixture of real and potential nodes by hostname"""
-        return ht.Hostname(self.__hostname or self.delayed_node_id.transient_id)
+        return ht.Hostname(self.hostname or self.delayed_node_id.transient_id)
 
     @property
     def hostname_required(self) -> ht.Hostname:
