@@ -136,6 +136,12 @@ class Node(ABC):
 
     @nodeproperty
     def hostname(self) -> Optional[ht.Hostname]:
+        if not self.__hostname:
+            return self.__hostname
+        return self.__hostname.split(".")[0]
+    
+    @nodeproperty
+    def fqdn(self) -> Optional[ht.Hostname]:
         return self.__hostname
 
     @nodeproperty
