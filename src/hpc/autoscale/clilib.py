@@ -900,7 +900,7 @@ class CommonCLI(ABC):
                     )
 
         drained_nodes = driver.handle_draining(nodes) or []
-        print("Drained the following nodes that have joined PBS:")
+        print("Drained the following nodes that have joined {}:".format(driver.name))
         for n in drained_nodes:
             print("   ", n)
 
@@ -911,7 +911,7 @@ class CommonCLI(ABC):
                 print("   ", n)
 
         removed_nodes = driver.handle_post_delete(nodes) or []
-        print("Removed the following nodes from PBS:")
+        print("Removed the following nodes from {}:".format(driver.name))
         for n in removed_nodes:
             print("   ", n)
 
