@@ -470,6 +470,14 @@ class And(BaseNodeConstraint):
         #         if len(constraints) == 1 and isinstance(constraints[0], list):
         #             constraints = constraints[0]
         self.constraints = get_constraints(list(constraints))
+    
+    def weight_buckets(
+        self, bucket_weights: List[Tuple["NodeBucket", float]]
+    ) -> List[Tuple["NodeBucket", float]]:
+        ret = bucket_weights
+        for constraint in self.constraints:
+            ret = constraint.weight_buckets(ret)
+        return ret
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
 
@@ -573,7 +581,8 @@ class NodePropertyConstraint(BaseNodeConstraint):
                 if err_msg:
                     new_weight = 0.0
                 else:
-                    new_weight = float(len(self.values) - n)
+                    target = self._get_target_value(bucket.example_node)
+                    new_weight = float(len(self.values) - self.values.index(target))
                 ret.append((bucket, new_weight))
         return ret
 
