@@ -596,7 +596,7 @@ class NodeManager:
             existing_nodes,  # type: ignore
             lambda n: (n.placement_group, n.bucket_id),
         )
-        
+
         buckets = partition_single(
             self.__node_buckets, lambda b: (b.placement_group, b.bucket_id)
         )
@@ -606,14 +606,14 @@ class NodeManager:
                 buckets[key].add_nodes(nodes_list)
                 continue
 
-            bucket_id, placement_group = key
+            placement_group, bucket_id = key
 
             a_node = nodes_list[0]
             # create a null definition, limits and bucket for each
             # unique set of unmanaged nodes
             node_def = NodeDefinition(
                 nodearray=ht.NodeArrayName("__unmanaged__"),
-                bucket_id=key[1],
+                bucket_id=ht.BucketId(bucket_id),
                 vm_size=ht.VMSize("unknown"),
                 location=ht.Location("unknown"),
                 spot=False,

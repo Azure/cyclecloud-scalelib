@@ -798,7 +798,8 @@ class NodePropertyConstraint(BaseNodeConstraint):
                 if err_msg:
                     new_weight = 0.0
                 else:
-                    new_weight = float(len(self.values) - n)
+                    target = self._get_target_value(bucket.example_node)
+                    new_weight = float(len(self.values) - self.values.index(target))
                 ret.append((bucket, new_weight))
         return ret
 

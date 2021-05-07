@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 from argparse import ArgumentParser
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -142,4 +142,4 @@ def main(argv: Iterable[str], default_config: Optional[str] = None) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1 if os.path.isfile(sys.argv[0]) else 0:])
+    main(sys.argv[1 if os.path.isfile(sys.argv[0]) else 0 :])
