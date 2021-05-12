@@ -146,7 +146,7 @@ class Node(ABC):
 
     @nodeproperty
     def hostname_or_uuid(self) -> Optional[ht.Hostname]:
-        return ht.Hostname(self.__hostname or self.delayed_node_id.transient_id)
+        return ht.Hostname(self.hostname or self.delayed_node_id.transient_id)
 
     @property
     def hostname_required(self) -> ht.Hostname:
