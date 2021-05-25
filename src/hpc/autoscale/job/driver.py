@@ -113,7 +113,7 @@ class SchedulerDriver(ABC):
 
         lock_path = config.get("lock_file", default_path)
 
-        if lock_path:
+        if lock_path and not config.get("read_only", False):
             # TODO RDH check file perms
             return SingletonFileLock(lock_path)
 

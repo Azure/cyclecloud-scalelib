@@ -235,6 +235,7 @@ class CommonCLI(ABC):
         self.__node_mgr: Optional[NodeManager] = None
 
     def connect(self, config: Dict) -> None:
+        """Tests connection to CycleCloud"""
         self._node_mgr(config)
 
     @abstractmethod
@@ -1654,6 +1655,7 @@ def create_arg_parser(
         default_config = default_config or os.path.join(
             default_install_dir, "autoscale.json"
         )
+
         if not os.path.exists(default_config):
             default_config = None
 
@@ -1666,9 +1668,8 @@ def create_arg_parser(
         new_parser.add_argument(
             "--config",
             "-c",
-            default=[default_config] if default_config else [],
+            default=default_config,
             required=not bool(default_config),
-            action="append",
         ).completer = default_completer  # type: ignore
         return new_parser
 
@@ -1722,7 +1723,7 @@ def main(
 
     # parse list of config paths to a single config
     if hasattr(args, "config"):
-        args.config = load_config(*args.config)
+        args.config = load_config(args.config)
         logging.initialize_logging(args.config)
 
         # if applicable, set read_only/lock_file
