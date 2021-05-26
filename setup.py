@@ -11,7 +11,7 @@ from setuptools.command.test import test as TestCommand  # noqa: N812
 
 import inspect
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 
 class PyTest(TestCommand):
