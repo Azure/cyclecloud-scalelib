@@ -280,6 +280,7 @@ setup(
         "jsonpickle==1.4.1",
         "argcomplete==1.12.2",
         "certifi==2020.12.5",
+        "importlib-metadata<4",
     ]
     + ["urllib3==1.25.11"],  # noqa: W503
     tests_require=["pytest==3.2.3"],
