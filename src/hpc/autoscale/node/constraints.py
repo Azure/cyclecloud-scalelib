@@ -796,16 +796,17 @@ class NodePropertyConstraint(BaseNodeConstraint):
             if weight == 0:
                 ret.append((bucket, weight))
                 continue
+            new_weight = 0.0
             for n, value in enumerate(self.values):
                 err_msg = self._satisfied(bucket.example_node, value)
-                if err_msg:
-                    new_weight = 0.0
-                else:
+                if not err_msg:
                     target = self._get_target_value(bucket.example_node)
                     new_weight = weight + 100 * float(
                         len(self.values) - self.values.index(target)
                     )
-                ret.append((bucket, new_weight))
+                    break 
+            ret.append((bucket, new_weight))
+
         return ret
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
