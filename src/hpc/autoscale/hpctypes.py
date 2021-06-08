@@ -223,7 +223,7 @@ class Memory(Size):
     @classmethod
     def value_of(cls, value: typing.Union[SizeValue, "Size", str]) -> "Size":
         return Size._value_of(Memory, value)
-    
+
     def convert_to(self, new_mag: SizeMagnitude) -> "Size":
         if new_mag == self.magnitude:
             return Memory(self.value, self.magnitude)

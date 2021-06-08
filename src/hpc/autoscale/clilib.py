@@ -1666,10 +1666,7 @@ def create_arg_parser(
             return new_parser
 
         new_parser.add_argument(
-            "--config",
-            "-c",
-            default=default_config,
-            required=not bool(default_config),
+            "--config", "-c", default=default_config, required=not bool(default_config),
         ).completer = default_completer  # type: ignore
         return new_parser
 

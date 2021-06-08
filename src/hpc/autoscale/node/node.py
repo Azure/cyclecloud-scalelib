@@ -201,6 +201,8 @@ class Node(ABC):
     @nodeproperty
     def vcpu_count(self) -> int:
         """Virtual CPU Count"""
+        if self.__vcpu_count < 0:
+            return self.__aux_vm_info.pcpu_count
         return self.__vcpu_count
 
     @nodeproperty
@@ -326,6 +328,8 @@ class Node(ABC):
     @nodeproperty
     def pcpu_count(self) -> int:
         """Physical CPU count"""
+        if self.__aux_vm_info.pcpu_count < 0:
+            return self.__vcpu_count
         return self.__aux_vm_info.pcpu_count
 
     @nodeproperty

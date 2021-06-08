@@ -14,16 +14,9 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
     if cache_path and os.path.exists(cache_path):
         raw = open(cache_path).read()
     else:
-
-        if which("az"):
-            raw = check_output(
-                [
-                    os.path.expanduser("~/.virtualenvs/azcli/bin/az"),
-                    "vm",
-                    "list-skus",
-                    "--all",
-                ]
-            ).decode()
+        az_path = which("az")
+        if az_path:
+            raw = check_output([az_path, "vm", "list-skus", "--all",]).decode()
         else:
             print("You need az cli installed.", file=sys.stderr)
             sys.exit(1)

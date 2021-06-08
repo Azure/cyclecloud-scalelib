@@ -804,7 +804,7 @@ class NodePropertyConstraint(BaseNodeConstraint):
                     new_weight = weight + 100 * float(
                         len(self.values) - self.values.index(target)
                     )
-                    break 
+                    break
             ret.append((bucket, new_weight))
 
         return ret
