@@ -104,10 +104,21 @@ class NodeResourceConstraint(BaseNodeConstraint):
     ```
     """
 
-    def __init__(self, attr: str, *values: ht.ResourceTypeAtom) -> None:
+    def __init__(self, attr: str, *values: ht.ResourceTypeAtom, **flags: Any) -> None:
         self.attr = attr
         self.values: List[ResourceType] = list(values)
         self.weight = 100
+        self.case_insensitive: bool = flags.pop("case_insensitive", False)
+
+        if flags:
+            raise RuntimeError(
+                "Unknown flag(s) passed to %s: %s", self.__class__, flags
+            )
+        if self.case_insensitive:
+            for i in range(len(self.values)):
+                value = self.values[i]
+                if isinstance(value, str):
+                    self.values[i] = value.lower()
 
     def weight_buckets(
         self, bucket_weights: List[Tuple["NodeBucket", float]]
@@ -120,6 +131,8 @@ class NodeResourceConstraint(BaseNodeConstraint):
                 ret.append((bucket, 0.0))
                 continue
             target = bucket.example_node.available[self.attr]
+            if self.case_insensitive and isinstance(target, str):
+                target = target.lower()
 
             for n, value in enumerate(self.values):
                 if isinstance(value, str) and isinstance(target, str):
@@ -164,6 +177,9 @@ class NodeResourceConstraint(BaseNodeConstraint):
                 ],
             )
         target = node.available[self.attr]
+
+        if self.case_insensitive and isinstance(target, str):
+            target = target.lower()
 
         for n, value in enumerate(self.values):
             if isinstance(value, str) and isinstance(target, str):
@@ -1240,7 +1256,10 @@ def _parse_node_property_constraint(
 
 @hpcwrap
 def new_job_constraint(
-    attr: str, value: Union[ResourceType, Constraint, list], in_alias: bool = False
+    attr: str,
+    value: Union[ResourceType, Constraint, list],
+    in_alias: bool = False,
+    case_insensitive: bool = False,
 ) -> NodeConstraint:
 
     if attr in _CUSTOM_PARSERS:
@@ -1294,10 +1313,10 @@ def new_job_constraint(
             size = ht.Memory.value_of(value)
             return MinResourcePerNode(attr, size)
 
-        return NodeResourceConstraint(attr, value)
+        return NodeResourceConstraint(attr, value, case_insensitive=case_insensitive)
 
     elif isinstance(value, bool):
-        return NodeResourceConstraint(attr, value)
+        return NodeResourceConstraint(attr, value, case_insensitive=case_insensitive)
 
     elif isinstance(value, list):
 
@@ -1324,7 +1343,7 @@ def new_job_constraint(
         if attr.startswith("node."):
             return _parse_node_property_constraint(attr, value)
 
-        return NodeResourceConstraint(attr, *value)
+        return NodeResourceConstraint(attr, *value, case_insensitive=case_insensitive)
 
     elif (
         isinstance(value, int)
@@ -1335,7 +1354,7 @@ def new_job_constraint(
         return MinResourcePerNode(attr, value)
 
     elif value is None:
-        return NodeResourceConstraint(attr, value)
+        return NodeResourceConstraint(attr, value, case_insensitive=case_insensitive)
         # raise RuntimeError("None is not an allowed value. For attr {}".format(attr))
 
     else:
@@ -1347,7 +1366,9 @@ def new_job_constraint(
 
 
 @hpcwrap
-def get_constraint(constraint_expression: Constraint) -> NodeConstraint:
+def get_constraint(
+    constraint_expression: Constraint, case_insensitive: bool = False
+) -> NodeConstraint:
     ret = get_constraints([constraint_expression])
     assert len(ret) == 1, "Expression=%s len(ret)==%s" % (
         constraint_expression,
@@ -1357,7 +1378,9 @@ def get_constraint(constraint_expression: Constraint) -> NodeConstraint:
 
 
 @hpcwrap
-def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConstraint]:
+def get_constraints(
+    constraint_expressions: List[Constraint], case_insensitive: bool = False
+) -> List[NodeConstraint]:
     if isinstance(constraint_expressions, dict):
         constraint_expressions = [constraint_expressions]
 
@@ -1382,7 +1405,7 @@ def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConst
             and_constraints = []
             for attr, value in constraint_expression.items():
                 # TODO
-                c = new_job_constraint(attr, value)
+                c = new_job_constraint(attr, value, case_insensitive=case_insensitive)
                 assert c is not None
                 and_constraints.append(c)
             if len(and_constraints) > 1:
