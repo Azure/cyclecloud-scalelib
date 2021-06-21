@@ -1346,6 +1346,8 @@ def _new_node_manager_79(
             )
             assert isinstance(aux_vm_info, vm_sizes.AuxVMSizeInfo)
             vm_family = aux_vm_info.vm_family
+            if vm_family == "unknown":
+                vm_family = bucket.definition.machine_type
 
             if region not in regional_limits:
                 regional_limits[region] = _SharedLimit(
