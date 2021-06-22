@@ -7,10 +7,14 @@ from hpc.autoscale import hpctypes as ht
 
 RESOURCE_FILE = os.path.join(os.path.dirname(__file__), "vm_sizes.json")
 VM_SIZES = {}
+VM_SIZES_LOWER = {}
 
 try:
     with open(RESOURCE_FILE) as fr:
         VM_SIZES = json.load(fr)
+    for location in VM_SIZES:
+        VM_SIZES_LOWER[location.lower()] = VM_SIZES[location]
+
 except Exception:
     logging.exception(
         (
@@ -72,9 +76,10 @@ __AUX_CACHE = {}
 
 
 def get_aux_vm_size_info(location: str, vm_size: str) -> AuxVMSizeInfo:
+    location = location.lower()
     key = (location, vm_size)
     if key not in __AUX_CACHE:
-        by_name = VM_SIZES.get(location)
+        by_name = VM_SIZES_LOWER.get(location)
 
         if not by_name:
             return AuxVMSizeInfo({"family": "unknown"})
