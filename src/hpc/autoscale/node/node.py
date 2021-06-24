@@ -138,15 +138,15 @@ class Node(ABC):
     def hostname(self) -> Optional[ht.Hostname]:
         if not self.__hostname:
             return self.__hostname
-        return self.__hostname.split(".")[0]
-    
+        return ht.Hostname(self.__hostname.split(".")[0])
+
     @nodeproperty
     def fqdn(self) -> Optional[ht.Hostname]:
         return self.__hostname
 
     @nodeproperty
     def hostname_or_uuid(self) -> Optional[ht.Hostname]:
-        return ht.Hostname(self.__hostname or self.delayed_node_id.transient_id)
+        return ht.Hostname(self.hostname or self.delayed_node_id.transient_id)
 
     @property
     def hostname_required(self) -> ht.Hostname:

@@ -559,7 +559,7 @@ class NodeManager:
             existing_nodes,  # type: ignore
             lambda n: (n.placement_group, n.bucket_id),
         )
-        
+
         buckets = partition_single(
             self.__node_buckets, lambda b: (b.placement_group, b.bucket_id)
         )

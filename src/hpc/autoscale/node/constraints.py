@@ -470,7 +470,7 @@ class And(BaseNodeConstraint):
         #         if len(constraints) == 1 and isinstance(constraints[0], list):
         #             constraints = constraints[0]
         self.constraints = get_constraints(list(constraints))
-    
+
     def weight_buckets(
         self, bucket_weights: List[Tuple["NodeBucket", float]]
     ) -> List[Tuple["NodeBucket", float]]:

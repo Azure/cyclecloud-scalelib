@@ -233,7 +233,11 @@ class DemandCalculator:
 
         # filter out nodes that have converged.
         booting_nodes = [
-            n for n in booting_nodes if n.exists and n.state not in ["Ready", "Started"]
+            n
+            for n in booting_nodes
+            if n.exists
+            and n.state not in ["Ready", "Started"]
+            and n.delayed_node_id.node_id
         ]
 
         by_id = partition_single(booting_nodes, lambda n: n.delayed_node_id.node_id)
@@ -276,12 +280,20 @@ class DemandCalculator:
         by_hostname: Dict[str, Node] = partition_single(
             self.__scheduler_nodes_queue, lambda n: n.hostname_or_uuid  # type: ignore
         )
+
+        all_hostnames_logged = False
+
         for new_snode in scheduler_nodes:
             if new_snode.hostname not in by_hostname:
                 logging.debug(
                     "Found new node[hostname=%s] that does not exist in CycleCloud",
                     new_snode.hostname,
                 )
+                if not all_hostnames_logged:
+                    all_hostnames = ", ".join(sorted(by_hostname))
+                    logging.debug("Hostnames as seen by CycleCloud: %s", all_hostnames)
+                    all_hostnames_logged = True
+
                 by_hostname[new_snode.hostname] = new_snode
                 self.__scheduler_nodes_queue.push(new_snode)
                 self.node_mgr.add_unmanaged_nodes([new_snode])

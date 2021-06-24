@@ -271,7 +271,7 @@ class SQLiteNodeHistory(NodeHistory):
                     node.idle_time_remaining = match_remaining
 
     def _execute(self, stmt: str) -> sqlite3.Cursor:
-        logging.debug(stmt)
+        logging.fine(stmt)
         return self.conn.execute(stmt)
 
     def __repr__(self) -> str:
