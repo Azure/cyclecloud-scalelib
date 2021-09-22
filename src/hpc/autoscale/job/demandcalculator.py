@@ -279,12 +279,12 @@ class DemandCalculator:
     def update_scheduler_nodes(self, scheduler_nodes: List[SchedulerNode]) -> None:
 
         by_hostname: Dict[str, Node] = partition_single(
-            self.__scheduler_nodes_queue, lambda n: n.hostname_or_uuid  # type: ignore
+            self.__scheduler_nodes_queue, lambda n: n.hostname_or_uuid.lower()  # type: ignore
         )
 
         for new_snode in scheduler_nodes:
-            if new_snode.hostname not in by_hostname:
-                by_hostname[new_snode.hostname] = new_snode
+            if new_snode.hostname.lower() not in by_hostname:
+                by_hostname[new_snode.hostname.lower()] = new_snode
                 self.__scheduler_nodes_queue.push(new_snode)
                 self.node_mgr.add_unmanaged_nodes([new_snode])
                 if new_snode.resources.get("ccnodeid"):
@@ -301,7 +301,7 @@ class DemandCalculator:
                 # TODO inform bucket catalog?
             elif new_snode.metadata.get("override_resources", True):
 
-                old_snode = by_hostname[new_snode.hostname_or_uuid]
+                old_snode = by_hostname[new_snode.hostname_or_uuid.lower()]
                 logging.fine(
                     "Found existing CycleCloud node[hostname=%s]", new_snode.hostname,
                 )
@@ -312,7 +312,7 @@ class DemandCalculator:
                     + " so ignoring the reported resources and only copying metadata",
                     new_snode.hostname,
                 )
-                old_snode = by_hostname[new_snode.hostname_or_uuid]
+                old_snode = by_hostname[new_snode.hostname_or_uuid.lower()]
                 old_snode.metadata.update(new_snode.metadata)
 
     def __str__(self) -> str:
