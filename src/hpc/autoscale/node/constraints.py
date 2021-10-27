@@ -283,7 +283,7 @@ class MinResourcePerNode(BaseNodeConstraint):
             )
 
         if node._is_example_node():
-            msg = "Resource[name={} value={}] < Bucket[array={} vm_size={} value={}]".format(
+            msg = "Resource[name={} value={}] > Bucket[array={} vm_size={} value={}]".format(
                 self.attr,
                 repr(self.value),
                 node.nodearray,
@@ -291,7 +291,7 @@ class MinResourcePerNode(BaseNodeConstraint):
                 repr(node.available[self.attr]),
             )
         else:
-            msg = "Resource[name={} value={}] < Node[name={} value={}]".format(
+            msg = "Resource[name={} value={}] > Node[name={} value={}]".format(
                 self.attr, repr(self.value), node.name, repr(node.available[self.attr]),
             )
         return SatisfiedResult("InsufficientResource", self, node, reasons=[msg],)
