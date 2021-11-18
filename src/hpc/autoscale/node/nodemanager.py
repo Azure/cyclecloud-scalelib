@@ -1286,6 +1286,7 @@ def _new_node_manager_79(
 
     nodearray_limits: Dict[str, _SharedLimit] = {}
     regional_limits: Dict[str, _SharedLimit] = {}
+    regional_spot_limits: Dict[str, _SharedLimit] = {}
     family_limits: Dict[str, _SharedLimit] = {}
 
     for nodearray_status in cluster_status.nodearrays:
@@ -1349,8 +1350,15 @@ def _new_node_manager_79(
             if vm_family == "unknown":
                 vm_family = bucket.definition.machine_type
 
-            if region not in regional_limits:
-                regional_limits[region] = _SharedLimit(
+            # bugfix: If spot instances came first, their regional limits were imposed on
+            # other buckets.
+            if nodearray.get("Interruptible"):
+                target_regional_limits = regional_spot_limits
+            else:
+                target_regional_limits = regional_limits
+
+            if region not in target_regional_limits:
+                target_regional_limits[region] = _SharedLimit(
                     "Region({})".format(region),
                     bucket.regional_consumed_core_count,
                     bucket.regional_quota_core_count,
@@ -1426,16 +1434,17 @@ def _new_node_manager_79(
                 ]
 
                 family_limit: Union[_SpotLimit, _SharedLimit] = family_limits[vm_family]
+                
                 if nodearray.get("Interruptible"):
                     # enabling spot/interruptible 0's out the family limit response
                     # as the regional limit is supposed to be used in its place,
                     # however that responsibility is on the caller and not the
                     # REST api. For this library we handle that for them.
-                    family_limit = _SpotLimit(regional_limits[region])
+                    family_limit = _SpotLimit(target_regional_limits[region])
 
                 bucket_limit = BucketLimits(
                     vcpu_count,
-                    regional_limits[region],
+                    target_regional_limits[region],
                     cluster_limit,
                     nodearray_limits[nodearray_name],
                     family_limit,
