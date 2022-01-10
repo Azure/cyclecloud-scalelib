@@ -1295,6 +1295,10 @@ def _new_node_manager_79(
             n for n in cluster_status.nodes if n["Name"] not in mimic_on_prem
         ]
 
+    assume_standalone_hostnames = autoscale_config.get(
+        "assume_standalone_hostnames", False
+    )
+
     all_node_names = [n["Name"] for n in nodes_list.nodes]
 
     buckets = []
@@ -1498,7 +1502,9 @@ def _new_node_manager_79(
                             % cc_node_rec
                         )
                         continue
-                    node = _node_from_cc_node(cc_node_rec, bucket, region)
+                    node = _node_from_cc_node(
+                        cc_node_rec, bucket, region, assume_standalone_hostnames
+                    )
                     nodes.append(node)
 
                 node_def = NodeDefinition(
@@ -1544,14 +1550,36 @@ def _new_node_manager_79(
 
 
 def _node_from_cc_node(
-    cc_node_rec: dict, bucket: NodearrayBucketStatus, region: ht.Location
+    cc_node_rec: dict,
+    bucket: NodearrayBucketStatus,
+    region: ht.Location,
+    assume_standalone_hostnames: bool = False,
 ) -> Node:
     node_id = ht.NodeId(cc_node_rec["NodeId"])
     node_name = ht.NodeName(cc_node_rec["Name"])
     nodearray_name = cc_node_rec["Template"]
     vm_size_node = cc_node_rec["MachineType"]
+    software_configuration = ImmutableOrderedDict(cc_node_rec.get("Configuration", {}))
     hostname = cc_node_rec.get("Hostname")
     private_ip = cc_node_rec.get("PrivateIp")
+
+    is_standalone_dns = (
+        software_configuration.get("cyclecloud", {})
+        .get("hosts", {})
+        .get("standalone_dns", {})
+        .get("enabled", True)
+    )
+    if is_standalone_dns and assume_standalone_hostnames and private_ip:
+        ip_bytes = [int(x) for x in private_ip.split(".")]
+        assumed_hostname = (
+            "ip-" + ("".join(["{0:0{1}x}".format(x, 2) for x in ip_bytes])).upper()
+        )
+        if hostname != assumed_hostname:
+            logging.debug(
+                f"Assuming hostname {assumed_hostname} (currently is {hostname}) for {node_name}"
+            )
+            hostname = assumed_hostname
+
     instance_id = cc_node_rec.get("InstanceId")
     vcpu_count = cc_node_rec.get("CoreCount") or bucket.virtual_machine.vcpu_count
     node_memory_gb = cc_node_rec.get("Memory") or (bucket.virtual_machine.memory)
@@ -1565,8 +1593,6 @@ def _node_from_cc_node(
     resources = deepcopy(
         cc_node_rec.get("Configuration", {}).get("autoscale", {}).get("resources", {})
     )
-
-    software_configuration = ImmutableOrderedDict(cc_node_rec.get("Configuration", {}))
 
     return Node(
         node_id=DelayedNodeId(node_name, node_id=node_id),
