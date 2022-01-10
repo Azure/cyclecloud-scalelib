@@ -174,7 +174,11 @@ class ShellDict(dict):
             setattr(self, attr_safe_key, value)
 
 
-def shell(config: Dict, shell_locals: Dict[str, Any], script: Optional[str],) -> None:
+def shell(
+    config: Dict,
+    shell_locals: Dict[str, Any],
+    script: Optional[str],
+) -> None:
     """
     Provides read only interactive shell. type gehelp()
     in the shell for more information
@@ -294,6 +298,7 @@ class CommonCLI(ABC):
             self.example_nodes = [Node.from_dict(x) for x in cache["example-nodes"]]
             self.node_names = cache["node-names"]
             self.hostnames = cache["hostnames"]
+            self._read_completion_data(cache)
         else:
             node_mgr = self._node_mgr(config, driver)
             self.example_nodes = self._make_example_nodes(config, node_mgr)
@@ -312,13 +317,27 @@ class CommonCLI(ABC):
                     "node-names": self.node_names,
                     "hostnames": self.hostnames,
                 }
+                self._add_completion_data(to_dump)
+
                 json_dump(to_dump, fw)
 
         return self.example_nodes
 
+    def _add_completion_data(self, completion_json: Dict) -> None:
+        pass
+
+    def _read_completion_data(self, completion_json: Dict) -> None:
+        pass
+
     def _node_mgr(
-        self, config: Dict, driver: Optional[SchedulerDriver] = None
+        self,
+        config: Dict,
+        driver: Optional[SchedulerDriver] = None,
+        force: bool = False,
     ) -> NodeManager:
+        if force:
+            self.__node_mgr = None
+        
         if self.__node_mgr is not None:
             return self.__node_mgr
         driver = driver or self._driver(config)
@@ -921,7 +940,8 @@ class CommonCLI(ABC):
 
                 if node.keep_alive and do_delete:
                     error(
-                        "%s is marked as KeepAlive=true. Please exclude this.", node,
+                        "%s is marked as KeepAlive=true. Please exclude this.",
+                        node,
                     )
 
                 if node.required:
@@ -1050,7 +1070,10 @@ class CommonCLI(ABC):
 
         demand_result = DemandResult([], filtered, [], [])
         demandprinter.print_demand(
-            output_columns, demand_result, output_format=output_format, long=long,
+            output_columns,
+            demand_result,
+            output_format=output_format,
+            long=long,
         )
 
     def buckets_parser(self, parser: ArgumentParser) -> None:
@@ -1108,14 +1131,20 @@ class CommonCLI(ABC):
         config["output_columns"] = output_columns
 
         demandprinter.print_demand(
-            output_columns, demand_result, output_format=output_format, long=long,
+            output_columns,
+            demand_result,
+            output_format=output_format,
+            long=long,
         )
 
     def limits_parser(self, parser: ArgumentParser) -> None:
         self._add_output_format(parser, default="json")
 
     def limits(
-        self, config: Dict, output_format: OutputFormat, long: bool = False,
+        self,
+        config: Dict,
+        output_format: OutputFormat,
+        long: bool = False,
     ) -> None:
         """
         Writes a detailed set of limits for each bucket. Defaults to json due to number of fields.
@@ -1150,7 +1179,10 @@ class CommonCLI(ABC):
         )
 
         demandprinter.print_demand(
-            output_columns, demand_result, output_format=output_format, long=long,
+            output_columns,
+            demand_result,
+            output_format=output_format,
+            long=long,
         )
 
     def config_parser(self, parser: ArgumentParser) -> None:
@@ -1334,7 +1366,12 @@ class CommonCLI(ABC):
         parser.add_argument("--job-id", "-j", required=True)
         parser.add_argument("--long", "-l", action="store_true", default=False)
 
-    def analyze(self, config: Dict, job_id: str, long: bool = False,) -> None:
+    def analyze(
+        self,
+        config: Dict,
+        job_id: str,
+        long: bool = False,
+    ) -> None:
         """
         Prints out relevant reasons that a job was not matched to any nodes.
         """
@@ -1704,7 +1741,10 @@ def create_arg_parser(
             return new_parser
 
         new_parser.add_argument(
-            "--config", "-c", default=default_config, required=not bool(default_config),
+            "--config",
+            "-c",
+            default=default_config,
+            required=not bool(default_config),
         ).completer = default_completer  # type: ignore
         return new_parser
 

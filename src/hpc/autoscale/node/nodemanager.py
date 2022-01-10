@@ -84,6 +84,7 @@ class NodeManager:
 
         self.__default_resources: List[_DefaultResource] = []
         self.__journal: List[_JournalEntry] = []
+        self._next_node_name_hook: Optional[Callable[[NodeBucket, int], str]] = None
         # list of nodes a user has 'allocated'.
         # self.new_nodes = []  # type: List[Node]
 
@@ -109,6 +110,7 @@ class NodeManager:
         allow_existing: bool = True,
         all_or_nothing: bool = False,
         assignment_id: Optional[str] = None,
+        node_namer: Optional[Callable[[], str]] = None,
     ) -> AllocationResult:
 
         if not allow_existing:
@@ -579,11 +581,17 @@ class NodeManager:
     def _next_node_name(self, bucket: NodeBucket) -> ht.NodeName:
         index = 1
         while True:
-            name = ht.NodeName("{}-{}".format(bucket.nodearray, index))
+            if self._next_node_name_hook:
+                name = ht.NodeName(self._next_node_name_hook(bucket, index))
+            else:
+                name = ht.NodeName("{}-{}".format(bucket.nodearray, index))
             if name not in self._node_names:
                 self._node_names[name] = False
                 return name
             index += 1
+
+    def set_node_name_hook(self, hook: Callable[[NodeBucket, int], str]) -> None:
+        self._next_node_name_hook = hook
 
     @apitrace
     def add_unmanaged_nodes(self, existing_nodes: List[UnmanagedNode]) -> None:

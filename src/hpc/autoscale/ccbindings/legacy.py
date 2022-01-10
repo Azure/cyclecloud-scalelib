@@ -93,6 +93,7 @@ class ClusterBinding(ClusterBindingInterface):
         creation_request.sets = []
         # the node attributes aren't hashable, so a string representation
         # is good enough to ensure they are all the same across the list.
+
         p_nodes_dict = partition(
             nodes,
             lambda n: (
@@ -101,6 +102,7 @@ class ClusterBinding(ClusterBindingInterface):
                 n.placement_group,
                 str(n.node_attribute_overrides),
                 n.keep_alive,
+                n.name_format,
             ),
         )
 
@@ -114,14 +116,18 @@ class ClusterBinding(ClusterBindingInterface):
                 return (n.nodearray, -1)
 
         for key, p_nodes in p_nodes_dict.items():
-            nodearray, vm_size, pg, _, keep_alive = key
+            nodearray, vm_size, pg, _, keep_alive, name_format = key
             request_set = NodeCreationRequestSet()
 
+            if name_format:
+                request_set.name_format = name_format
             request_set.nodearray = nodearray
             request_set.count = len(p_nodes)
             request_set.placement_group_id = pg
             request_set.definition = NodeCreationRequestSetDefinition()
             request_set.definition.machine_type = vm_size
+
+            print(json.dumps(request_set.to_dict(), indent=2))
 
             if p_nodes[0].node_attribute_overrides:
                 request_set.node_attributes = deepcopy(
