@@ -149,6 +149,12 @@ class NodeBucket:
         self.__decrement_counter = 0
 
     @property
+    def max_count(self) -> int:
+        if self.placement_group:
+            self.max_placement_group_size
+        return self.limits.max_count
+
+    @property
     def available_count(self) -> int:
         # non-pg buckets return -1
         pg_available = self.limits.placement_group_available_count
@@ -324,10 +330,14 @@ class NodeBucket:
 
 
 def bucket_candidates(
-    candidates: List["NodeBucket"], constraints: List["constraintslib.NodeConstraint"],
+    candidates: List["NodeBucket"],
+    constraints: List["constraintslib.NodeConstraint"],
 ) -> CandidatesResult:
     if not candidates:
-        return CandidatesResult("NoBucketsDefined", child_results=[],)
+        return CandidatesResult(
+            "NoBucketsDefined",
+            child_results=[],
+        )
 
     for c in candidates:
         assert isinstance(c, NodeBucket)
