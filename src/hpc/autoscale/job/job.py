@@ -40,10 +40,8 @@ def _check_type(**kwargs: Any) -> None:
 
 
 def _initialize_job_config() -> None:
-    config_path = os.getenv("AUTOSCALE_JOB_CONFIG", "/opt/cycle/pbspro/allocate.conf")
+    config_path = os.getenv("AUTOSCALE_JOB_CONFIG", "/opt/cycle/pbspro/autoscale.conf")
     cwd = os.getcwd()
-    logging.info("config_path %s", config_path)
-    logging.info("Current working directory: {0}".format(cwd))
     if os.path.exists(config_path):
         job_config = configparser.ConfigParser()
         job_config.read(config_path)
@@ -94,15 +92,12 @@ class Job:
 
         _check_type(node_count=node_count, type=int)
         jobsize, extranode = _initialize_job_config()
-        logging.info("config %s", jobsize)
         if node_count >= jobsize:
             self.__node_count = node_count + extranode
             self.__nodes_remaining = node_count + extranode
         else:
             self.__node_count = node_count
             self.__nodes_remaining = node_count
-        #self.__node_count = node_count
-        #self.__nodes_remaining = node_count
 
         _check_type(colocated=colocated, type=bool)
         self.__colocated = colocated
