@@ -221,8 +221,8 @@ class Memory(Size):
         return "memory::" + str(self)
 
     @classmethod
-    def value_of(cls, value: typing.Union[SizeValue, "Size", str]) -> "Size":
-        return Size._value_of(Memory, value)
+    def value_of(cls, value: typing.Union[SizeValue, "Size", str]) -> "Memory":
+        return Size._value_of(Memory, value)  # type: ignore
 
     def convert_to(self, new_mag: SizeMagnitude) -> "Size":
         if new_mag == self.magnitude:
