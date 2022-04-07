@@ -7,11 +7,12 @@ from abc import ABC, abstractmethod
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.hpctypes import Hostname, NodeId
+from hpc.autoscale.job.demandprinter import logging_stream
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.util import partition_single
 
 # TODO RDH reset
-SQLITE_VERSION = "0.0.4"
+SQLITE_VERSION = "0.0.5"
 
 
 NodeHistoryResult = typing.List[typing.Tuple[NodeId, Hostname, float]]
@@ -106,8 +107,9 @@ def initialize_db(path: str, read_only: bool, uri: bool = False) -> sqlite3.Conn
     try:
         conn.execute(
             """CREATE TABLE nodes (node_id TEXT PRIMARY KEY, hostname TEXT,
-                                   last_match_time REAL, create_time REAL,
-                                   delete_time REAL)"""
+                                   instance_id TEXT,
+                                   create_time REAL, last_match_time REAL,
+                                   ready_time REAL, delete_time REAL)"""
         )
     except sqlite3.OperationalError as e:
         if "table nodes already exists" not in e.args:
@@ -134,8 +136,8 @@ class SQLiteNodeHistory(NodeHistory):
 
         rows = list(
             self._execute(
-                """SELECT node_id, hostname, last_match_time,
-                          create_time from nodes where delete_time IS NULL"""
+                """SELECT node_id, instance_id, hostname, create_time, last_match_time, ready_time
+                         from nodes where delete_time IS NULL"""
             )
         )
 
@@ -147,31 +149,61 @@ class SQLiteNodeHistory(NodeHistory):
         )
 
         to_delete = set(rows_by_id.keys()) - set(nodes_by_id.keys())
+        to_pre_delete = []
+        for node_id, node in nodes_by_id.items():
+            row = rows_by_id.get(node_id)
+            if row:
+                instance_id = row[1]
+                if instance_id and node.instance_id and node.instance_id != instance_id:
+                    to_pre_delete.append(node_id)
+                    rows_by_id.pop(node_id)
+
+        if to_pre_delete:
+            for node_id in to_pre_delete:
+                self._execute("DELETE FROM nodes where node_id='{node_id}'")
 
         for node in nodes:
             node_id = node.delayed_node_id.node_id
 
             if node_id not in rows_by_id:
                 # first time we see it, just put an entry
-                rows_by_id[node_id] = tuple([node_id, node.hostname, now, now])
+                rows_by_id[node_id] = tuple(
+                    [node_id, node.instance_id, node.hostname, now, now, 0]
+                )
 
             if node.required:
                 rec = list(rows_by_id[node_id])
                 rec[-2] = now
                 rows_by_id[node_id] = tuple(rec)
 
+            if node.state == "Ready":
+                node_id, instance_id, hostname, create_time, match_time, ready_time = rows_by_id[
+                    node_id
+                ]
+                if ready_time < 1:
+                    rows_by_id[node_id] = tuple(
+                        [node_id, instance_id, hostname, create_time, match_time, now]
+                    )
+
         if rows_by_id:
             exprs = []
             for row in rows_by_id.values():
-                node_id, hostname, match_time, create_time = row
-                expr = "('{}', '{}', {}, {}, NULL)".format(
-                    node_id, hostname, match_time, create_time
+                (
+                    node_id,
+                    instance_id,
+                    hostname,
+                    create_time,
+                    match_time,
+                    ready_time,
+                ) = row
+                expr = "('{}', '{}', '{}', {}, {}, {}, NULL)".format(
+                    node_id, instance_id, hostname, create_time, match_time, ready_time,
                 )
                 exprs.append(expr)
 
             values_expr = ",".join(exprs)
 
-            stmt = "INSERT OR REPLACE INTO nodes (node_id, hostname, last_match_time, create_time, delete_time) VALUES {}".format(
+            stmt = "INSERT OR REPLACE INTO nodes (node_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time) VALUES {}".format(
                 values_expr
             )
             self._execute(stmt)
@@ -180,11 +212,34 @@ class SQLiteNodeHistory(NodeHistory):
             to_delete_expr = " OR ".join(
                 ['node_id="{}"'.format(node_id) for node_id in to_delete]
             )
-            now = datetime.datetime.utcnow().timestamp()
+            now = self.now()
             self._execute(
                 "UPDATE nodes set delete_time={} where {}".format(now, to_delete_expr)
             )
+        import sys
 
+        ls = logging_stream(sys.stdout)
+        print(
+            "\t".join(
+                [
+                    "node_id",
+                    "instance_id",
+                    "hostname",
+                    "create_time",
+                    "last_match_time",
+                    "ready_time",
+                    "delete_time",
+                ]
+            ),
+            file=ls,
+        )
+        for row in list(
+            self._execute(
+                "select node_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time from nodes"
+            )
+        ):
+            print("\t".join([str(x) for x in row]), file=ls)
+        ls.flush()
         self.retire_records(commit=True)
 
     def retire_records(
@@ -207,7 +262,7 @@ class SQLiteNodeHistory(NodeHistory):
             self.conn.commit()
 
     def find_unmatched(self, for_at_least: float = 300) -> NodeHistoryResult:
-        now = datetime.datetime.utcnow().timestamp()
+        now = self.now()
         omega = now - for_at_least
         return list(
             self._execute(
@@ -218,13 +273,12 @@ class SQLiteNodeHistory(NodeHistory):
         )
 
     def find_booting(self, for_at_least: float = 1800) -> NodeHistoryResult:
-        now = datetime.datetime.utcnow().timestamp()
+        now = self.now()
         omega = now - for_at_least
+
         return list(
             self._execute(
-                "SELECT node_id, hostname, create_time from nodes where create_time < {}".format(
-                    omega
-                )
+                f"SELECT node_id, hostname, create_time as ctime from nodes where ctime < {omega} AND ready_time < create_time"
             )
         )
 
@@ -240,7 +294,7 @@ class SQLiteNodeHistory(NodeHistory):
         if not equalities:
             return
 
-        stmt = "select node_id, last_match_time, create_time, delete_time from nodes where {}".format(
+        stmt = "select node_id, create_time, last_match_time, ready_time, delete_time from nodes where {}".format(
             "{}".format(" OR ".join(equalities))
         )
 
@@ -262,15 +316,22 @@ class SQLiteNodeHistory(NodeHistory):
 
             if node_id in rows_by_id:
 
-                node_id, last_match_time, create_time, delete_time = rows_by_id[node_id]
+                (
+                    node_id,
+                    create_time,
+                    last_match_time,
+                    ready_time,
+                    delete_time,
+                ) = rows_by_id[node_id]
                 node.create_time_unix = create_time
                 node.last_match_time_unix = last_match_time
                 node.delete_time_unix = delete_time
 
                 if self.create_timeout:
-                    create_elapsed = max(0, now - create_time)
-                    create_remaining = max(0, self.create_timeout - create_elapsed)
-                    node.create_time_remaining = create_remaining
+                    if ready_time < 1:
+                        create_elapsed = max(0, now - create_time)
+                        create_remaining = max(0, self.create_timeout - create_elapsed)
+                        node.create_time_remaining = create_remaining
 
                 if self.last_match_timeout:
                     if node.keep_alive:

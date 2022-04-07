@@ -1423,6 +1423,10 @@ def _new_node_manager_79(
 
                 bucket_id = bucket.bucket_id
 
+                for n in nodes_list.nodes:
+                    ov = autoscale_config.get("_node-overrides", {})
+                    n.update(ov.get(n.get(""), {}))
+
                 # TODO the bucket has a list of node names
                 cc_node_records = [
                     n
@@ -1434,7 +1438,7 @@ def _new_node_manager_79(
                 ]
 
                 family_limit: Union[_SpotLimit, _SharedLimit] = family_limits[vm_family]
-                
+
                 if nodearray.get("Interruptible"):
                     # enabling spot/interruptible 0's out the family limit response
                     # as the regional limit is supposed to be used in its place,
