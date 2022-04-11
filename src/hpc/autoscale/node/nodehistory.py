@@ -9,7 +9,7 @@ import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.hpctypes import Hostname, NodeId
 from hpc.autoscale.job.demandprinter import logging_stream
 from hpc.autoscale.node.node import Node
-from hpc.autoscale.util import partition_single
+from hpc.autoscale.util import parse_boot_timeout, parse_idle_timeout, partition_single
 
 # TODO RDH reset
 SQLITE_VERSION = "0.0.5"
@@ -31,8 +31,11 @@ class NodeHistory(ABC):
     def find_booting(self, for_at_least: float = 1800) -> NodeHistoryResult:
         pass
 
-    def decorate(self, nodes: typing.List[Node]) -> None:
+    def decorate(self, nodes: typing.List[Node], config: typing.Dict = {}) -> None:
         pass
+
+    def now(self) -> float:
+        return datetime.datetime.utcnow().timestamp()
 
 
 class NullNodeHistory(NodeHistory):
@@ -123,10 +126,6 @@ class SQLiteNodeHistory(NodeHistory):
         self.path = path
         self.conn = initialize_db(path, read_only)
         self.read_only = read_only
-        self.last_match_timeout = self.create_timeout = 0.0
-
-    def now(self) -> float:
-        return datetime.datetime.utcnow().timestamp()
 
     def update(self, nodes: typing.Iterable[Node]) -> None:
         if self.read_only:
@@ -175,8 +174,9 @@ class SQLiteNodeHistory(NodeHistory):
                 rec = list(rows_by_id[node_id])
                 rec[-2] = now
                 rows_by_id[node_id] = tuple(rec)
-
-            if node.state == "Ready":
+            # if a node is running a job according to the scheduler, assume it
+            # is 'ready' for boot timeout purposes.
+            if node.state == "Ready" or node.metadata.get("_running_job_"):
                 node_id, instance_id, hostname, create_time, match_time, ready_time = rows_by_id[
                     node_id
                 ]
@@ -216,30 +216,7 @@ class SQLiteNodeHistory(NodeHistory):
             self._execute(
                 "UPDATE nodes set delete_time={} where {}".format(now, to_delete_expr)
             )
-        import sys
-
-        ls = logging_stream(sys.stdout)
-        print(
-            "\t".join(
-                [
-                    "node_id",
-                    "instance_id",
-                    "hostname",
-                    "create_time",
-                    "last_match_time",
-                    "ready_time",
-                    "delete_time",
-                ]
-            ),
-            file=ls,
-        )
-        for row in list(
-            self._execute(
-                "select node_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time from nodes"
-            )
-        ):
-            print("\t".join([str(x) for x in row]), file=ls)
-        ls.flush()
+        
         self.retire_records(commit=True)
 
     def retire_records(
@@ -282,7 +259,7 @@ class SQLiteNodeHistory(NodeHistory):
             )
         )
 
-    def decorate(self, nodes: typing.List[Node]) -> None:
+    def decorate(self, nodes: typing.List[Node], config: typing.Dict = {}) -> None:
         if not nodes:
             nodes = []
 
@@ -323,23 +300,25 @@ class SQLiteNodeHistory(NodeHistory):
                     ready_time,
                     delete_time,
                 ) = rows_by_id[node_id]
+
                 node.create_time_unix = create_time
                 node.last_match_time_unix = last_match_time
                 node.delete_time_unix = delete_time
-
-                if self.create_timeout:
+                boot_timeout = parse_boot_timeout(config, node)
+                idle_timeout = parse_idle_timeout(config, node)
+                if boot_timeout:
                     if ready_time < 1:
                         create_elapsed = max(0, now - create_time)
-                        create_remaining = max(0, self.create_timeout - create_elapsed)
+                        create_remaining = max(0, boot_timeout - create_elapsed)
                         node.create_time_remaining = create_remaining
 
-                if self.last_match_timeout:
+                if idle_timeout:
                     if node.keep_alive:
                         node.idle_time_remaining = -1
                     else:
                         match_elapsed = max(0, now - last_match_time)
                         match_remaining = max(
-                            0, self.last_match_timeout - match_elapsed
+                            0, idle_timeout - match_elapsed
                         )
                         node.idle_time_remaining = match_remaining
 

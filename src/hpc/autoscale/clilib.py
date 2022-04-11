@@ -34,7 +34,13 @@ from hpc.autoscale.results import (
     MatchResult,
     register_result_handler,
 )
-from hpc.autoscale.util import json_dump, load_config, partition_single
+from hpc.autoscale.util import (
+    json_dump,
+    load_config,
+    parse_boot_timeout,
+    parse_idle_timeout,
+    partition_single,
+)
 
 
 def _print(*msg: Any) -> None:
@@ -466,14 +472,19 @@ class CommonCLI(ABC):
 
         # we also tell the driver about nodes that are unmatched. It filters them out
         # and returns a list of ones we can delete.
-        idle_timeout = int(config.get("idle_timeout", 300))
-        boot_timeout = int(config.get("boot_timeout", 3600))
-        logging.fine("Idle timeout is %s", idle_timeout)
+
+        def idle_at_least(node: Node) -> float:
+            return parse_idle_timeout(config, node)
+        
+        def booting_at_least(node: Node) -> float:
+            return parse_boot_timeout(config, node)
 
         unmatched_for_5_mins = demand_calculator.find_unmatched_for(
-            at_least=idle_timeout
+            at_least=idle_at_least
         )
-        timed_out_booting = demand_calculator.find_booting(at_least=boot_timeout)
+        timed_out_booting = demand_calculator.find_booting(
+            at_least=booting_at_least
+        )
 
         # I don't care about nodes that have keep_alive=true
         timed_out_booting = [n for n in timed_out_booting if not n.keep_alive]
@@ -491,7 +502,7 @@ class CommonCLI(ABC):
         if unmatched_for_5_mins:
             node_expr = ", ".join([str(x) for x in unmatched_for_5_mins])
             logging.info(
-                "Unmatched for at least %s seconds: %s", idle_timeout, node_expr
+                "IdleTimeout reached: %s", node_expr
             )
             unmatched_nodes_to_delete = (
                 driver.handle_draining(unmatched_for_5_mins) or []

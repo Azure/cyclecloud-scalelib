@@ -91,7 +91,7 @@ class TempNode(Node):
             self=self,
             node_id=DelayedNodeId(ht.NodeName(hostname)),
             name=ht.NodeName(hostname),
-            nodearray=ht.NodeArrayName("unknown"),
+            nodearray=ht.NodeArrayName(overrides.get("nodearray", "unknown")),
             bucket_id=bucket_id or ht.BucketId(str(uuid4())),
             hostname=ht.Hostname(hostname),
             private_ip=None,

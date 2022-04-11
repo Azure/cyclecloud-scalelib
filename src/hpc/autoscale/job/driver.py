@@ -127,9 +127,6 @@ class SchedulerDriver(ABC):
         read_only = config.get("read_only", False)
         node_history = SQLiteNodeHistory(db_path, read_only)
 
-        node_history.create_timeout = config.get("boot_timeout", 3600)
-        node_history.last_match_timeout = config.get("idle_timeout", 300)
-
         return node_history
 
     def read_jobs_and_nodes(

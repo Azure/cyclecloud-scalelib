@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.codeanalysis import hpcwrapclass
@@ -39,11 +39,13 @@ class DemandCalculator:
 
     def __init__(
         self,
+        config: Dict,
         node_mgr: NodeManager,
         node_history: NodeHistory = NullNodeHistory(),
         node_queue: Optional[NodeQueue] = None,
         singleton_lock: Optional[SingletonLock] = None,
     ) -> None:
+        self.config = config
         assert isinstance(node_mgr, NodeManager)
         self.node_mgr = node_mgr
         self.node_history = node_history
@@ -58,7 +60,7 @@ class DemandCalculator:
 
         self.__set_buffer_delayed_invocations: List[Tuple[Any, ...]] = []
 
-        self.node_history.decorate(list(self.__scheduler_nodes_queue))
+        self.node_history.decorate(list(self.__scheduler_nodes_queue), config)
 
         if not singleton_lock:
             singleton_lock = new_singleton_lock({})
@@ -209,28 +211,42 @@ class DemandCalculator:
 
     @apitrace
     def find_unmatched_for(
-        self, at_least: float = 300, unmatched_nodes: Optional[List[Node]] = None,
+        self,
+        at_least: Union[Callable[[Node], float], float, int] = 300,
+        unmatched_nodes: Optional[List[Node]] = None,
     ) -> List[Node]:
+        if isinstance(at_least, (int, float)):
+            at_least_value = at_least
+            at_least = lambda node: at_least_value
         unmatched_nodes = unmatched_nodes or self.get_demand().unmatched_nodes
         by_id = dict([(n.delayed_node_id.node_id, n) for n in unmatched_nodes])
         ret = []
         for node_id, hostname, idle_time in self.node_history.find_unmatched(
-            for_at_least=at_least
+            for_at_least=-1
         ):
-            if node_id and node_id in by_id and idle_time > at_least:
-                node = by_id[node_id]
+            node = by_id.get(node_id)
+            if not node:
+                continue
+            at_least_delta = at_least(node)
+            omega = self.node_history.now() - at_least_delta
+            if idle_time < omega:
                 if node.assignments:
                     continue
-
                 ret.append(node)
         return ret
 
     @apitrace
     def find_booting(
-        self, at_least: float = 1800, booting_nodes: Optional[List[Node]] = None,
+        self,
+        at_least: Union[Callable[[Node], float], float, int] = 1800,
+        booting_nodes: Optional[List[Node]] = None,
     ) -> List[Node]:
         if not booting_nodes:
             booting_nodes = self.node_mgr.get_nodes()
+
+        if isinstance(at_least, (int, float)):
+            at_least_value = at_least
+            at_least = lambda node: at_least_value
 
         # filter out nodes that have converged.
         booting_nodes = [
@@ -245,12 +261,15 @@ class DemandCalculator:
 
         ret = []
         for node_id, hostname, create_time in self.node_history.find_booting(
-            for_at_least=at_least
+            for_at_least=-1
         ):
-            if not node_id:
-                continue
 
-            if node_id in by_id:
+            node = by_id.get(node_id)
+            if not node:
+                continue
+            at_least_delta = at_least(node)
+            omega = self.node_history.now() - at_least_delta
+            if create_time < omega:
                 ret.append(by_id[node_id])
 
         return ret
@@ -382,7 +401,7 @@ def new_demand_calculator(
     if singleton_lock is None:
         singleton_lock = new_singleton_lock(config_dict)
 
-    dc = DemandCalculator(node_mgr, node_history, node_queue, singleton_lock)
+    dc = DemandCalculator(config_dict, node_mgr, node_history, node_queue, singleton_lock)
 
     dc.update_scheduler_nodes(existing_nodes)
 

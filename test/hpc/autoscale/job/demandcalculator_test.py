@@ -36,7 +36,7 @@ def teardown_function(function) -> None:
 @pytest.mark.skip
 def test_no_buckets():
     node_mgr = NodeManager(MockClusterBinding(), [])
-    dc = DemandCalculator(
+    dc = DemandCalculator({},
         node_mgr, NullNodeHistory(), singleton_lock=util.NullSingletonLock()
     )
     result = dc._add_job(Job("1", {"ncpus": 2}))
