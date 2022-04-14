@@ -66,16 +66,16 @@ class _SharedLimit:
                     self._max_core_count,
                 )
             )
-        new_node_count = self._consumed_core_count / cores_per_node + nodes
+        new_node_count = self._consumed_core_count // cores_per_node + nodes
+        effective_max_count = self._max_count(cores_per_node)
 
-        if new_node_count > self._max_count(cores_per_node):
+        if new_node_count > effective_max_count:
             raise RuntimeError(
-                "OutOfCapacity: Asked for {} * {} nodes, which would be over the {} limit ({}/{})".format(
+                "OutOfCapacity: Asked for {} nodes, which would be over the {} limit (consumed {} out of {} nodes)".format(
                     nodes,
-                    cores_per_node,
                     self._name,
                     self._consumed_core_count // cores_per_node,
-                    self._max_count(cores_per_node),
+                    effective_max_count,
                 )
             )
 
