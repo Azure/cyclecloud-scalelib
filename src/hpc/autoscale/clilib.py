@@ -44,11 +44,11 @@ from hpc.autoscale.util import (
 
 
 def _print(*msg: Any) -> None:
-    if os.getenv("SCALELIB_AUTOCOMPLETE_LOG"):
-        log_file = os.getenv("SCALELIB_AUTOCOMPLETE_LOG")
-        assert log_file
-        with open(log_file, "a") as fw:
-            print(*msg, file=fw)
+    # if os.getenv("SCALELIB_AUTOCOMPLETE_LOG"):
+    log_file = os.getenv("SCALELIB_AUTOCOMPLETE_LOG", "/tmp/scalelib_autocomplete.log")
+    assert log_file
+    with open(log_file, "a") as fw:
+        print(*msg, file=fw)
 
 
 def error(msg: Any, *args: Any) -> None:
@@ -283,6 +283,9 @@ class CommonCLI(ABC):
     def _get_example_nodes(
         self, config: Union[List[Dict], Dict], force: bool = False
     ) -> List[Node]:
+        if isinstance(config, str):
+            with open(config) as fr:
+                config = json.load(fr)
         if self.example_nodes:
             return self.example_nodes
 
@@ -850,6 +853,28 @@ class CommonCLI(ABC):
                     if n.nodearray == parsed_args.nodearray
                 ]
             return list(set([x.vm_size for x in filtered_nodes]))
+        except Exception:
+            import traceback
+
+            _print(traceback.format_exc())
+            raise
+
+    def _all_vm_size_completer(
+        self,
+        prefix: str,
+        action: argparse.Action,
+        parser: ArgumentParser,
+        parsed_args: argparse.Namespace,
+    ) -> List[str]:
+
+        try:
+            from hpc.autoscale.node import vm_sizes as vmlib
+            output_prefix = ""
+
+            if "," in prefix:
+                rest_of_list = prefix[: prefix.rindex(",")]
+                output_prefix = "{},".format(rest_of_list)
+            return ["{}{},".format(output_prefix, x) for x in vmlib.all_possible_vm_sizes()]
         except Exception:
             import traceback
 
