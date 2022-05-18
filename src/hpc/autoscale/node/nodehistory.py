@@ -7,12 +7,11 @@ from abc import ABC, abstractmethod
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.hpctypes import Hostname, NodeId
-from hpc.autoscale.job.demandprinter import logging_stream
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.util import parse_boot_timeout, parse_idle_timeout, partition_single
 
 # TODO RDH reset
-SQLITE_VERSION = "0.0.5"
+SQLITE_VERSION = "0.0.6"
 
 
 NodeHistoryResult = typing.List[typing.Tuple[NodeId, Hostname, float]]
@@ -29,6 +28,18 @@ class NodeHistory(ABC):
 
     @abstractmethod
     def find_booting(self, for_at_least: float = 1800) -> NodeHistoryResult:
+        pass
+
+    @abstractmethod
+    def find_ignored(self) -> NodeHistoryResult:
+        pass
+
+    @abstractmethod
+    def mark_ignored(self, nodes: typing.List[Node]) -> None:
+        pass
+
+    @abstractmethod
+    def unmark_ignored(self, nodes: typing.List[Node]) -> None:
         pass
 
     def decorate(self, nodes: typing.List[Node], config: typing.Dict = {}) -> None:
@@ -58,6 +69,25 @@ class NullNodeHistory(NodeHistory):
             for n in self.nodes
             if n.delayed_node_id.node_id
         ]
+
+    def find_ignored(self) -> NodeHistoryResult:
+        return [
+            (n.delayed_node_id.node_id, n.hostname_required, 0)
+            for n in self.nodes
+            if n.metadata.get("__ignore__")
+        ]
+
+    def mark_ignored(self, nodes: typing.List[Node]) -> None:
+        for n in self.nodes:
+            n.metadata["__ignore__"] = True
+
+    def unmark_ignored(self, nodes: typing.List[Node]) -> None:
+        for n in self.nodes:
+            n.metadata["__ignore__"] = False
+
+
+def upgrade_database(current_version: str, conn: sqlite3.Connection) -> None:
+    assert False, "Please contact CycleCloud support"
 
 
 def initialize_db(path: str, read_only: bool, uri: bool = False) -> sqlite3.Connection:
@@ -101,6 +131,9 @@ def initialize_db(path: str, read_only: bool, uri: bool = False) -> sqlite3.Conn
         version = SQLITE_VERSION
 
     if version != SQLITE_VERSION:
+        if SQLITE_VERSION > "0.0.6":
+            upgrade_database(version, conn)
+
         conn.close()
         new_path = "{}.{}".format(path, version)
         print("Invalid version - moving to {}".format(new_path))
@@ -112,7 +145,8 @@ def initialize_db(path: str, read_only: bool, uri: bool = False) -> sqlite3.Conn
             """CREATE TABLE nodes (node_id TEXT PRIMARY KEY, hostname TEXT,
                                    instance_id TEXT,
                                    create_time REAL, last_match_time REAL,
-                                   ready_time REAL, delete_time REAL)"""
+                                   ready_time REAL, delete_time REAL,
+                                   ignore BOOL)"""
         )
     except sqlite3.OperationalError as e:
         if "table nodes already exists" not in e.args:
@@ -135,7 +169,7 @@ class SQLiteNodeHistory(NodeHistory):
 
         rows = list(
             self._execute(
-                """SELECT node_id, instance_id, hostname, create_time, last_match_time, ready_time
+                """SELECT node_id, instance_id, hostname, create_time, last_match_time, ready_time, ignore
                          from nodes where delete_time IS NULL"""
             )
         )
@@ -148,18 +182,6 @@ class SQLiteNodeHistory(NodeHistory):
         )
 
         to_delete = set(rows_by_id.keys()) - set(nodes_by_id.keys())
-        to_pre_delete = []
-        for node_id, node in nodes_by_id.items():
-            row = rows_by_id.get(node_id)
-            if row:
-                instance_id = row[1]
-                if instance_id and node.instance_id and node.instance_id != instance_id:
-                    to_pre_delete.append(node_id)
-                    rows_by_id.pop(node_id)
-
-        if to_pre_delete:
-            for node_id in to_pre_delete:
-                self._execute("DELETE FROM nodes where node_id='{node_id}'")
 
         for node in nodes:
             node_id = node.delayed_node_id.node_id
@@ -167,7 +189,7 @@ class SQLiteNodeHistory(NodeHistory):
             if node_id not in rows_by_id:
                 # first time we see it, just put an entry
                 rows_by_id[node_id] = tuple(
-                    [node_id, node.instance_id, node.hostname, now, now, 0]
+                    [node_id, node.instance_id, node.hostname, now, now, 0, False]
                 )
 
             if node.required:
@@ -177,12 +199,26 @@ class SQLiteNodeHistory(NodeHistory):
             # if a node is running a job according to the scheduler, assume it
             # is 'ready' for boot timeout purposes.
             if node.state == "Ready" or node.metadata.get("_running_job_"):
-                node_id, instance_id, hostname, create_time, match_time, ready_time = rows_by_id[
-                    node_id
-                ]
+                (
+                    node_id,
+                    instance_id,
+                    hostname,
+                    create_time,
+                    match_time,
+                    ready_time,
+                    ignore,
+                ) = rows_by_id[node_id]
                 if ready_time < 1:
                     rows_by_id[node_id] = tuple(
-                        [node_id, instance_id, hostname, create_time, match_time, now]
+                        [
+                            node_id,
+                            instance_id,
+                            hostname,
+                            create_time,
+                            match_time,
+                            now,
+                            ignore,
+                        ]
                     )
 
         if rows_by_id:
@@ -195,15 +231,15 @@ class SQLiteNodeHistory(NodeHistory):
                     create_time,
                     match_time,
                     ready_time,
+                    ignore,
                 ) = row
-                expr = "('{}', '{}', '{}', {}, {}, {}, NULL)".format(
-                    node_id, instance_id, hostname, create_time, match_time, ready_time,
-                )
+                expr = f"('{node_id}', '{instance_id}', '{hostname}', {create_time}, {match_time}, {ready_time}, NULL, {str(ignore).lower()})".lower()
+
                 exprs.append(expr)
 
             values_expr = ",".join(exprs)
 
-            stmt = "INSERT OR REPLACE INTO nodes (node_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time) VALUES {}".format(
+            stmt = "INSERT OR REPLACE INTO nodes (node_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time, ignore) VALUES {}".format(
                 values_expr
             )
             self._execute(stmt)
@@ -216,7 +252,7 @@ class SQLiteNodeHistory(NodeHistory):
             self._execute(
                 "UPDATE nodes set delete_time={} where {}".format(now, to_delete_expr)
             )
-        
+
         self.retire_records(commit=True)
 
     def retire_records(
@@ -317,10 +353,31 @@ class SQLiteNodeHistory(NodeHistory):
                         node.idle_time_remaining = -1
                     else:
                         match_elapsed = max(0, now - last_match_time)
-                        match_remaining = max(
-                            0, idle_timeout - match_elapsed
-                        )
+                        match_remaining = max(0, idle_timeout - match_elapsed)
                         node.idle_time_remaining = match_remaining
+
+    def find_ignored(self) -> NodeHistoryResult:
+        return list(
+            self._execute(
+                f"SELECT node_id, hostname, create_time as ctime from nodes where ignore"
+            )
+        )
+
+    def mark_ignored(self, nodes: typing.List[Node]) -> None:
+        for n in nodes:
+            if n.delayed_node_id:
+                self._execute(
+                    f"UPDATE nodes SET ignore=true WHERE node_id='{n.delayed_node_id.node_id}'"
+                )
+        self.conn.commit()
+
+    def unmark_ignored(self, nodes: typing.List[Node]) -> None:
+        for n in nodes:
+            if n.delayed_node_id:
+                self._execute(
+                    f"UPDATE nodes SET ignore=false WHERE node_id='{n.delayed_node_id.node_id}'"
+                )
+        self.conn.commit()
 
     def _execute(self, stmt: str) -> sqlite3.Cursor:
         logging.debug(stmt)

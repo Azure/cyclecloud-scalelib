@@ -14,8 +14,8 @@ from hpc.autoscale.util import (
     is_valid_hostname,
     load_config,
     new_singleton_lock,
-    parse_idle_timeout,
     parse_boot_timeout,
+    parse_idle_timeout,
     partition,
     partition_single,
 )
@@ -244,11 +244,15 @@ def test_is_valid_hostname() -> None:
 def test_timeouts() -> None:
     node = TempNode("localhost", nodearray="hpc")
     assert 500 == parse_idle_timeout({"idle_timeout": {"default": 500}}, node)
-    assert 200 == parse_idle_timeout({"idle_timeout": {"default": 500, "hpc": 200}}, node)
+    assert 200 == parse_idle_timeout(
+        {"idle_timeout": {"default": 500, "hpc": 200}}, node
+    )
     assert 300 == parse_idle_timeout({"idle_timeout": {}}, node)
     assert 600 == parse_idle_timeout({"idle_timeout": 600}, node)
 
     assert 500 == parse_boot_timeout({"boot_timeout": {"default": 500}}, node)
-    assert 200 == parse_boot_timeout({"boot_timeout": {"default": 500, "hpc": 200}}, node)
+    assert 200 == parse_boot_timeout(
+        {"boot_timeout": {"default": 500, "hpc": 200}}, node
+    )
     assert 1800 == parse_boot_timeout({"boot_timeout": {}}, node)
     assert 600 == parse_boot_timeout({"boot_timeout": 600}, node)

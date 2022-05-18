@@ -350,7 +350,9 @@ def parse_boot_timeout(config: Dict, node: Optional["Node"] = None) -> int:
     return parse_timeout("boot_timeout", 1800, config, node)
 
 
-def parse_timeout(timeout_key: str, default_value: int, config: Dict, node: Optional["Node"] = None) -> int:
+def parse_timeout(
+    timeout_key: str, default_value: int, config: Dict, node: Optional["Node"] = None
+) -> int:
     value: Union[int, str, Dict] = config.get(timeout_key, default_value)
     if isinstance(value, int):
         return value

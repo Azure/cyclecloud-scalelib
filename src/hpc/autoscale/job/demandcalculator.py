@@ -59,8 +59,10 @@ class DemandCalculator:
             self.__scheduler_nodes_queue.push(node)
 
         self.__set_buffer_delayed_invocations: List[Tuple[Any, ...]] = []
-
-        self.node_history.decorate(list(self.__scheduler_nodes_queue), config)
+        failed_nodes = self.node_mgr.get_nodes()
+        self.node_history.decorate(
+            list(self.__scheduler_nodes_queue) + failed_nodes, config
+        )
 
         if not singleton_lock:
             singleton_lock = new_singleton_lock({})
@@ -187,7 +189,8 @@ class DemandCalculator:
 
     @apitrace
     def update_history(self) -> None:
-        self.node_history.update(list(self.__scheduler_nodes_queue))
+        failed_nodes = self.node_mgr.get_failed_nodes()
+        self.node_history.update(list(self.__scheduler_nodes_queue) + failed_nodes)
 
     @apitrace
     def get_demand(self) -> DemandResult:
@@ -217,7 +220,7 @@ class DemandCalculator:
     ) -> List[Node]:
         if isinstance(at_least, (int, float)):
             at_least_value = at_least
-            at_least = lambda node: at_least_value
+            at_least = lambda node: at_least_value  # qa: ignore
         unmatched_nodes = unmatched_nodes or self.get_demand().unmatched_nodes
         by_id = dict([(n.delayed_node_id.node_id, n) for n in unmatched_nodes])
         ret = []
@@ -301,16 +304,27 @@ class DemandCalculator:
             self.__scheduler_nodes_queue, lambda n: n.hostname_or_uuid  # type: ignore
         )
 
+        by_node_id: Dict[str, Node] = partition_single(
+            self.__scheduler_nodes_queue, lambda n: n.delayed_node_id.node_id or n.hostname_or_uuid  # type: ignore
+        )
+
         for new_snode in scheduler_nodes:
             if new_snode.hostname not in by_hostname:
                 by_hostname[new_snode.hostname] = new_snode
                 self.__scheduler_nodes_queue.push(new_snode)
                 self.node_mgr.add_unmanaged_nodes([new_snode])
                 if new_snode.resources.get("ccnodeid"):
-                    logging.warning(
-                        "%s has ccnodeid defined, but no longer exists in CycleCloud",
-                        new_snode,
-                    )
+                    ccnodeid = new_snode.resources.get("ccnodeid")
+                    if ccnodeid in by_node_id:
+                        logging.warning(
+                            "%s has a hostname that does not match what is in CycleCloud",
+                            new_snode,
+                        )
+                    else:
+                        logging.warning(
+                            "%s has ccnodeid defined, but no longer exists in CycleCloud",
+                            new_snode,
+                        )
                 else:
                     logging.debug(
                         "Found new node[hostname=%s] that does not exist in CycleCloud",
@@ -401,7 +415,9 @@ def new_demand_calculator(
     if singleton_lock is None:
         singleton_lock = new_singleton_lock(config_dict)
 
-    dc = DemandCalculator(config_dict, node_mgr, node_history, node_queue, singleton_lock)
+    dc = DemandCalculator(
+        config_dict, node_mgr, node_history, node_queue, singleton_lock
+    )
 
     dc.update_scheduler_nodes(existing_nodes)
 
