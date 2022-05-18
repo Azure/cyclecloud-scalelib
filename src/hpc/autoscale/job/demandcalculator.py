@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import hpc.autoscale.hpclogging as logging
 from hpc.autoscale.codeanalysis import hpcwrapclass
@@ -39,11 +39,13 @@ class DemandCalculator:
 
     def __init__(
         self,
+        config: Dict,
         node_mgr: NodeManager,
         node_history: NodeHistory = NullNodeHistory(),
         node_queue: Optional[NodeQueue] = None,
         singleton_lock: Optional[SingletonLock] = None,
     ) -> None:
+        self.config = config
         assert isinstance(node_mgr, NodeManager)
         self.node_mgr = node_mgr
         self.node_history = node_history
@@ -57,8 +59,10 @@ class DemandCalculator:
             self.__scheduler_nodes_queue.push(node)
 
         self.__set_buffer_delayed_invocations: List[Tuple[Any, ...]] = []
-
-        self.node_history.decorate(list(self.__scheduler_nodes_queue))
+        failed_nodes = self.node_mgr.get_nodes()
+        self.node_history.decorate(
+            list(self.__scheduler_nodes_queue) + failed_nodes, config
+        )
 
         if not singleton_lock:
             singleton_lock = new_singleton_lock({})
@@ -185,7 +189,8 @@ class DemandCalculator:
 
     @apitrace
     def update_history(self) -> None:
-        self.node_history.update(list(self.__scheduler_nodes_queue))
+        failed_nodes = self.node_mgr.get_failed_nodes()
+        self.node_history.update(list(self.__scheduler_nodes_queue) + failed_nodes)
 
     @apitrace
     def get_demand(self) -> DemandResult:
@@ -209,28 +214,42 @@ class DemandCalculator:
 
     @apitrace
     def find_unmatched_for(
-        self, at_least: float = 300, unmatched_nodes: Optional[List[Node]] = None,
+        self,
+        at_least: Union[Callable[[Node], float], float, int] = 300,
+        unmatched_nodes: Optional[List[Node]] = None,
     ) -> List[Node]:
+        if isinstance(at_least, (int, float)):
+            at_least_value = at_least
+            at_least = lambda node: at_least_value  # qa: ignore
         unmatched_nodes = unmatched_nodes or self.get_demand().unmatched_nodes
         by_id = dict([(n.delayed_node_id.node_id, n) for n in unmatched_nodes])
         ret = []
         for node_id, hostname, idle_time in self.node_history.find_unmatched(
-            for_at_least=at_least
+            for_at_least=-1
         ):
-            if node_id and node_id in by_id and idle_time > at_least:
-                node = by_id[node_id]
+            node = by_id.get(node_id)
+            if not node:
+                continue
+            at_least_delta = at_least(node)
+            omega = self.node_history.now() - at_least_delta
+            if idle_time < omega:
                 if node.assignments:
                     continue
-
                 ret.append(node)
         return ret
 
     @apitrace
     def find_booting(
-        self, at_least: float = 1800, booting_nodes: Optional[List[Node]] = None,
+        self,
+        at_least: Union[Callable[[Node], float], float, int] = 1800,
+        booting_nodes: Optional[List[Node]] = None,
     ) -> List[Node]:
         if not booting_nodes:
             booting_nodes = self.node_mgr.get_nodes()
+
+        if isinstance(at_least, (int, float)):
+            at_least_value = at_least
+            at_least = lambda node: at_least_value
 
         # filter out nodes that have converged.
         booting_nodes = [
@@ -245,12 +264,15 @@ class DemandCalculator:
 
         ret = []
         for node_id, hostname, create_time in self.node_history.find_booting(
-            for_at_least=at_least
+            for_at_least=-1
         ):
-            if not node_id:
-                continue
 
-            if node_id in by_id:
+            node = by_id.get(node_id)
+            if not node:
+                continue
+            at_least_delta = at_least(node)
+            omega = self.node_history.now() - at_least_delta
+            if create_time < omega:
                 ret.append(by_id[node_id])
 
         return ret
@@ -282,16 +304,27 @@ class DemandCalculator:
             self.__scheduler_nodes_queue, lambda n: n.hostname_or_uuid  # type: ignore
         )
 
+        by_node_id: Dict[str, Node] = partition_single(
+            self.__scheduler_nodes_queue, lambda n: n.delayed_node_id.node_id or n.hostname_or_uuid  # type: ignore
+        )
+
         for new_snode in scheduler_nodes:
             if new_snode.hostname not in by_hostname:
                 by_hostname[new_snode.hostname] = new_snode
                 self.__scheduler_nodes_queue.push(new_snode)
                 self.node_mgr.add_unmanaged_nodes([new_snode])
                 if new_snode.resources.get("ccnodeid"):
-                    logging.warning(
-                        "%s has ccnodeid defined, but no longer exists in CycleCloud",
-                        new_snode,
-                    )
+                    ccnodeid = new_snode.resources.get("ccnodeid")
+                    if ccnodeid in by_node_id:
+                        logging.warning(
+                            "%s has a hostname that does not match what is in CycleCloud",
+                            new_snode,
+                        )
+                    else:
+                        logging.warning(
+                            "%s has ccnodeid defined, but no longer exists in CycleCloud",
+                            new_snode,
+                        )
                 else:
                     logging.debug(
                         "Found new node[hostname=%s] that does not exist in CycleCloud",
@@ -382,7 +415,9 @@ def new_demand_calculator(
     if singleton_lock is None:
         singleton_lock = new_singleton_lock(config_dict)
 
-    dc = DemandCalculator(node_mgr, node_history, node_queue, singleton_lock)
+    dc = DemandCalculator(
+        config_dict, node_mgr, node_history, node_queue, singleton_lock
+    )
 
     dc.update_scheduler_nodes(existing_nodes)
 

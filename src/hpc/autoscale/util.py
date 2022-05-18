@@ -340,3 +340,33 @@ def is_standalone_dns(node_or_bucket: Union["Node", "NodeBucket"]) -> bool:
         .get("standalone_dns", {})
         .get("enabled", True)
     )
+
+
+def parse_idle_timeout(config: Dict, node: Optional["Node"] = None) -> int:
+    return parse_timeout("idle_timeout", 300, config, node)
+
+
+def parse_boot_timeout(config: Dict, node: Optional["Node"] = None) -> int:
+    return parse_timeout("boot_timeout", 1800, config, node)
+
+
+def parse_timeout(
+    timeout_key: str, default_value: int, config: Dict, node: Optional["Node"] = None
+) -> int:
+    value: Union[int, str, Dict] = config.get(timeout_key, default_value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value)
+    section = node.nodearray if node else "default"
+    key = section
+    if key not in value:
+        key = "default"
+    if key not in value:
+        return default_value
+    ret = value.get(key)
+    if not ret:
+        return default_value
+    if isinstance(ret, str):
+        return int(ret)
+    return ret

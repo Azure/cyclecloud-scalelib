@@ -34,7 +34,13 @@ from hpc.autoscale.results import (
     MatchResult,
     register_result_handler,
 )
-from hpc.autoscale.util import json_dump, load_config, partition_single
+from hpc.autoscale.util import (
+    json_dump,
+    load_config,
+    parse_boot_timeout,
+    parse_idle_timeout,
+    partition_single,
+)
 
 
 def _print(*msg: Any) -> None:
@@ -327,9 +333,12 @@ class CommonCLI(ABC):
         return self._driver(config).new_node_history(config)
 
     def _demand_calc(
-        self, config: Dict, driver: SchedulerDriver
+        self,
+        config: Dict,
+        driver: SchedulerDriver,
+        node_mgr: Optional[NodeManager] = None,
     ) -> Tuple[DemandCalculator, List[Job]]:
-        node_mgr = self._node_mgr(config, driver)
+        node_mgr = node_mgr or self._node_mgr(config, driver)
         node_history = self._node_history(config)
         driver = self._driver(config)
 
@@ -351,13 +360,14 @@ class CommonCLI(ABC):
         config: Dict,
         driver: Optional[SchedulerDriver] = None,
         ctx_handler: Optional[DefaultContextHandler] = None,
+        node_mgr: Optional[NodeManager] = None,
     ) -> DemandCalculator:
         driver = driver or self._driver(config)
         if not ctx_handler:
             ctx_handler = self._ctx_handler(config)
             register_result_handler(ctx_handler)
 
-        dcalc, jobs = self._demand_calc(config, driver)
+        dcalc, jobs = self._demand_calc(config, driver, node_mgr)
         logging.info(
             "Calculating demand for %s jobs: %s", len(jobs), [j.name for j in jobs]
         )
@@ -426,7 +436,11 @@ class CommonCLI(ABC):
 
         nodes_to_delete = driver.handle_failed_nodes(invalid_nodes)
 
-        demand_calculator = self._demand(config, driver, ctx_handler)
+        node_mgr = self._node_mgr(config, driver)
+
+        driver.validate_nodes(scheduler_nodes, node_mgr.get_nodes())
+
+        demand_calculator = self._demand(config, driver, ctx_handler, node_mgr)
 
         failed_nodes = demand_calculator.node_mgr.get_failed_nodes()
         failed_nodes_to_delete = driver.handle_failed_nodes(failed_nodes)
@@ -466,14 +480,17 @@ class CommonCLI(ABC):
 
         # we also tell the driver about nodes that are unmatched. It filters them out
         # and returns a list of ones we can delete.
-        idle_timeout = int(config.get("idle_timeout", 300))
-        boot_timeout = int(config.get("boot_timeout", 3600))
-        logging.fine("Idle timeout is %s", idle_timeout)
+
+        def idle_at_least(node: Node) -> float:
+            return parse_idle_timeout(config, node)
+
+        def booting_at_least(node: Node) -> float:
+            return parse_boot_timeout(config, node)
 
         unmatched_for_5_mins = demand_calculator.find_unmatched_for(
-            at_least=idle_timeout
+            at_least=idle_at_least
         )
-        timed_out_booting = demand_calculator.find_booting(at_least=boot_timeout)
+        timed_out_booting = demand_calculator.find_booting(at_least=booting_at_least)
 
         # I don't care about nodes that have keep_alive=true
         timed_out_booting = [n for n in timed_out_booting if not n.keep_alive]
@@ -483,22 +500,20 @@ class CommonCLI(ABC):
 
         if timed_out_booting:
             logging.info(
-                "The following nodes have timed out while booting: %s",
-                timed_out_booting,
+                "BootTimeout reached: %s", timed_out_booting,
             )
             timed_out_to_deleted = driver.handle_boot_timeout(timed_out_booting) or []
 
         if unmatched_for_5_mins:
             node_expr = ", ".join([str(x) for x in unmatched_for_5_mins])
-            logging.info(
-                "Unmatched for at least %s seconds: %s", idle_timeout, node_expr
-            )
+            logging.info("IdleTimeout reached: %s", node_expr)
             unmatched_nodes_to_delete = (
                 driver.handle_draining(unmatched_for_5_mins) or []
             )
-
-        nodes_to_delete = []
-        for node in timed_out_to_deleted + unmatched_nodes_to_delete:
+        nodes_to_delete.extend(timed_out_to_deleted + unmatched_nodes_to_delete)
+        can_not_delete_bc_assigned = [n for n in nodes_to_delete if n.assignments]
+        nodes_to_delete = [n for n in nodes_to_delete if not n.assignments]
+        for node in can_not_delete_bc_assigned:
             if node.assignments:
                 logging.warning(
                     "%s has jobs assigned to it so we will take no action.", node
@@ -824,14 +839,21 @@ class CommonCLI(ABC):
 
     def join_nodes_parser(self, parser: ArgumentParser) -> None:
         parser.set_defaults(read_only=False)
+        parser.add_argument("--include-permanent", action="store_true", default=False)
         self._add_hostnames(parser)
         self._add_nodenames(parser)
 
     def join_nodes(
-        self, config: Dict, hostnames: List[str], node_names: List[str]
+        self,
+        config: Dict,
+        hostnames: List[str],
+        node_names: List[str],
+        include_permanent: bool = False,
     ) -> None:
         """Adds selected nodes to the scheduler"""
         driver, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
+        if include_permanent:
+            self._node_history(config).unmark_ignored(nodes)
         joined_nodes = driver.add_nodes_to_cluster(nodes)
         print("Joined the following nodes:")
         for n in joined_nodes or []:
@@ -849,6 +871,7 @@ class CommonCLI(ABC):
         self._add_hostnames(parser)
         self._add_nodenames(parser)
         parser.add_argument("--force", action="store_true", default=False)
+        parser.add_argument("--permanent", action="store_true", default=False)
         parser.set_defaults(read_only=False)
 
     def remove_nodes(
@@ -857,9 +880,17 @@ class CommonCLI(ABC):
         hostnames: List[str],
         node_names: List[str],
         force: bool = False,
+        permanent: bool = False,
     ) -> None:
         """Removes the node from the scheduler without terminating the actual instance."""
-        self.delete_nodes(config, hostnames, node_names, force, do_delete=False)
+        self.delete_nodes(
+            config,
+            hostnames,
+            node_names,
+            do_delete=False,
+            force=force,
+            permanent=permanent,
+        )
 
     def delete_nodes_parser(self, parser: ArgumentParser) -> None:
         self._add_hostnames(parser)
@@ -872,10 +903,10 @@ class CommonCLI(ABC):
         config: Dict,
         hostnames: List[str],
         node_names: List[str],
-        force: bool = False,
         do_delete: bool = True,
+        force: bool = False,
+        permanent: bool = False,
     ) -> None:
-        """Deletes node, including draining post delete handling"""
         driver, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
 
         if not force:
@@ -915,6 +946,13 @@ class CommonCLI(ABC):
         print("Removed the following nodes from {}:".format(driver.name))
         for n in removed_nodes:
             print("   ", n)
+
+        # This should only happen when do_delete=false, but as an extra asssertion
+        if permanent and not do_delete:
+            print(
+                "Ignoring the removed nodes until join_nodes --include-permanent is called."
+            )
+            self._node_history(self.config).mark_ignored(removed_nodes)
 
     def default_output_columns_parser(self, parser: ArgumentParser) -> None:
         cmds = [

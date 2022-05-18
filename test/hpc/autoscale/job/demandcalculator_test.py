@@ -37,7 +37,7 @@ def teardown_function(function) -> None:
 def test_no_buckets():
     node_mgr = NodeManager(MockClusterBinding(), [])
     dc = DemandCalculator(
-        node_mgr, NullNodeHistory(), singleton_lock=util.NullSingletonLock()
+        {}, node_mgr, NullNodeHistory(), singleton_lock=util.NullSingletonLock()
     )
     result = dc._add_job(Job("1", {"ncpus": 2}))
     assert not result

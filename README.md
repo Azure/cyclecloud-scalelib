@@ -320,6 +320,16 @@ region but we ensure that only one of them is valid at a time.
          {"node.location": "eastus"}]
 }
 ```
+
+# Timeouts
+By default we set idle and boot timeouts across all nodes.
+```"idle_timeout": 300,
+   "boot_timeout": 3600
+```
+You can also set these per nodearray.
+```"idle_timeout": {"default": 300, "nodearray1": 600, "nodearray2": 900},
+   "boot_timeout": {"default": 3600, "nodearray1": 7200, "nodearray2": 900},
+```
     
 
 # Contributing

@@ -70,9 +70,15 @@ class ScaleLibCLI(CommonCLI):
 
     @disablecommand
     def join_nodes(
-        self, config: Dict, hostnames: List[str], node_names: List[str]
+        self,
+        config: Dict,
+        hostnames: List[str],
+        node_names: List[str],
+        include_permanent: bool = False,
     ) -> None:
-        return super().join_nodes(config, hostnames, node_names)
+        return super().join_nodes(
+            config, hostnames, node_names, include_permanent=include_permanent
+        )
 
     @disablecommand
     def remove_nodes(
