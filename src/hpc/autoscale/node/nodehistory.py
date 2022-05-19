@@ -13,6 +13,11 @@ from hpc.autoscale.util import parse_boot_timeout, parse_idle_timeout, partition
 # TODO RDH reset
 SQLITE_VERSION = "0.0.6"
 
+# the keyword true/false is relatively new for sqlite, so use int values for
+# backwards compatibility.
+SQL_TRUE = 1
+SQL_FALSE = 0
+
 
 NodeHistoryResult = typing.List[typing.Tuple[NodeId, Hostname, float]]
 
@@ -192,10 +197,11 @@ class SQLiteNodeHistory(NodeHistory):
                     [node_id, node.instance_id, node.hostname, now, now, 0, False]
                 )
 
-            if node.required:
+            if node.required or node.state != "Ready":
                 rec = list(rows_by_id[node_id])
-                rec[-2] = now
+                rec[-3] = now
                 rows_by_id[node_id] = tuple(rec)
+
             # if a node is running a job according to the scheduler, assume it
             # is 'ready' for boot timeout purposes.
             if node.state == "Ready" or node.metadata.get("_running_job_"):
@@ -233,7 +239,8 @@ class SQLiteNodeHistory(NodeHistory):
                     ready_time,
                     ignore,
                 ) = row
-                expr = f"('{node_id}', '{instance_id}', '{hostname}', {create_time}, {match_time}, {ready_time}, NULL, {str(ignore).lower()})".lower()
+                ignore_int = SQL_TRUE if ignore else SQL_FALSE
+                expr = f"('{node_id}', '{instance_id}', '{hostname}', {create_time}, {match_time}, {ready_time}, NULL, {ignore_int})".lower()
 
                 exprs.append(expr)
 
@@ -349,7 +356,7 @@ class SQLiteNodeHistory(NodeHistory):
                         node.create_time_remaining = create_remaining
 
                 if idle_timeout:
-                    if node.keep_alive:
+                    if node.keep_alive or node.state != "Ready":
                         node.idle_time_remaining = -1
                     else:
                         match_elapsed = max(0, now - last_match_time)
@@ -367,7 +374,7 @@ class SQLiteNodeHistory(NodeHistory):
         for n in nodes:
             if n.delayed_node_id:
                 self._execute(
-                    f"UPDATE nodes SET ignore=true WHERE node_id='{n.delayed_node_id.node_id}'"
+                    f"UPDATE nodes SET ignore={SQL_TRUE} WHERE node_id='{n.delayed_node_id.node_id}'"
                 )
         self.conn.commit()
 
@@ -375,7 +382,7 @@ class SQLiteNodeHistory(NodeHistory):
         for n in nodes:
             if n.delayed_node_id:
                 self._execute(
-                    f"UPDATE nodes SET ignore=false WHERE node_id='{n.delayed_node_id.node_id}'"
+                    f"UPDATE nodes SET ignore={SQL_FALSE} WHERE node_id='{n.delayed_node_id.node_id}'"
                 )
         self.conn.commit()
 
