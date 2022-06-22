@@ -1008,8 +1008,8 @@ class SharedConsumableResource(SharedResource):
         initial_value: Union[int, float, "SharedConsumableResource"],
         current_value: Union[int, float, "SharedConsumableResource"],
     ) -> None:
-        super().__init__(resource_name, source, current_value)
         self.initial_value = initial_value
+        super().__init__(resource_name, source, current_value)
 
     @property
     def is_consumable(self) -> bool:
@@ -1093,6 +1093,27 @@ class SharedConsumableConstraint(SharedConstraint):
             shared_resource.current_value -= self.amount
 
         return True
+
+    def minimum_space(self, node: "Node") -> int:
+        for sr in self.shared_resources:
+            if not sr.is_consumable:
+                return -1
+        return int(
+            min([sr.current_value / self.amount for sr in self.shared_resources])
+        )
+
+    def weight_buckets(
+        self, bucket_weights: List[Tuple["NodeBucket", float]]
+    ) -> List[Tuple["NodeBucket", float]]:
+
+        for sr in self.shared_resources:
+
+            if sr.is_consumable:
+                if self.amount > sr.current_value:
+                    return []
+            elif sr.current_value != self.amount:
+                return []
+        return bucket_weights
 
     def __str__(self) -> str:
         current = ",".join(

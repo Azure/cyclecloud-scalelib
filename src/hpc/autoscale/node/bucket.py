@@ -366,7 +366,7 @@ def bucket_candidates(
         # raw_scores.append(num_open_nodes)
 
         if is_unsatisfied:
-            allocation_failures.extend(reasons)
+            allocation_failures.extend(reasons or ["unknown failure"])
         else:
             satisfied_buckets.append(bucket)
 

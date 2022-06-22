@@ -168,7 +168,7 @@ class DemandCalculator:
         )
 
         if not result:
-            return result.reasons
+            return result.reasons or ["Unknown failure"]
 
         for node in result.nodes:
             if not node.exists and node.metadata.get("__demand_allocated") is None:
