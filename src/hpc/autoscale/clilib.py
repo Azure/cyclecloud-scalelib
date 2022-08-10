@@ -615,6 +615,7 @@ class CommonCLI(ABC):
         ).completer = self._vm_size_completer  # type: ignore
 
         parser.add_argument("-p", "--placement-group", type=str, required=False)
+        parser.add_argument("--name-format", type=str, required=False)
         parser.add_argument(
             "-S", "--software-configuration", type=json_type, required=False
         )
@@ -648,6 +649,7 @@ class CommonCLI(ABC):
         strategy: Optional[str],
         exclusive: bool,
         exclusive_task: bool,
+        name_format: Optional[str],
         software_configuration: Optional[Dict],
         node_attribute_overrides: Optional[Dict],
         output_columns: Optional[List[str]],
@@ -719,7 +721,7 @@ class CommonCLI(ABC):
         if result:
 
             for node in result.nodes:
-
+                node.name_format = name_format
                 node.keep_alive = keep_alive
 
                 if software_configuration:
