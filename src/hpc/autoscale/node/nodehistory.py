@@ -167,6 +167,9 @@ class SQLiteNodeHistory(NodeHistory):
         self.read_only = read_only
 
     def update(self, nodes: typing.Iterable[Node]) -> None:
+        self._update(nodes)
+
+    def _update(self, nodes: typing.Iterable[Node]) -> None:
         if self.read_only:
             return
 
@@ -243,13 +246,14 @@ class SQLiteNodeHistory(NodeHistory):
                 expr = f"('{node_id}', '{instance_id}', '{hostname}', {create_time}, {match_time}, {ready_time}, NULL, {ignore_int})".lower()
 
                 exprs.append(expr)
-
-            values_expr = ",".join(exprs)
-
-            stmt = "INSERT OR REPLACE INTO nodes (node_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time, ignore) VALUES {}".format(
-                values_expr
-            )
-            self._execute(stmt)
+            block_size = int(os.getenv("SCALELIB_SQLITE_INSERT_BLOCK", "25"))
+            for i in range(0, len(exprs), block_size):
+                sub_exprs = exprs[i: i + block_size]
+                values_expr = ",".join(sub_exprs)
+                stmt = "INSERT OR REPLACE INTO nodes (node_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time, ignore) VALUES {}".format(
+                    values_expr
+                )
+                self._execute(stmt)
 
         if to_delete:
             to_delete_expr = " OR ".join(
