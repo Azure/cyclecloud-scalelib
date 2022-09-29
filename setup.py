@@ -9,7 +9,7 @@ from setuptools import find_packages, setup
 from setuptools.command.test import Command
 from setuptools.command.test import test as TestCommand  # noqa: N812
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
 
 class PyTest(TestCommand):
