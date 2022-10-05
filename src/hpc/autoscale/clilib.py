@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+from subprocess import check_output
 import sys
 import traceback
 import typing
@@ -133,7 +134,7 @@ class ReraiseAssertionInterpreter(code.InteractiveConsole):
     ) -> None:
         code.InteractiveConsole.__init__(self, locals=locals, filename=filename)
         self.reraise = reraise
-        hist_file = os.path.expanduser("~/.cyclegehistory")
+        hist_file = os.path.expanduser("~/.azurehpchistory")
 
         if os.path.exists(hist_file):
             with open(hist_file) as fr:
@@ -183,7 +184,7 @@ def shell(
     Provides read only interactive shell. type gehelp()
     in the shell for more information
     """
-    banner = "\nCycleCloud Autoscale Shell"
+    banner = "\nScaleLib Shell"
     interpreter = ReraiseAssertionInterpreter(locals=shell_locals)
     try:
         __import__("readline")
@@ -1323,7 +1324,7 @@ class CommonCLI(ABC):
     def autoscale_home(self) -> str:
         if os.getenv("AUTOSCALE_HOME"):
             return os.environ["AUTOSCALE_HOME"]
-        return os.path.join("/opt", "cycle", self.project_name)
+        return os.path.join("/opt", "azurehpc", self.project_name)
 
     def initconfig_parser(self, parser: ArgumentParser) -> None:
         parser.add_argument("--cluster-name", required=True)
@@ -1742,7 +1743,10 @@ def create_arg_parser(
         return [x.strip() for x in x.split(",")]
 
     help_msg = io.StringIO()
-    default_install_dir = os.path.join("/", "opt", "cycle", project_name)
+    
+    default_install_dir = os.path.join("/", "opt", "azurehpc", project_name)
+    if hasattr(module, "autoscale_dir"):
+        default_install_dir = getattr(module, "autoscale_dir")
 
     def add_parser(
         name: str,

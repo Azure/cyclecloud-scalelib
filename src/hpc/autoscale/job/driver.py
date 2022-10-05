@@ -29,7 +29,7 @@ class SchedulerDriver(ABC):
     def autoscale_home(self) -> str:
         if os.getenv("AUTOSCALE_HOME"):
             return os.environ["AUTOSCALE_HOME"]
-        return os.path.join("/opt", "cycle", self.name)
+        return os.path.join("/opt", "azurehpc", self.name)
 
     @abstractmethod
     def initialize(self) -> None:
