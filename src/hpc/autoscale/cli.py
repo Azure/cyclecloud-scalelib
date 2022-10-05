@@ -15,6 +15,9 @@ from hpc.autoscale.util import partition, partition_single
 
 
 class GenericDriver(SchedulerDriver):
+    def __init__(self, project_name: str) -> None:
+        super().__init__(project_name)
+
     def initialize(self) -> None:
         pass
 
