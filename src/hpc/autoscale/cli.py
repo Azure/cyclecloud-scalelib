@@ -3,7 +3,7 @@ import sys
 from argparse import ArgumentParser
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from hpc.autoscale import clilib
+from hpc.autoscale import clilib, util as hpcutil
 from hpc.autoscale.clilib import CommonCLI, ShellDict, disablecommand
 from hpc.autoscale.job.demandprinter import OutputFormat
 from hpc.autoscale.job.driver import SchedulerDriver
@@ -98,11 +98,23 @@ class ScaleLibCLI(CommonCLI):
     def _default_output_columns(
         self, config: Dict, cmd: Optional[str] = None
     ) -> List[str]:
+        if hpcutil.LEGACY:
+            return [
+                "name",
+                "hostname",
+                "instance_id",
+                "ccnodeid",
+                "required",
+                "job_ids",
+                "state",
+                "ctr@create_time_remaining",
+                "itr@idle_time_remaining",
+            ]
         return [
             "name",
             "hostname",
             "instance_id",
-            "ccnodeid",
+            "aznodeid@ccnodeid",
             "required",
             "job_ids",
             "state",

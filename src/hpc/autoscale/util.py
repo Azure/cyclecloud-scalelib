@@ -16,6 +16,9 @@ if typing.TYPE_CHECKING:
     from hpc.autoscale.node.bucket import NodeBucket  # noqa:F401
 
 
+LEGACY = bool(int(os.getenv("AZUREHPC_LEGACY", "0")))
+
+
 @hpcwrapclass
 class IncrementingUUID:
     """

@@ -29,6 +29,7 @@ from hpc.autoscale.node.constraints import NodeConstraint, get_constraints
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import NodeHistory
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
+from hpc.autoscale import util as hpcutil
 from hpc.autoscale.results import (
     DefaultContextHandler,
     EarlyBailoutResult,
@@ -1104,12 +1105,40 @@ class CommonCLI(ABC):
             long=long,
         )
 
-    def buckets_parser(self, parser: ArgumentParser) -> None:
-        self._add_output_columns(parser)
-        self._add_output_format(parser)
-        self._add_constraint_expr(parser)
+    if hpcutil.LEGACY:
+        def buckets_parser(self, parser: ArgumentParser) -> None:
+            self._add_output_columns(parser)
+            self._add_output_format(parser)
+            self._add_constraint_expr(parser)
 
-    def buckets(
+        def buckets(
+            self,
+            config: Dict,
+            constraint_expr: List[str],
+            output_format: OutputFormat,
+            long: bool = False,
+            output_columns: Optional[List[str]] = None,
+        ) -> None:
+            """Prints out autoscale bucket information, like limits etc"""
+            self._pools(config, constraint_expr, output_format, long, output_columns)
+    else:
+        def pools_parser(self, parser: ArgumentParser) -> None:
+            self._add_output_columns(parser)
+            self._add_output_format(parser)
+            self._add_constraint_expr(parser)
+
+        def pools(
+            self,
+            config: Dict,
+            constraint_expr: List[str],
+            output_format: OutputFormat,
+            long: bool = False,
+            output_columns: Optional[List[str]] = None,
+        ) -> None:
+            """Prints out pool status"""
+            self._pools(config, constraint_expr, output_format, long, output_columns)
+
+    def _pools(
         self,
         config: Dict,
         constraint_expr: List[str],
@@ -1117,22 +1146,32 @@ class CommonCLI(ABC):
         long: bool = False,
         output_columns: Optional[List[str]] = None,
     ) -> None:
-        """Prints out autoscale bucket information, like limits etc"""
+        
         writer = io.StringIO()
         self.validate_constraint(config, constraint_expr, writer=writer)
 
         node_mgr = self._node_mgr(config)
         specified_output_columns = output_columns
         output_format = output_format or "table"
-        output_columns = output_columns or [
-            "nodearray",
-            "placement_group",
-            "vm_size",
-            "vcpu_count",
-            "pcpu_count",
-            "memory",
-            "available_count",
-        ]
+        if hpcutil.LEGACY:
+            output_columns = output_columns or [
+                "nodearray",
+                "placement_group",
+                "vm_size",
+                "vcpu_count",
+                "pcpu_count",
+                "memory",
+                "available_count",
+            ]
+        else:
+            output_columns = output_columns or [
+                "pool@nodearray",
+                "vm_size",
+                "vcpu_count",
+                "pcpu_count",
+                "memory",
+                "available_count",
+            ]
 
         if specified_output_columns is None:
             # fill in other columns
@@ -1175,18 +1214,27 @@ class CommonCLI(ABC):
         long: bool = False,
     ) -> None:
         """
-        Writes a detailed set of limits for each bucket. Defaults to json due to number of fields.
+        Writes a detailed set of limits for each {"bucket" if hpcutil.LEGACY else "pool"}. Defaults to json due to number of fields.
         """
         node_mgr = self._node_mgr(config)
         output_format = output_format or "json"
-        output_columns = [
-            "nodearray",
-            "placement_group",
-            "vm_size",
-            "vm_family",
-            "vcpu_count",
-            "available_count",
-        ]
+        if hpcutil.LEGACY:
+            output_columns = [
+                "nodearray",
+                "placement_group",
+                "vm_size",
+                "vm_family",
+                "vcpu_count",
+                "available_count",
+            ]
+        else:
+            output_columns = [
+                "pool@nodearray",
+                "vm_size",
+                "vm_family",
+                "vcpu_count",
+                "available_count",
+            ]
 
         for bucket in node_mgr.get_buckets():
 
