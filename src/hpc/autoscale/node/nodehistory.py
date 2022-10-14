@@ -307,6 +307,11 @@ class SQLiteNodeHistory(NodeHistory):
         )
 
     def decorate(self, nodes: typing.List[Node], config: typing.Dict = {}) -> None:
+        for i in range(0, len(nodes), 100):
+            nodes_sublist = nodes[i: i + 100]
+            self._decorate(nodes_sublist)
+
+    def _decorate(self, nodes: typing.List[Node], config: typing.Dict = {}) -> None:
         if not nodes:
             nodes = []
 
