@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
 from cyclecloud.model.ClusterStatusModule import ClusterStatus
 from cyclecloud.model.NodearrayBucketStatusModule import NodearrayBucketStatus
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
+from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
@@ -667,10 +668,20 @@ class NodeManager:
         return partition_single(self.get_buckets(), lambda b: b.bucket_id)
 
     @apitrace
+    def get_nodes_by_request_id(self, request_id: ht.RequestId) -> List[Node]:
+        relevant_node_list = self.__cluster_bindings.get_nodes(
+            request_id=request_id
+        )
+        return self._get_nodes_by_id(relevant_node_list)
+
+    @apitrace
     def get_nodes_by_operation(self, operation_id: ht.OperationId) -> List[Node]:
         relevant_node_list = self.__cluster_bindings.get_nodes(
             operation_id=operation_id
         )
+        return self._get_nodes_by_id(relevant_node_list)
+
+    def _get_nodes_by_id(self, relevant_node_list: NodeList) -> List[Node]:
         relevant_node_names = [n["Name"] for n in relevant_node_list.nodes]
         updated_cluster_status = self.__cluster_bindings.get_cluster_status(True)
 
