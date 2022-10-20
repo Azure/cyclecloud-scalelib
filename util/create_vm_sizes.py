@@ -16,7 +16,14 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
     else:
         az_path = which("az")
         if az_path:
-            raw = check_output([az_path, "vm", "list-skus", "--all",]).decode()
+            raw = check_output(
+                [
+                    az_path,
+                    "vm",
+                    "list-skus",
+                    "--all",
+                ]
+            ).decode()
         else:
             print("You need az cli installed.", file=sys.stderr)
             sys.exit(1)
@@ -101,7 +108,8 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
         )
     else:
         print(
-            "Warning: cycle_server found! Skipping validation", file=sys.stderr,
+            "Warning: cycle_server found! Skipping validation",
+            file=sys.stderr,
         )
         cs_mts = []
 

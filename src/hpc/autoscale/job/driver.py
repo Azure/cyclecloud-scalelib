@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 from hpc.autoscale import hpclogging as logging
 from hpc.autoscale import hpctypes as ht
+from hpc.autoscale import util as hpcutil
 from hpc.autoscale.job.job import Job
 from hpc.autoscale.job.nodequeue import NodeQueue
 from hpc.autoscale.job.schedulernode import SchedulerNode
@@ -54,7 +55,7 @@ class SchedulerDriver(ABC):
         self, scheduler_nodes: List[SchedulerNode], cc_nodes: List[Node]
     ) -> None:
         """Before any demand calculations are done, validate gives a chance
-            to validate / preprocess nodes.
+        to validate / preprocess nodes.
         """
         ...
 
@@ -222,4 +223,6 @@ def add_ccnodeid_default_resource(node_mgr: NodeManager) -> None:
     def get_node_id(n: Node) -> Optional[str]:
         return n.delayed_node_id.node_id
 
-    node_mgr.add_default_resource({}, "ccnodeid", get_node_id)
+    resource_name = "ccnodeid" if hpcutil.LEGACY else "aznodeid"
+
+    node_mgr.add_default_resource({}, resource_name, get_node_id)

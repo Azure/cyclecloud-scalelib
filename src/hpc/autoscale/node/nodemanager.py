@@ -74,7 +74,9 @@ class NodeManager:
     """
 
     def __init__(
-        self, cluster_bindings: ClusterBindingInterface, node_buckets: List[NodeBucket],
+        self,
+        cluster_bindings: ClusterBindingInterface,
+        node_buckets: List[NodeBucket],
     ) -> None:
         self.__cluster_bindings = cluster_bindings
         self.__node_buckets = node_buckets
@@ -133,7 +135,8 @@ class NodeManager:
         candidates_result = bucket_candidates(self.get_buckets(), parsed_constraints)
         if not candidates_result:
             return AllocationResult(
-                "NoCandidatesFound", reasons=candidates_result.reasons,
+                "NoCandidatesFound",
+                reasons=candidates_result.reasons,
             )
 
         logging.debug(
@@ -297,7 +300,9 @@ class NodeManager:
         if remaining < slot_count:
             commited_nodes = self._commit(bucket, list(allocated_nodes.values()))
             return AllocationResult(
-                "success", nodes=commited_nodes, slots_allocated=slot_count - remaining,
+                "success",
+                nodes=commited_nodes,
+                slots_allocated=slot_count - remaining,
             )
         self._rollback(bucket)
         if alloc_result:
@@ -835,6 +840,7 @@ class NodeManager:
         modifier_magnitude: Optional[Union[int, float]] = None,
         allow_none: bool = True,
     ) -> None:
+        assert resource_name
         if isinstance(default_value, str):
             if default_value.startswith("node."):
                 attr = default_value[len("node.") :]  # noqa: E203
@@ -857,7 +863,11 @@ class NodeManager:
                                 + " for node/bucket %s because the node/bucket did not define %s as a resource"
                             )
                             logging.warning(
-                                msg, attr, alias, node, alias,
+                                msg,
+                                attr,
+                                alias,
+                                node,
+                                alias,
                             )
                             value = ""
 
@@ -881,7 +891,11 @@ class NodeManager:
                                 + " in its software_configuration"
                             )
                             logging.warning(
-                                msg, attr, alias, node, alias,
+                                msg,
+                                attr,
+                                alias,
+                                node,
+                                alias,
                             )
                             value = ""
 
@@ -1107,10 +1121,14 @@ class NodeManager:
         self.add_default_resource({}, "memtb", MemoryDefault("t"))
         if hpcutil.LEGACY:
             self.add_default_resource({}, "nodearray", "node.nodearray")
-            self.add_default_resource({}, "ccnodeid", lambda n: n.delayed_node_id.node_id)
+            self.add_default_resource(
+                {}, "ccnodeid", lambda n: n.delayed_node_id.node_id
+            )
         else:
             self.add_default_resource({}, "pool", lambda n: n.nodearray)
-            self.add_default_resource({}, "aznodeid", lambda n: n.delayed_node_id.node_id)
+            self.add_default_resource(
+                {}, "aznodeid", lambda n: n.delayed_node_id.node_id
+            )
 
     def example_node(self, location: str, vm_size: str) -> Node:
         aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
@@ -1273,7 +1291,8 @@ def _cluster_limits(cluster_name: str, cluster_status: ClusterStatus) -> _Shared
 
 
 def _new_node_manager_79(
-    cluster_bindings: ClusterBindingInterface, autoscale_config: Dict,
+    cluster_bindings: ClusterBindingInterface,
+    autoscale_config: Dict,
 ) -> NodeManager:
     cluster_status = cluster_bindings.get_cluster_status(nodes=True)
     nodes_list = cluster_bindings.get_nodes()
@@ -1318,7 +1337,8 @@ def _new_node_manager_79(
 
         if is_autoscale_disabled:
             logging.fine(
-                "Ignoring nodearray %s because autoscale.enabled=false", nodearray_name,
+                "Ignoring nodearray %s because autoscale.enabled=false",
+                nodearray_name,
             )
             continue
 

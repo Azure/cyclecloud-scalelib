@@ -161,10 +161,15 @@ class DemandCalculator:
         return AllocationResult("Failed", reasons=failure_reasons)
 
     def _handle_allocate(
-        self, job: Job, allocated_nodes_out: List[Node], all_or_nothing: bool,
+        self,
+        job: Job,
+        allocated_nodes_out: List[Node],
+        all_or_nothing: bool,
     ) -> Optional[List[str]]:
         result = job.do_allocate(
-            self.node_mgr, all_or_nothing=all_or_nothing, allow_existing=True,
+            self.node_mgr,
+            all_or_nothing=all_or_nothing,
+            allow_existing=True,
         )
 
         if not result:
@@ -336,7 +341,8 @@ class DemandCalculator:
 
                 old_snode = by_hostname[new_snode.hostname_or_uuid]
                 logging.fine(
-                    "Found existing CycleCloud node[hostname=%s]", new_snode.hostname,
+                    "Found existing CycleCloud node[hostname=%s]",
+                    new_snode.hostname,
                 )
                 old_snode.update(new_snode)
             else:
@@ -402,7 +408,8 @@ def new_demand_calculator(
 
     if node_mgr is None:
         node_mgr = new_node_manager(
-            config_dict, disable_default_resources=disable_default_resources,
+            config_dict,
+            disable_default_resources=disable_default_resources,
         )
     else:
         logging.initialize_logging(config_dict)

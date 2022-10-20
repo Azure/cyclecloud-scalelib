@@ -4,17 +4,18 @@ import io
 import json
 import os
 import re
-from subprocess import check_output
 import sys
 import traceback
 import typing
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 from fnmatch import fnmatch
+from subprocess import check_output
 from typing import Any, Callable, Dict, Iterable, List, Optional, TextIO, Tuple, Union
 
 from hpc.autoscale import hpclogging as logging
 from hpc.autoscale import hpctypes as ht
+from hpc.autoscale import util as hpcutil
 from hpc.autoscale.job import demandprinter
 from hpc.autoscale.job.demand import DemandResult
 from hpc.autoscale.job.demandcalculator import DemandCalculator, new_demand_calculator
@@ -29,7 +30,6 @@ from hpc.autoscale.node.constraints import NodeConstraint, get_constraints
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import NodeHistory
 from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
-from hpc.autoscale import util as hpcutil
 from hpc.autoscale.results import (
     DefaultContextHandler,
     EarlyBailoutResult,
@@ -342,7 +342,7 @@ class CommonCLI(ABC):
     ) -> NodeManager:
         if force:
             self.__node_mgr = None
-        
+
         if self.__node_mgr is not None:
             return self.__node_mgr
         driver = driver or self._driver(config)
@@ -524,7 +524,8 @@ class CommonCLI(ABC):
 
         if timed_out_booting:
             logging.info(
-                "BootTimeout reached: %s", timed_out_booting,
+                "BootTimeout reached: %s",
+                timed_out_booting,
             )
             timed_out_to_deleted = driver.handle_boot_timeout(timed_out_booting) or []
 
@@ -700,7 +701,7 @@ class CommonCLI(ABC):
         cons_dict["node.placement_group"] = placement_group
 
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer)
+        self.validate_constraint(config, constraint_expr, writer, quiet=True)
         validated_cons = json.loads(writer.getvalue())
 
         if not isinstance(validated_cons, list):
@@ -873,12 +874,15 @@ class CommonCLI(ABC):
 
         try:
             from hpc.autoscale.node import vm_sizes as vmlib
+
             output_prefix = ""
 
             if "," in prefix:
                 rest_of_list = prefix[: prefix.rindex(",")]
                 output_prefix = "{},".format(rest_of_list)
-            return ["{}{},".format(output_prefix, x) for x in vmlib.all_possible_vm_sizes()]
+            return [
+                "{}{},".format(output_prefix, x) for x in vmlib.all_possible_vm_sizes()
+            ]
         except Exception:
             import traceback
 
@@ -1086,7 +1090,7 @@ class CommonCLI(ABC):
     ) -> None:
         """Query nodes"""
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer=io.StringIO())
+        self.validate_constraint(config, constraint_expr, writer=io.StringIO(), quiet=True)
         validated_constraints = writer.getvalue()
 
         driver = self._driver(config)
@@ -1106,6 +1110,7 @@ class CommonCLI(ABC):
         )
 
     if hpcutil.LEGACY:
+
         def buckets_parser(self, parser: ArgumentParser) -> None:
             self._add_output_columns(parser)
             self._add_output_format(parser)
@@ -1121,7 +1126,9 @@ class CommonCLI(ABC):
         ) -> None:
             """Prints out autoscale bucket information, like limits etc"""
             self._pools(config, constraint_expr, output_format, long, output_columns)
+
     else:
+
         def pools_parser(self, parser: ArgumentParser) -> None:
             self._add_output_columns(parser)
             self._add_output_format(parser)
@@ -1146,9 +1153,9 @@ class CommonCLI(ABC):
         long: bool = False,
         output_columns: Optional[List[str]] = None,
     ) -> None:
-        
+
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer=writer)
+        self.validate_constraint(config, constraint_expr, writer=writer, quiet=True)
 
         node_mgr = self._node_mgr(config)
         specified_output_columns = output_columns
@@ -1165,12 +1172,12 @@ class CommonCLI(ABC):
             ]
         else:
             output_columns = output_columns or [
-                "pool@nodearray",
+                "pool",
                 "vm_size",
-                "vcpu_count",
-                "pcpu_count",
+                "vcpu@vcpu_count",
+                "pcpu@pcpu_count",
                 "memory",
-                "available_count",
+                "avail@available_count",
             ]
 
         if specified_output_columns is None:
@@ -1178,7 +1185,11 @@ class CommonCLI(ABC):
             for bucket in node_mgr.get_buckets():
                 for resource_name in bucket.resources:
                     if resource_name not in output_columns:
-                        output_columns.append(resource_name)
+                        if (
+                            resource_name not in ["memkb", "memmb", "memtb", "memb"]
+                            and resource_name not in output_columns
+                        ):
+                            output_columns.append(resource_name)
 
         for bucket in node_mgr.get_buckets():
             for attr in dir(bucket.limits):
@@ -1791,7 +1802,7 @@ def create_arg_parser(
         return [x.strip() for x in x.split(",")]
 
     help_msg = io.StringIO()
-    
+
     default_install_dir = os.path.join("/", "opt", "azurehpc", project_name)
     if hasattr(module, "autoscale_dir"):
         default_install_dir = getattr(module, "autoscale_dir")

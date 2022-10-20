@@ -186,7 +186,8 @@ class SQLiteNodeHistory(NodeHistory):
         nodes_with_ids = [n for n in nodes if n.delayed_node_id.node_id]
 
         nodes_by_id: typing.Dict[typing.Optional[NodeId], Node] = partition_single(
-            nodes_with_ids, lambda n: n.delayed_node_id.node_id,
+            nodes_with_ids,
+            lambda n: n.delayed_node_id.node_id,
         )
 
         to_delete = set(rows_by_id.keys()) - set(nodes_by_id.keys())
@@ -248,7 +249,7 @@ class SQLiteNodeHistory(NodeHistory):
                 exprs.append(expr)
             block_size = int(os.getenv("SCALELIB_SQLITE_INSERT_BLOCK", "25"))
             for i in range(0, len(exprs), block_size):
-                sub_exprs = exprs[i: i + block_size]
+                sub_exprs = exprs[i : i + block_size]
                 values_expr = ",".join(sub_exprs)
                 stmt = "INSERT OR REPLACE INTO nodes (node_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time, ignore) VALUES {}".format(
                     values_expr

@@ -426,14 +426,20 @@ class ClusterBinding(ClusterBindingInterface):
         as_json = json.dumps(r.to_dict())
 
         logging.debug(
-            "[%s] Response: Status=%s -> %s", caller, s.status_code, as_json[:100],
+            "[%s] Response: Status=%s -> %s",
+            caller,
+            s.status_code,
+            as_json[:100],
         )
 
         if logging.getLogger().getEffectiveLevel() > logging.FINE:
             return
 
         logging.fine(
-            "[%s] Full response: Status=%s -> %s", caller, s.status_code, as_json,
+            "[%s] Full response: Status=%s -> %s",
+            caller,
+            s.status_code,
+            as_json,
         )
 
     @notreadonly

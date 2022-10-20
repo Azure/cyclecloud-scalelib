@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
     from hpc.autoscale.node.bucket import NodeBucket  # noqa:F401
 
 
-LEGACY = bool(int(os.getenv("AZUREHPC_LEGACY", "0")))
+LEGACY = bool(int(os.getenv("AZUREHPC_LEGACY", "1")))
 
 
 @hpcwrapclass
@@ -81,7 +81,8 @@ def partition_single(
             if strict or not reduce(lambda x, y: x == y, value):  # type: ignore
                 raise RuntimeError(
                     "Could not partition list into single values - key={} values={}".format(
-                        key, value,
+                        key,
+                        value,
                     )
                 )
         ret[key] = value[0]

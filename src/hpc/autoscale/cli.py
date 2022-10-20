@@ -3,7 +3,8 @@ import sys
 from argparse import ArgumentParser
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from hpc.autoscale import clilib, util as hpcutil
+from hpc.autoscale import clilib
+from hpc.autoscale import util as hpcutil
 from hpc.autoscale.clilib import CommonCLI, ShellDict, disablecommand
 from hpc.autoscale.job.demandprinter import OutputFormat
 from hpc.autoscale.job.driver import SchedulerDriver
