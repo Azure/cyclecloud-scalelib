@@ -1,23 +1,23 @@
-from typing import Dict, List, Optional
-import typing
 import json
+import typing
+from typing import Dict, List, Optional
+
+import cyclecloud.api.clusters
+import requests
 from cyclecloud.model import (
-    ClusterStatus,
     ClusterNodearrayStatus,
+    ClusterStatus,
     NodearrayBucketStatus,
     NodearrayBucketStatusDefinition,
     NodearrayBucketStatusVirtualMachine,
     NodeCreationResult,
     NodeCreationResultSet,
-    NodeManagementResult,
     NodeList,
+    NodeManagementResult,
     PlacementGroupStatus,
 )
-import requests
+
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
-
-from . import cluster_service_client as csc
-
 from hpc.autoscale.hpctypes import (
     ClusterName,
     Hostname,
@@ -29,7 +29,8 @@ from hpc.autoscale.hpctypes import (
     RequestId,
 )
 from hpc.autoscale.node import node
-import cyclecloud.api.clusters
+
+from . import cluster_service_client as csc
 
 
 class ClusterServiceBinding(ClusterBindingInterface):
@@ -215,7 +216,7 @@ class ClusterServiceBinding(ClusterBindingInterface):
             )
 
             res = _make_request(self.config, "DeleteNode", msg)
-            
+
         return NodeManagementResult(nodes=[], operation_id="123")
 
     def scale(
@@ -310,7 +311,9 @@ def _make_request(config, func_name, msg):
     _responses.append((200, "object", lambda v: v))
 
     _response = session.request(
-        "POST", url=f"{config['url']}/clusterservice/{func_name}", json=_body,
+        "POST",
+        url=f"{config['url']}/clusterservice/{func_name}",
+        json=_body,
     )
     print(_response.text)
     data = json.loads(_response.text)
@@ -357,6 +360,7 @@ def main():
     from hpc.autoscale.node.delayednodeid import DelayedNodeId
     from hpc.autoscale.hpctypes import Memory
     import random
+
     index = random.randint(1, 100)
     node = Node(
         node_id=DelayedNodeId("s1-htc-%s" % index),

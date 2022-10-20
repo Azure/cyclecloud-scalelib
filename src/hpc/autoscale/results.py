@@ -230,8 +230,10 @@ class SatisfiedResult(Result):
         reasons = " AND ".join(set(self.reasons))
 
         if self:
-            return "SatisfiedResult(status={}, node={}, score={}, constraint={})".format(
-                self.status, self.node, self.score, self.constraint
+            return (
+                "SatisfiedResult(status={}, node={}, score={}, constraint={})".format(
+                    self.status, self.node, self.score, self.constraint
+                )
             )
         else:
             return "SatisfiedResult(status={}, node={},reason={})".format(
@@ -304,7 +306,10 @@ class TerminateResult(NodeOperationResult):
 @hpcwrapclass
 class EarlyBailoutResult(Result):
     def __init__(
-        self, status: str, node: Optional["Node"] = None, reasons: Reasons = None,
+        self,
+        status: str,
+        node: Optional["Node"] = None,
+        reasons: Reasons = None,
     ) -> None:
         Result.__init__(self, status, reasons)
         self.node = node

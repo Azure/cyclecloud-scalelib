@@ -497,7 +497,11 @@ class Node(ABC):
         """
 
         if self.closed:
-            return MatchResult("NodeClosed", node=self, slots=iterations,)
+            return MatchResult(
+                "NodeClosed",
+                node=self,
+                slots=iterations,
+            )
 
         assignment_id = assignment_id or str(uuid4())
 
@@ -514,7 +518,10 @@ class Node(ABC):
         if is_unsatisfied:
             # TODO log why things are rejected at fine detail
             return MatchResult(
-                "NodeRejected", node=self, slots=iterations, reasons=reasons,
+                "NodeRejected",
+                node=self,
+                slots=iterations,
+                reasons=reasons,
             )
 
         min_space = minimum_space(constraints, self)
@@ -532,7 +539,10 @@ class Node(ABC):
                 assert constraint.do_decrement(
                     self
                 ), "calculated minimum space of {} but failed at index {} {} {}".format(
-                    to_pack, i, constraint, constraint.satisfied_by_node(self),
+                    to_pack,
+                    i,
+                    constraint,
+                    constraint.satisfied_by_node(self),
                 )
 
         self._allocated = True

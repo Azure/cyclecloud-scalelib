@@ -258,7 +258,11 @@ def test_choice_ordering() -> None:
         assert hi.available_count == 10
         assert lo.available_count == 10
         result = node_mgr.allocate(
-            {"nodetype": ordering, "exclusive": True,}, node_count=15,  # noqa: E231
+            {
+                "nodetype": ordering,
+                "exclusive": True,
+            },
+            node_count=15,  # noqa: E231
         )
         assert hi.available_count == 0
         assert lo.available_count == 5
@@ -338,7 +342,11 @@ def test_mock_bindings(bindings: MockClusterBinding) -> None:
     b = MockClusterBinding()
     b.add_nodearray("haspgs", {}, max_placement_group_size=20)
     b.add_bucket(
-        "haspgs", "Standard_F4", 100, 100, placement_groups=["pg0", "pg1"],
+        "haspgs",
+        "Standard_F4",
+        100,
+        100,
+        placement_groups=["pg0", "pg1"],
     )
     # make sure we take the max_placement_group_size (20) into account
     # and that we have the non-pg and 2 pg buckets.
@@ -490,12 +498,37 @@ def test_hypo(vm: ht.VMSize) -> None:
 @given(
     s.integers(1, 3),
     s.integers(1, 3),
-    s.lists(vmindices(), min_size=9, max_size=9, unique=True,),
-    s.lists(s.integers(1, 25), min_size=1, max_size=10,),
-    s.lists(s.integers(1, 32), min_size=20, max_size=20,),
-    s.lists(s.booleans(), min_size=20, max_size=20,),
-    s.lists(s.booleans(), min_size=20, max_size=20,),
-    s.lists(s.integers(1, 2 ** 31), min_size=10, max_size=10,),
+    s.lists(
+        vmindices(),
+        min_size=9,
+        max_size=9,
+        unique=True,
+    ),
+    s.lists(
+        s.integers(1, 25),
+        min_size=1,
+        max_size=10,
+    ),
+    s.lists(
+        s.integers(1, 32),
+        min_size=20,
+        max_size=20,
+    ),
+    s.lists(
+        s.booleans(),
+        min_size=20,
+        max_size=20,
+    ),
+    s.lists(
+        s.booleans(),
+        min_size=20,
+        max_size=20,
+    ),
+    s.lists(
+        s.integers(1, 2 ** 31),
+        min_size=10,
+        max_size=10,
+    ),
 )
 @settings(deadline=None)
 @pytest.mark.skip
@@ -521,7 +554,10 @@ def test_slot_count_hypothesis(
             for b in range(num_buckets):
                 vm_size = vm_size_choices[n * num_buckets + b]
                 bindings.add_bucket(
-                    nodearray, vm_size, max_count=10, available_count=10,
+                    nodearray,
+                    vm_size,
+                    max_count=10,
+                    available_count=10,
                 )
 
         return _node_mgr(bindings)

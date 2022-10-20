@@ -2,7 +2,9 @@ from hpc.autoscale import hpctypes
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
 
 
-def new_cluster_bindings(config: dict,) -> ClusterBindingInterface:
+def new_cluster_bindings(
+    config: dict,
+) -> ClusterBindingInterface:
     if config.get("_mock_bindings"):
         return config["_mock_bindings"]
     if config.get("legacy", True):
@@ -22,6 +24,7 @@ def new_cluster_bindings(config: dict,) -> ClusterBindingInterface:
         )
     else:
         from hpc.autoscale.ccbindings import cluster_service
+
         # from cyclecloud.client import Client
 
         # cluster_name = hpctypes.ClusterName(config["cluster_name"])
@@ -32,6 +35,4 @@ def new_cluster_bindings(config: dict,) -> ClusterBindingInterface:
         # if read_only is None:
         #     read_only = False
 
-        return cluster_service.ClusterServiceBinding(
-            config
-        )
+        return cluster_service.ClusterServiceBinding(config)

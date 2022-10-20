@@ -250,7 +250,10 @@ class BucketLimits:
     @property
     def max_count(self) -> int:
         if self.placement_group_max_count >= 0:
-            return min(self.__max_count, self.placement_group_max_count,)
+            return min(
+                self.__max_count,
+                self.placement_group_max_count,
+            )
         return self.__max_count
 
     @property

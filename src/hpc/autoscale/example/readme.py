@@ -314,7 +314,10 @@ class MyCustomMemoryRatioConstraint(BaseNodeConstraint):
             return SatisfiedResult("success", self, node)
 
         return SatisfiedResult(
-            "failed", self, node, reasons=["Not enough memory per core"],
+            "failed",
+            self,
+            node,
+            reasons=["Not enough memory per core"],
         )
 
 

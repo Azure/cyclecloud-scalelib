@@ -363,7 +363,9 @@ def print_rows(
 
     if output_format.lower() == "json":
         json.dump(
-            [dict(zip(short_names, row)) for row in rows], stream, indent=2,
+            [dict(zip(short_names, row)) for row in rows],
+            stream,
+            indent=2,
         )
     else:
         widths = calculate_column_widths(short_names, rows)
