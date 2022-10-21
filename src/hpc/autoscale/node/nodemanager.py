@@ -718,14 +718,16 @@ class NodeManager:
     def bootup(
         self,
         nodes: Optional[List[Node]] = None,
-        request_id: Optional[ht.RequestId] = None,
+        request_id_start: Optional[ht.RequestId] = None,
+        request_id_create: Optional[ht.RequestId] = None,
     ) -> BootupResult:
         nodes = nodes or self.new_nodes
+        request_ids = [x for x in [request_id_start, request_id_create] if x]
         if not nodes:
             return BootupResult(
                 "success",
                 ht.OperationId(""),
-                request_id,
+                request_ids,
                 reasons=["No new nodes required or created."],
             )
 
@@ -737,7 +739,7 @@ class NodeManager:
 
         if nodes_to_start:
             start_result: NodeManagementResult = self.__cluster_bindings.start_nodes(
-                nodes_to_start
+                nodes_to_start, request_id=request_id_start
             )
             operation_id = start_result.operation_id
 
@@ -758,7 +760,7 @@ class NodeManager:
         if nodes_to_create:
 
             create_result: NodeCreationResult = self.__cluster_bindings.create_nodes(
-                nodes_to_create
+                nodes_to_create, request_id=request_id_create
             )
 
             if operation_id:
@@ -787,7 +789,7 @@ class NodeManager:
                     node.state = ht.NodeStatus("Unknown")
 
         return BootupResult(
-            "success", ht.OperationId(operation_id), request_id, booted_nodes
+            "success", ht.OperationId(operation_id), request_ids, booted_nodes
         )
 
     @property
@@ -1001,9 +1003,9 @@ class NodeManager:
         )
 
     @apitrace
-    def start_nodes(self, nodes: List[Node]) -> StartResult:
+    def start_nodes(self, nodes: List[Node], request_id: Optional[str] = None) -> StartResult:
         return self._nodes_operation(
-            nodes, self.__cluster_bindings.start_nodes, StartResult
+            nodes, lambda n: self.__cluster_bindings.start_nodes(n, request_id=request_id), StartResult
         )
 
     @apitrace

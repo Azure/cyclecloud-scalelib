@@ -326,12 +326,15 @@ class MockClusterBinding(ClusterBindingInterface):
 
         return self.nodes[name]
 
-    def create_nodes(self, new_nodes: List[Node]) -> NodeCreationResult:
+    def create_nodes(
+        self, new_nodes: List[Node], request_id: Optional[str] = None
+    ) -> NodeCreationResult:
         for node in new_nodes:
             assert node.name not in self.nodes, "{} already in {}".format(
                 node.name, list(self.nodes)
             )
             self.nodes[node.name] = node.clone()
+            self.nodes[node.name].metadata["__request_id__"] = request_id
 
             for bucket in self._get_buckets(node.location, node.vm_family):
                 if bucket.bucket_id == node.bucket_id:
@@ -478,7 +481,8 @@ class MockClusterBinding(ClusterBindingInterface):
         node_ids: Optional[List[NodeId]] = None,
         hostnames: Optional[List[Hostname]] = None,
         ip_addresses: Optional[List[IpAddress]] = None,
-        custom_filter: str = None,
+        custom_filter: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> NodeManagementResult:
         raise NotImplementedError()
 

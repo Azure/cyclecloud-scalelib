@@ -244,13 +244,13 @@ class NodeOperationResult(Result):
         self,
         status: str,
         operation_id: ht.OperationId,
-        request_id: Optional[ht.RequestId],
+        request_ids: Optional[List[ht.RequestId]],
         nodes: Optional[List["Node"]] = None,
         reasons: Reasons = None,
     ) -> None:
         Result.__init__(self, status, reasons)
         self.operation_id = operation_id
-        self.request_id = request_id
+        self.request_ids = request_ids
         self.nodes = nodes
         fire_result_handlers(self)
 
