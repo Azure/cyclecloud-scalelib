@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
 from cyclecloud.model.ClusterStatusModule import ClusterStatus
 from cyclecloud.model.NodearrayBucketStatusModule import NodearrayBucketStatus
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
+from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
@@ -667,10 +668,20 @@ class NodeManager:
         return partition_single(self.get_buckets(), lambda b: b.bucket_id)
 
     @apitrace
+    def get_nodes_by_request_id(self, request_id: ht.RequestId) -> List[Node]:
+        relevant_node_list = self.__cluster_bindings.get_nodes(
+            request_id=request_id
+        )
+        return self._get_nodes_by_id(relevant_node_list)
+
+    @apitrace
     def get_nodes_by_operation(self, operation_id: ht.OperationId) -> List[Node]:
         relevant_node_list = self.__cluster_bindings.get_nodes(
             operation_id=operation_id
         )
+        return self._get_nodes_by_id(relevant_node_list)
+
+    def _get_nodes_by_id(self, relevant_node_list: NodeList) -> List[Node]:
         relevant_node_names = [n["Name"] for n in relevant_node_list.nodes]
         updated_cluster_status = self.__cluster_bindings.get_cluster_status(True)
 
@@ -707,14 +718,16 @@ class NodeManager:
     def bootup(
         self,
         nodes: Optional[List[Node]] = None,
-        request_id: Optional[ht.RequestId] = None,
+        request_id_start: Optional[ht.RequestId] = None,
+        request_id_create: Optional[ht.RequestId] = None,
     ) -> BootupResult:
         nodes = nodes or self.new_nodes
+        request_ids = [x for x in [request_id_start, request_id_create] if x]
         if not nodes:
             return BootupResult(
                 "success",
                 ht.OperationId(""),
-                request_id,
+                request_ids,
                 reasons=["No new nodes required or created."],
             )
 
@@ -726,7 +739,7 @@ class NodeManager:
 
         if nodes_to_start:
             start_result: NodeManagementResult = self.__cluster_bindings.start_nodes(
-                nodes_to_start
+                nodes_to_start, request_id=request_id_start
             )
             operation_id = start_result.operation_id
 
@@ -747,7 +760,7 @@ class NodeManager:
         if nodes_to_create:
 
             create_result: NodeCreationResult = self.__cluster_bindings.create_nodes(
-                nodes_to_create
+                nodes_to_create, request_id=request_id_create
             )
 
             if operation_id:
@@ -776,7 +789,7 @@ class NodeManager:
                     node.state = ht.NodeStatus("Unknown")
 
         return BootupResult(
-            "success", ht.OperationId(operation_id), request_id, booted_nodes
+            "success", ht.OperationId(operation_id), request_ids, booted_nodes
         )
 
     @property
@@ -990,9 +1003,9 @@ class NodeManager:
         )
 
     @apitrace
-    def start_nodes(self, nodes: List[Node]) -> StartResult:
+    def start_nodes(self, nodes: List[Node], request_id: Optional[str] = None) -> StartResult:
         return self._nodes_operation(
-            nodes, self.__cluster_bindings.start_nodes, StartResult
+            nodes, lambda n: self.__cluster_bindings.start_nodes(n, request_id=request_id), StartResult
         )
 
     @apitrace

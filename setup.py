@@ -274,7 +274,7 @@ setup(
     package_dir={"": "src", "conf": "conf"},
     include_package_data=True,
     install_requires=[
-        "requests >= 2.24.0",
+        "requests == 2.24.0",
         "typing_extensions",
         "immutabledict==1.0.0",
         "jsonpickle==1.4.1",

@@ -76,7 +76,7 @@ class ClusterBinding(ClusterBindingInterface):
         return self.__cluster_name
 
     @hpcwrap
-    def create_nodes(self, nodes: List[Node]) -> NodeCreationResult:
+    def create_nodes(self, nodes: List[Node], request_id: Optional[str] = None) -> NodeCreationResult:
         if self.read_only:
             ret = NodeCreationResult()
             ret.operation_id = str(uuid.uuid4())
@@ -91,6 +91,7 @@ class ClusterBinding(ClusterBindingInterface):
 
         creation_request = NodeCreationRequest()
         creation_request.sets = []
+        creation_request.request_id = request_id
         # the node attributes aren't hashable, so a string representation
         # is good enough to ensure they are all the same across the list.
         p_nodes_dict = partition(
@@ -122,7 +123,7 @@ class ClusterBinding(ClusterBindingInterface):
             request_set.placement_group_id = pg
             request_set.definition = NodeCreationRequestSetDefinition()
             request_set.definition.machine_type = vm_size
-
+            
             if p_nodes[0].node_attribute_overrides:
                 request_set.node_attributes = deepcopy(
                     p_nodes[0].node_attribute_overrides
