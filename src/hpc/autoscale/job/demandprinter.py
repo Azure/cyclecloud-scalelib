@@ -125,7 +125,7 @@ class DemandPrinter:
                 nodearray_ord = [ord(x) for x in node.nodearray]
                 # 2**31 to make these come after private ips
                 # then nodearray name, then index
-                return tuple([2 ** 31] + nodearray_ord + [node_index])
+                return tuple([2**31] + nodearray_ord + [node_index])
             return tuple([-1] + name_toks)
 
         ordered_nodes = sorted(demand_result.compute_nodes, key=sort_by_ip_or_name)

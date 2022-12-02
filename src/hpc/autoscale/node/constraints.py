@@ -359,7 +359,7 @@ class MinResourcePerNode(BaseNodeConstraint):
         available = node.available[self.attr]
 
         if self.value == 0:
-            return 2 ** 31
+            return 2**31
 
         return int(available // self.value)
 

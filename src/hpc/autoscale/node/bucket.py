@@ -160,7 +160,7 @@ class NodeBucket:
         pg_available = self.limits.placement_group_available_count
 
         if pg_available < 0:
-            pg_available = 2 ** 32
+            pg_available = 2**32
 
         return (
             min(

@@ -1090,7 +1090,9 @@ class CommonCLI(ABC):
     ) -> None:
         """Query nodes"""
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer=io.StringIO(), quiet=True)
+        self.validate_constraint(
+            config, constraint_expr, writer=io.StringIO(), quiet=True
+        )
         validated_constraints = writer.getvalue()
 
         driver = self._driver(config)
@@ -1224,7 +1226,7 @@ class CommonCLI(ABC):
         output_format: OutputFormat,
         long: bool = False,
     ) -> None:
-        """
+        f"""
         Writes a detailed set of limits for each {"bucket" if hpcutil.LEGACY else "pool"}. Defaults to json due to number of fields.
         """
         node_mgr = self._node_mgr(config)
@@ -1469,7 +1471,7 @@ class CommonCLI(ABC):
                 columns_str = "120"
             columns = int(columns_str)
         else:
-            columns = 2 ** 31
+            columns = 2**31
 
         ctx_handler = DefaultContextHandler("[demand-cli]")
 
