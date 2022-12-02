@@ -47,17 +47,17 @@ MemoryMagnitude = SizeMagnitude
 
 
 _MAG_CONVERSIONS = {
-    "b": 1024 ** 0,
-    "k": 1024 ** 1,
-    "K": 1000 ** 1,
-    "m": 1024 ** 2,
-    "M": 1000 ** 2,
-    "g": 1024 ** 3,
-    "G": 1000 ** 3,
-    "t": 1024 ** 4,
-    "T": 1000 ** 4,
-    "p": 1024 ** 5,
-    "P": 1000 ** 5,
+    "b": 1024**0,
+    "k": 1024**1,
+    "K": 1000**1,
+    "m": 1024**2,
+    "M": 1000**2,
+    "g": 1024**3,
+    "G": 1000**3,
+    "t": 1024**4,
+    "T": 1000**4,
+    "p": 1024**5,
+    "P": 1000**5,
 }
 
 
@@ -182,7 +182,7 @@ class Size:
 
     def __float_eq(self, f1: float, f2: float) -> bool:
         # FYI we are comparing bytes here, so it will likely be tiny
-        return abs(f1 - f2) < 10 ** -10
+        return abs(f1 - f2) < 10**-10
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, (int, float, Size)):
