@@ -14,7 +14,6 @@ from cyclecloud.model import (
     NodeCreationResultSet,
     NodeList,
     NodeManagementResult,
-    PlacementGroupStatus,
 )
 
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
@@ -22,6 +21,7 @@ from hpc.autoscale.hpctypes import (
     ClusterName,
     Hostname,
     IpAddress,
+    Memory,
     NodeArrayName,
     NodeId,
     NodeName,
@@ -30,28 +30,92 @@ from hpc.autoscale.hpctypes import (
 )
 from hpc.autoscale.node import node
 
-from . import cluster_service_client as csc
+from swagger_client.api.cluster_api import ClusterApi
+
+# import ApiClient
+from swagger_client.api_client import ApiClient
+from swagger_client.configuration import Configuration
+
+# import models into sdk package
+from swagger_client.models.admin_access import AdminAccess
+from swagger_client.models.cloud_error import CloudError
+from swagger_client.models.cloud_error_body import CloudErrorBody
+from swagger_client.models.cluster import Cluster
+from swagger_client.models.cluster_properties import ClusterProperties
+from swagger_client.models.image_reference import ImageReference
+from swagger_client.models.ip_rule import IpRule
+from swagger_client.models.network_profile import NetworkProfile
+from swagger_client.models.network_rule_action import NetworkRuleAction
+from swagger_client.models.node import Node as CSNode
+from swagger_client.models.node_network_access_configuration import (
+    NodeNetworkAccessConfiguration,
+)
+from swagger_client.models.node_properties import NodeProperties
+from swagger_client.models.provisioning_state import ProvisioningState
+from swagger_client.models.public_network_access import PublicNetworkAccess
+from swagger_client.models.scale_set_type import ScaleSetType
+from swagger_client.models.virtual_machine_profile import VirtualMachineProfile
+
+
+from hpc.autoscale.node import vm_sizes
 
 
 class ClusterServiceBinding(ClusterBindingInterface):
     def __init__(self, config: Dict) -> None:
         self.config = config
 
+    def _api(self) -> ClusterApi:
+        csconf = Configuration()
+        csconf.host = self.config["url"]
+        csconf.verify_ssl = False
+        return ClusterApi(api_client=ApiClient(configuration=csconf))
+
+    @property
     def cluster_name(self) -> ClusterName:
         return self.config["cluster_name"]
 
+    def create_cluster(self) -> None:
+        api = self._api()
+        nw_prof = NetworkProfile(
+            node_management_access=NodeNetworkAccessConfiguration(default_action="Allow", ip_rules=[]),
+            public_network_access="Disabled",
+        )
+        cprops = ClusterProperties(network_profile=nw_prof, tags={"Owner": "ryhamel"})
+        api.clusters_create_or_update(
+            cprops,
+            self.config["subscription_id"],
+            self.config["resource_group"],
+            self.config["cluster_name"],
+        )
+
     def create_nodes(self, nodes: List[node.Node]) -> NodeCreationResult:
+        self.create_cluster()
         create_count = 0
+        api = self._api()
         for n in nodes:
-            msg = csc.CreateOrUpdateNodeRequestMessage(
-                cluster_id=self.config["cluster_name"],
-                properties=csc.NodePropertiesV2Message(
-                    name=n.name, pool_id=n.nodearray
+
+            vm_prof = VirtualMachineProfile(
+                scaleset_type=self.config["demo"]["scaleset_type"],
+                admin_access=AdminAccess(**self.config["demo"]["admin_access"]),
+                cloud_init=self.config["demo"]["cloud_init"],
+                image_reference=ImageReference(
+                    **self.config["demo"]["image_reference"]
                 ),
+                region=self.config["demo"]["region"],
+                subnet_id=self.config["demo"]["subnet_id"],
+                tags=self.config["demo"]["tags"],
+                vm_size=self.config["demo"]["vm_size"],
             )
-            res = _make_request(self.config, "CreateOrUpdateNode", msg)
-            if res.created:
-                create_count += 1
+            node_props = NodeProperties(vm_prof)
+
+            csnode: CSNode = api.nodes_create_or_update(
+                body=node_props,
+                subscription_id=self.config["subscription_id"],
+                resource_group=self.config["resource_group"],
+                cluster_name=self.cluster_name,
+                name=n.name,
+            )
+            create_count += 1
 
         nsets = [NodeCreationResultSet(added=create_count, message="")]
         return NodeCreationResult(operation_id="123", sets=nsets)
@@ -68,125 +132,89 @@ class ClusterServiceBinding(ClusterBindingInterface):
         pass
 
     def get_cluster_status(self, nodes: bool = False) -> ClusterStatus:
-        msg = csc.GetClusterRequestMessage(self.config["cluster_name"])
-        # print("Here is the msg", msg, type(msg))
-        response: csc.ClusterMessage = _make_request(self.config, "GetCluster", msg)
-        all_nodes = []
-        nodearray_statuses = []
-        # print(type(response))
-        # print(type(response.properties))
-        # print(type(response.properties.pools))
-        for pool in response.properties.pools:
-            # print(type(pool))
+        vm_size = self.config["demo"]["vm_size"]
+        region = self.config["demo"]["region"]
+        aux_info = vm_sizes.get_aux_vm_size_info(region, vm_size)
 
-            # all_nodes.extend(pool.nodes)
-            buckets = []
-            virtual_machine = pool.properties.vm_size
-            """
-                    cores_per_socket: integer, The number of cores per socket, Required
-        gpu_count: integer, The number of GPUs this machine type has, Required
-        infiniband: boolean, If this virtual machine supports InfiniBand connectivity, Required
-        memory: float, The RAM in this virtual machine, in GB, Required
-        pcpu_count: integer, The number of physical CPUs this machine type has, Required
-        vcpu_count: integer, The number of virtual CPUs this machine type has, Required
-            """
-            vm = NodearrayBucketStatusVirtualMachine(
-                cores_per_socket=max(
-                    1, virtual_machine.pcpu_count // virtual_machine.vcpu_count
-                ),
-                vcpu_count=virtual_machine.vcpu_count,
-                pcpu_count=virtual_machine.pcpu_count,
-                memory=virtual_machine.memory_gb,
-                infiniband=virtual_machine.infiniband,
-                gpu_count=virtual_machine.gpu_count,
-            )
-            definition = NodearrayBucketStatusDefinition(
-                machine_type=virtual_machine.name
-            )
-            pool_limits = pool.properties.limits
-            buckets.append(
-                NodearrayBucketStatus(
-                    active_nodes=pool.properties.member_ids,
-                    active_core_count=pool_limits.active_core_count,
-                    active_count=pool_limits.active_count,
-                    available_core_count=pool_limits.available_core_count,
-                    available_count=pool_limits.available_count,
-                    bucket_id=pool.properties.name,
-                    consumed_core_count=pool_limits.consumed_core_count,
-                    definition=definition,
-                    family_consumed_core_count=pool_limits.family_consumed_core_count,
-                    family_quota_core_count=pool_limits.family_quota_core_count,
-                    family_quota_count=pool_limits.family_quota_count,
-                    invalid_reason="",
-                    valid=True,
-                    max_core_count=pool_limits.max_core_count,
-                    max_count=pool_limits.max_count,
-                    max_placement_group_size=1000,  # TODO
-                    placement_groups=[],
-                    quota_core_count=pool_limits.quota_core_count,
-                    quota_count=pool_limits.quota_count,
-                    regional_consumed_core_count=pool_limits.regional_consumed_core_count,
-                    regional_quota_core_count=pool_limits.regional_quota_core_count,
-                    regional_quota_count=pool_limits.regional_quota_count,
-                    virtual_machine=vm,
-                )
-            )
-            for n in pool.nodes:
-                all_nodes.append(
-                    {
-                        "Name": n.display_name,
-                        "Template": n.pool_id,
-                        "NodeId": n.id,
-                        "MachineType": virtual_machine.name,
-                        "TargetState": "Started",  # TODO
-                        "Status": n.status,
-                        "State": n.status,
-                        "Hostname": n.hostname,
-                        "PrivateIp": n.ipv4,
-                        "InstanceId": n.instance_id,
-                        "KeepAlive": n.keep_alive,
-                        "Configuration": pool.properties.configuration,
-                    }
-                )
-            """
-            buckets: [NodearrayBucketStatus], Each bucket of allocation for this nodearray. The "core count" settings are always a multiple of the core count for this bucket.
-, Required
-            max_core_count: integer, The maximum number of cores that may be in this nodearray, Required
-            max_count: integer, The maximum number of nodes that may be in this nodearray, Required
-            name: string, The nodearray this is describing, Required
-            nodearray: object, A node record, Required
-            """
-            nodearray_statuses.append(
-                ClusterNodearrayStatus(
-                    name=pool.pool_id,
-                    max_core_count=pool.properties.limits.max_core_count,
-                    max_count=pool.properties.limits.max_count,
-                    buckets=buckets,
-                    nodearray={
-                        "ClusterName": self.config["cluster_name"],
-                        "Region": pool.properties.location,
-                        "SubnetId": "tbd",
-                        "Configuration": pool.properties.configuration,
-                    },
-                )
-            )
-        """
+        vm = NodearrayBucketStatusVirtualMachine(
+            cores_per_socket=max(1, aux_info.pcpu_count // aux_info.vcpu_count),
+            vcpu_count=aux_info.vcpu_count,
+            pcpu_count=aux_info.pcpu_count,
+            memory=aux_info.memory.value,
+            infiniband=aux_info.infiniband,
+            gpu_count=aux_info.gpu_count,
+        )
+        definition = NodearrayBucketStatusDefinition(machine_type=vm_size)
 
-        max_core_count: integer, The maximum number of cores that may be added to this cluster, Required
-        max_count: integer, The maximum number of nodes that may be added to this cluster, Required
-        nodearrays: [ClusterNodearrayStatus], , Required
-        nodes: [object], An optional list of nodes in this cluster, only included if nodes=true is in the query, Optional
-        state: string, The current state of the cluster, if it has been started at least once, Optional
-        target_state: string, The desired state of the cluster (eg Started or Terminated), Optional"""
-        nodes = []
+        cores = 10000
+        vms = cores // aux_info.vcpu_count
+        buckets = [
+            NodearrayBucketStatus(
+                active_nodes=[],
+                active_core_count=0,
+                active_count=0,
+                available_core_count=cores,
+                available_count=vms,
+                bucket_id="b-001",
+                consumed_core_count=0,
+                definition=definition,
+                family_consumed_core_count=0,
+                family_quota_core_count=cores,
+                family_quota_count=vms,
+                invalid_reason="",
+                valid=True,
+                max_core_count=cores,
+                max_count=vms,
+                max_placement_group_size=1000,  # TODO
+                placement_groups=[],
+                quota_core_count=cores,
+                quota_count=vms,
+                regional_consumed_core_count=0,
+                regional_quota_core_count=cores,
+                regional_quota_count=vms,
+                virtual_machine=vm,
+            )
+        ]
+        # for n in pool.nodes:
+        #     all_nodes.append(
+        #             {
+        #                 "Name": n.display_name,
+        #                 "Template": n.pool_id,
+        #                 "NodeId": n.id,
+        #                 "MachineType": virtual_machine.name,
+        #                 "TargetState": "Started",  # TODO
+        #                 "Status": n.status,
+        #                 "State": n.status,
+        #                 "Hostname": n.hostname,
+        #                 "PrivateIp": n.ipv4,
+        #                 "InstanceId": n.instance_id,
+        #                 "KeepAlive": n.keep_alive,
+        #                 "Configuration": pool.properties.configuration,
+        #             }
+        #     )
+
+        nodearray_statuses = [
+            ClusterNodearrayStatus(
+                name="htc",
+                max_core_count=10000,
+                max_count=10000 // aux_info.vcpu_count,
+                buckets=buckets,
+                nodearray={
+                    "ClusterName": self.config["cluster_name"],
+                    "Region": self.config["demo"]["region"],
+                    "SubnetId": self.config["demo"]["subnet_id"],
+                    "Configuration": {"slurm": {"autoscale": True, "hpc": False}},
+                },
+            )
+        ]
 
         ret = ClusterStatus(
-            max_core_count=10 ** 10,
-            max_count=10 ** 10,
+            max_core_count=10**10,
+            max_count=10**10,
             nodearrays=nodearray_statuses,
             state="Started",
             target_state="Started",
-            nodes=all_nodes,
+            nodes=[],
         )
 
         return ret
@@ -209,13 +237,14 @@ class ClusterServiceBinding(ClusterBindingInterface):
         custom_filter: str = None,
     ) -> NodeManagementResult:
         assert nodes
+        api = self._api()
         for n in nodes:
-            msg = csc.DeleteNodeRequestMessage(
-                cluster_id=self.config["cluster_name"],
-                node_id=n.name,
+            api.nodes_delete(
+                subscription_id=self.config["subscription_id"],
+                resource_group=self.config["resource_group"],
+                cluster_name=self.cluster_name,
+                name=n.name,
             )
-
-            res = _make_request(self.config, "DeleteNode", msg)
 
         return NodeManagementResult(nodes=[], operation_id="123")
 
@@ -236,7 +265,16 @@ class ClusterServiceBinding(ClusterBindingInterface):
         ip_addresses: Optional[List[IpAddress]] = None,
         custom_filter: str = None,
     ) -> NodeManagementResult:
-        pass
+        api = self._api()
+        for n in nodes:
+            api.nodes_delete(
+                subscription_id=self.config["subscription_id"],
+                resource_group=self.config["resource_group"],
+                cluster_name=self.cluster_name,
+                name=n.name,
+            )
+
+        return NodeManagementResult(nodes=[], operation_id="123")
 
     def start_nodes(
         self,
@@ -265,91 +303,6 @@ class ClusterServiceBinding(ClusterBindingInterface):
 
     def retry_failed_nodes(self) -> NodeManagementResult:
         pass
-
-
-def _get_session(config: typing.Dict) -> requests.sessions.Session:
-    try:
-        retries = 3
-        while retries > 0:
-            try:
-                # if not config["verify_certificates"]:
-                #     urllib3.disable_warnings(InsecureRequestWarning)
-
-                s = requests.session()
-                s.auth = (config["username"], config["password"])
-                # TODO apparently this does nothing...
-                # s.timeout = config["cycleserver"]["timeout"]
-                s.verify = config[
-                    "verify_certificates"
-                ]  # Should we auto-accept unrecognized certs?
-                s.headers = {
-                    "X-Cycle-Client-Version": "%s-cli:%s" % ("hpc-autoscale", "0.0.0")
-                }
-
-                return s
-            except requests.exceptions.SSLError:
-                retries = retries - 1
-                if retries < 1:
-                    raise
-    except ImportError:
-        raise
-
-    raise AssertionError(
-        "Could not connect to CycleCloud. Please see the log for more details."
-    )
-
-
-def _make_request(config, func_name, msg):
-    session = _get_session(config)
-    _request_context = cyclecloud.api.clusters._RequestContext()
-
-    _request_context.path = f"/clusterservice/{func_name}"
-
-    _body = msg.to_json()
-
-    _responses = []
-    _responses.append((200, "object", lambda v: v))
-
-    _response = session.request(
-        "POST",
-        url=f"{config['url']}/clusterservice/{func_name}",
-        json=_body,
-    )
-    print(_response.text)
-    data = json.loads(_response.text)
-
-    if "_type" in data:
-        clz = getattr(csc, data["_type"])
-        msg = clz.from_json(data)
-        return msg
-    raise RuntimeError(json.dumps(data, indent=2))
-
-
-"""
-node_id: DelayedNodeId,
-        name: ht.NodeName,
-        nodearray: ht.NodeArrayName,
-        bucket_id: ht.BucketId,
-        hostname: Optional[ht.Hostname],
-        private_ip: Optional[ht.IpAddress],
-        instance_id: Optional[ht.InstanceId],
-        vm_size: ht.VMSize,
-        location: ht.Location,
-        spot: bool,
-        vcpu_count: int,
-        memory: ht.Memory,
-        infiniband: bool,
-        state: ht.NodeStatus,
-        target_state: ht.NodeStatus,
-        power_state: ht.NodeStatus,
-        exists: bool,
-        placement_group: Optional[ht.PlacementGroup],
-        managed: bool,
-        resources: ht.ResourceDict,
-        software_configuration: ImmutableOrderedDict,
-        keep_alive: bool,
-        gpu_count: Optional[int] = None,
-"""
 
 
 def main():

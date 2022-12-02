@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
     from hpc.autoscale.node.bucket import NodeBucket  # noqa:F401
 
 
-LEGACY = bool(int(os.getenv("AZUREHPC_LEGACY", "1")))
+LEGACY = False  # bool(int(os.getenv("AZUREHPC_LEGACY", "0")))
 
 
 @hpcwrapclass
@@ -102,7 +102,6 @@ try:
 
     def _unlock(lockfp: TextIO) -> None:
         pass
-
 
 except ModuleNotFoundError:
     import msvcrt
