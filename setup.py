@@ -267,6 +267,19 @@ class TypeChecking(Command):
         run_type_checking()
 
 
+class Swagger(Command):
+    user_options: List[str] = []
+
+    def initialize_options(self) -> None:
+        pass
+
+    def finalize_options(self) -> None:
+        pass
+
+    def run(self) -> None:
+        check_call(["swagger-codegen", "generate", "-i", "Clusters.json", "-l", "python"], cwd="clusters")
+
+
 setup(
     name="cyclecloud-scalelib",
     version=__version__,
@@ -287,6 +300,7 @@ setup(
     cmdclass={
         "test": PyTest,
         "docs": AutoDoc,
+        "swagger": Swagger,
         "format": Formatter,
         "types": TypeChecking,
         "commithook": PreCommitHook,
