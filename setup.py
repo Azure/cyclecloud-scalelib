@@ -279,7 +279,7 @@ setup(
         "immutabledict==1.0.0",
         "jsonpickle==1.4.1",
         "argcomplete==1.12.2",
-        "certifi==2020.12.5",
+        "certifi==2022.12.07",
         "importlib-metadata<4",
     ]
     + ["urllib3==1.25.11"],  # noqa: W503
