@@ -309,7 +309,12 @@ class SQLiteNodeHistory(NodeHistory):
     def decorate(self, nodes: typing.List[Node], config: typing.Dict = {}) -> None:
         if not nodes:
             nodes = []
+        block_size = int(os.getenv("SCALELIB_SQLITE_DECORATE_BLOCK", "100"))
+        for i in range(0, len(nodes), block_size):
+            self._decorate(nodes[i: i + block_size], config)
 
+    def _decorate(self, nodes: typing.List[Node], config: typing.Dict = {}) -> None:
+        
         nodes = [n for n in nodes if n.exists]
         equalities = [
             " (node_id == '{}') ".format(n.delayed_node_id.node_id) for n in nodes
