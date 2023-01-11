@@ -136,7 +136,6 @@ class NodeBucket:
         ), "Requested too many nodes: %s > %s" % (count, self.available_count)
         assert self.family_available_count >= 0
         self.__decrement_counter += count
-        # self.limits.decrement(self.vcpu_count, count)
 
     def increment(self, count: int = 1) -> None:
         return self.decrement(-count)

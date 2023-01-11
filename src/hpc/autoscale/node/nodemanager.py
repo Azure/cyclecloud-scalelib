@@ -426,6 +426,9 @@ class NodeManager:
                 satisfied = True
 
             if satisfied:
+                
+                do_decrement = node.state == "Deallocated" and not node.assignments
+
                 per_node = _per_node(node, constraints)
                 journal_entry = _JournalEntry(
                     node, constraints, per_node, assignment_id
@@ -437,9 +440,12 @@ class NodeManager:
                 self.__journal.append(journal_entry)
                 allocated_nodes[node.name] = (node, node)
 
+                if do_decrement:
+                    bucket.decrement(1)
+
                 if remaining_slots() <= 0:
                     break
-
+        
         while remaining_slots() > 0 and bucket.available_count > 0:
             node_name = self._next_node_name(bucket)
             new_node = node_from_bucket(
