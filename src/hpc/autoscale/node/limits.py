@@ -99,6 +99,9 @@ class _SpotLimit:
     as the regional limit is supposed to be used in its place,
     however that responsibility is on the caller and not the
     REST api. For this library we handle that for them.
+
+    NOTE: This is a read only alias to the regional limit - decrement 
+          intentionally does nothing.
     """
 
     def __init__(self, regional_limits: _SharedLimit) -> None:
@@ -123,6 +126,8 @@ class _SpotLimit:
         return self._regional_limits._max_core_count
 
     def _decrement(self, nodes: int, cores_per_node: int) -> None:
+        # intentionally a read-only alias
+        # this is already decremented at the regional leve
         pass
 
     def __str__(self) -> str:

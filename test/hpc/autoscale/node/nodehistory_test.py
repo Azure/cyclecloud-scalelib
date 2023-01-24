@@ -78,7 +78,9 @@ def new_booting_node(
         hostname=ht.Hostname("host" + name),
         node_id=DelayedNodeId(
             name=name,
-            node_id=ht.NodeId(md5(name.encode()).hexdigest()),
+            # Note nodeid needs to be a uuid like instance_id, so use the same suffix
+            # when generating it here.
+            node_id=ht.NodeId(md5((name + instance_id_suffix).encode()).hexdigest()),
             operation_id="op-1",
             operation_offset=0,
         ),
@@ -153,4 +155,6 @@ def test_ready_time() -> None:
 
     # Now they really have timed out
     db.mock_now += 3000
-    assert 3 == len(db.find_booting(for_at_least=1800))
+    actual = len(db.find_booting(for_at_least=1800))
+    assert 3 == actual
+    
