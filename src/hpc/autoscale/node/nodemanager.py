@@ -1465,17 +1465,26 @@ def _new_node_manager_79(
                     # REST api. For this library we handle that for them.
                     family_limit = _SpotLimit(target_regional_limits[region])
 
+                na_limit = nodearray_limits[nodearray_name]
+                # bug - unfortunately CycleCloud does not give an accurate 'available_count'
+                # here. It excludes nodes in the process of being terminated. While this 
+                # was originally intentional, combined with the bug where CC ignores the 
+                # nodearray limit when starting deallocated nodes, we need to guard against that.
+                # Our nodearray_limits already adds in nodes that are in the process of terminating / stopping,
+                # so flooring the effective avail count gets us the correct behavior. 
+                avail_count_with_na = min(na_limit._available_count(vcpu_count), bucket.available_count)
+                avail_core_count_with_na = min(na_limit._available_count(1), bucket.available_core_count)
                 bucket_limit = BucketLimits(
                     vcpu_count,
                     target_regional_limits[region],
                     cluster_limit,
-                    nodearray_limits[nodearray_name],
+                    na_limit,
                     family_limit,
                     placement_group_limit,
                     active_core_count=bucket.active_core_count,
                     active_count=bucket.active_count,
-                    available_core_count=bucket.available_core_count,
-                    available_count=bucket.available_count,
+                    available_core_count=avail_core_count_with_na,
+                    available_count=avail_count_with_na,
                     max_core_count=bucket.max_core_count,
                     max_count=bucket.max_count,
                 )
