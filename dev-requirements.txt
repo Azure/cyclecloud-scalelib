@@ -11,3 +11,4 @@ typing_extensions
 immutabledict==1.0.0
 jsonpickle==1.4.1
 gnureadline
+requests-cache
