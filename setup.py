@@ -286,6 +286,9 @@ class Swagger(Command):
         
         if not os.path.exists(f".tools/{SWAGGER_CLI}"):
             check_call(["wget", SWAGGER_URL], cwd=".tools")
+
+        if not os.path.exists("clusters"):
+            os.makedirs("clusters")
         
         check_call(["java", "-jar", f"../.tools/{SWAGGER_CLI}", "generate", "-i", "../swagger/Clusters.json", "-l", "python"], cwd="clusters")
         check_call([sys.executable, "setup.py", "sdist"], cwd="clusters")
