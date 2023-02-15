@@ -1,4 +1,5 @@
 # test: ignore
+import glob
 import os
 import shutil
 import sys
@@ -278,6 +279,9 @@ class Swagger(Command):
 
     def run(self) -> None:
         check_call(["swagger-codegen", "generate", "-i", "Clusters.json", "-l", "python"], cwd="clusters")
+        check_call([sys.executable, "setup.py", "sdist"], cwd="clusters")
+        for fil in glob.glob("clusters/dist/*.gz"):
+            shutil.move(fil, "dist/")
 
 
 setup(
