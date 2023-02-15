@@ -115,7 +115,9 @@ class NodeManager:
         assignment_id: Optional[str] = None,
         node_namer: Optional[Callable[[], str]] = None,
     ) -> AllocationResult:
-
+        if isinstance(constraints, dict):
+            constraints = [constraints]
+            
         if not allow_existing:
             constraints = get_constraints([{"node.exists": False}]) + constraints
 
