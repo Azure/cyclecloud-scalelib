@@ -14,6 +14,9 @@ import inspect
 
 __version__ = "1.0.0"
 
+SWAGGER_URL = "https://oss.sonatype.org/content/repositories/releases/io/swagger/swagger-codegen-cli/2.2.1/swagger-codegen-cli-2.2.1.jar"
+SWAGGER_CLI = SWAGGER_URL.split("/")[-1]
+
 
 class PyTest(TestCommand):
     skip_hypothesis = True
@@ -278,10 +281,19 @@ class Swagger(Command):
         pass
 
     def run(self) -> None:
-        check_call(["swagger-codegen", "generate", "-i", "Clusters.json", "-l", "python"], cwd="clusters")
+        if not os.path.exists(".tools"):
+            os.makedirs(".tools")
+        
+        if not os.path.exists(f".tools/{SWAGGER_CLI}"):
+            check_call(["wget", SWAGGER_URL], cwd=".tools")
+        
+        check_call(["java", "-jar", f"../.tools/{SWAGGER_CLI}", "generate", "-i", "../swagger/Clusters.json", "-l", "python"], cwd="clusters")
         check_call([sys.executable, "setup.py", "sdist"], cwd="clusters")
         for fil in glob.glob("clusters/dist/*.gz"):
-            shutil.move(fil, "dist/")
+            dest = os.path.join("dist", os.path.basename(fil))
+            if os.path.exists(dest):
+                os.remove(dest)
+            shutil.move(fil, dest)
 
 
 setup(
