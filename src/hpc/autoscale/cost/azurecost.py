@@ -1,5 +1,7 @@
 import csv
 import requests
+import urllib3
+from urllib3.exceptions import InsecureRequestWarning
 import hpc.autoscale.hpclogging as log
 from collections import namedtuple
 from requests_cache import CachedSession
@@ -174,6 +176,8 @@ class azurecost:
         params['to'] = end
         uname = self.config['username']
         pw = self.config['password']
+
+        urllib3.disable_warnings(InsecureRequestWarning)
         res = requests.get(url=endpoint, params=params, auth=(uname,pw), verify=False)
         if res.status_code != 200:
             log.error(res.reason)
