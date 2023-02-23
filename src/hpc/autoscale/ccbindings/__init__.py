@@ -1,5 +1,6 @@
 from hpc.autoscale import hpctypes
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
+from hpc.autoscale import util as hpcutil
 
 
 def new_cluster_bindings(
@@ -7,7 +8,7 @@ def new_cluster_bindings(
 ) -> ClusterBindingInterface:
     if config.get("_mock_bindings"):
         return config["_mock_bindings"]
-    if config.get("legacy", True):
+    if hpcutil.LEGACY:
         from hpc.autoscale.ccbindings import legacy
         from cyclecloud.client import Client
 
