@@ -29,11 +29,14 @@ class azurecost:
         self.DEFAULT_AZCOST_FORMAT="sku_name,region,spot,meter,meterid,metercat,metersubcat,resourcegroup,rate,currency"
         self.RETAIL_FORMAT="sku_name,region,spot,meter,meterid,metercat,rate,currency"
         self.NODEARRAY_USAGE_FORMAT="nodearray,core_hours,cost"
+        self.NODEARRAY_USAGE_HOURLY_FORMAT="start,end,nodearray,core_hours,cost"
 
         self.az_job_t = namedtuple('az_job_t', self.DEFAULT_AZCOST_FORMAT)
         self.az_job_retail_t = namedtuple('az_job_retail_t', self.RETAIL_FORMAT)
         self.az_array_t = namedtuple('az_array_t', (self.NODEARRAY_USAGE_FORMAT + ',' + self.DEFAULT_AZCOST_FORMAT))
         self.az_array_retail_t = namedtuple('az_array_retail_t', (self.NODEARRAY_USAGE_FORMAT + ',' + self.RETAIL_FORMAT))
+        self.az_array_hourly_t = namedtuple('az_array_hourly_t', (self.NODEARRAY_USAGE_HOURLY_FORMAT + ',' + self.DEFAULT_AZCOST_FORMAT))
+        self.az_array_hourly_retail_t = namedtuple('az_array_hourly_retail_t', (self.NODEARRAY_USAGE_HOURLY_FORMAT + ',' + self.RETAIL_FORMAT))
 
     def do_meter_lookup(self, sku_name, spot, region):
         """
@@ -51,16 +54,16 @@ class azurecost:
         """
         return False
 
-    def get_azcost_job_format(self):
+    def get_job_format(self):
 
         if self.check_cost_avail():
             return self.az_job_t
         else:
             return self.az_job_retail_t
 
-    def get_azcost_job(self, sku_name, region, spot):
+    def get_job(self, sku_name, region, spot):
 
-        _fmt = self.get_azcost_job_format()
+        _fmt = self.get_job_format()
 
         if _fmt.__name__ == 'az_job_retail_t':
             data = self.get_retail_rate(sku_name, region, spot)
@@ -71,17 +74,24 @@ class azurecost:
         else:
             pass
 
-    def get_azcost_nodearray_format(self):
+    def get_nodearray_format(self):
 
         if self.check_cost_avail():
             return self.az_array_t
         else:
             return self.az_array_retail_t
 
-    def get_azcost_nodearray(self, fout, start, end):
+    def get_nodearray_hourly_format(self):
+
+        if self.check_cost_avail():
+            return self.az_array_hourly_t
+        else:
+            return self.az_array_hourly_retail_t
+
+    def get_nodearray(self, fout, start, end):
 
         def _process_usage_with_retail(az_fmt_t, fout, usage: dict):
-            row_count = 0
+
             writer = csv.writer(fout, delimiter=',')
             for e in usage['usage'][0]['breakdown']:
                 if e['category'] != 'nodearray':
@@ -108,14 +118,51 @@ class azurecost:
                     for f in az_fmt_t._fields:
                         row.append(array_fmt._asdict()[f])
                     writer.writerow(row)
-                    row_count += 1
-            return row_count
+
+            return
 
         usage = self.get_usage(start, end, 'total')
-        fmt = []
-        _fmt = self.get_azcost_nodearray_format()
+        _fmt = self.get_nodearray_format()
         if _fmt.__name__ == 'az_array_retail_t':
             return _process_usage_with_retail(_fmt, fout, usage)
+
+    def get_nodearray_hourly(self, fout, start, end):
+
+        def _process_hourly_with_retail(az_fmt_t, fout, usage: dict):
+            writer = csv.writer(fout, delimiter=',')
+            for e in usage['usage']:
+                start = e['start']
+                end = e['end']
+                for a in e['breakdown']:
+                    if a['category'] != 'nodearray':
+                        continue
+                    array = a['node']
+                    for d in a['details']:
+                        vm_size = d['vm_size']
+                        region = d['region']
+                        core_count = d['core_count']
+                        hours = d['hours']
+                        spot = False
+                        if d['priority'] == 'Spot':
+                            spot = True
+                        if self.do_meter_lookup(sku_name=vm_size,region=region,spot=spot):
+                            pass
+                        rate_data = self.get_retail_rate(armskuname=vm_size, armregionname=region, spot=spot)
+                        rate = rate_data['retailPrice']
+                        cost = (hours/core_count) * rate
+                        array_fmt = az_fmt_t(start=start, end=end, nodearray=array, core_hours=hours, cost=cost,
+                                             sku_name=vm_size,region=region,spot=spot,meterid=rate_data['meterId'],
+                                             metercat=rate_data['serviceName'], rate=rate_data['retailPrice'],
+                                             meter=rate_data['meterName'], currency=rate_data['currencyCode'])
+                        row = []
+                        for f in az_fmt_t._fields:
+                            row.append(array_fmt._asdict()[f])
+                        writer.writerow(row)
+
+        usage = self.get_usage(start, end, 'hourly')
+        _fmt = self.get_nodearray_hourly_format()
+        if _fmt.__name__ == 'az_array_hourly_retail_t':
+            return _process_hourly_with_retail(_fmt, fout, usage)
 
     def get_retail_rate(self, armskuname: str, armregionname: str, spot: bool):
 
