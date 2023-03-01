@@ -11,7 +11,16 @@ class azurecost:
 
         self.config = config
         self.retail_url = "https://prices.azure.com/api/retail/prices?api-version=2021-10-01-preview&meterRegion='primary'"
-        self.clusters = config['cluster_name']
+        if config.get('cluster_name'):
+            self.clusters = config.get('cluster_name')
+        else:
+            raise ValueError("cluster_name must be present in config")
+        cost_config = config.get('cost', {})
+        if not cost_config or not cost_config.get('cache_root'):
+            log.info("Defaulting cost cache dir to /tmp")
+            self.cache_root = "/tmp"
+        else:
+            self.cache_root = cost_config.get("cache_root")
         self.dimensions = namedtuple("dimensions", "cost,usage,region,meterid,meter,metercat,metersubcat,resourcegroup,tags,currency")
         retail_name = f"{config['cache_root']}/retail"
         self.retail_session = CachedSession(cache_name=retail_name,
@@ -208,7 +217,7 @@ class azurecost:
         data = res.json()
         sku_list = []
         for e in data['Items']:
-            if e[sku] and e[region]:
+            if e.get(sku) and e.get(region):
                 sku_list.append((e[sku],e[region]))
         return sku_list
 
