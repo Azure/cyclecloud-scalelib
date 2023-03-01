@@ -4,7 +4,7 @@ import urllib3
 from urllib3.exceptions import InsecureRequestWarning
 import hpc.autoscale.hpclogging as log
 from collections import namedtuple
-from types import Optional
+from typing import Optional
 from requests_cache import CachedSession
 
 class azurecost:
