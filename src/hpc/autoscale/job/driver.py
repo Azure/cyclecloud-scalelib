@@ -203,6 +203,13 @@ def add_default_placement_groups(config: Dict, node_mgr: NodeManager) -> None:
         buf_size = int(
             nas.get(nodearray, {}).get("generated_placement_group_buffer", 2)
         )
+        max_placement_groups = int(
+            nas.get(nodearray, {}).get("max_placement_groups", 10000)
+        )
+
+        node_mgr.add_placement_group
+        existing_pgs = len(node_mgr.get_placement_groups(bucket))
+        buf_size = min(max_placement_groups - existing_pgs, buf_size)
         buf_remaining = buf_size
         pgi = 0
         while buf_remaining > 0:

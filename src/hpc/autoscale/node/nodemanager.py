@@ -1012,6 +1012,9 @@ class NodeManager:
 
         self.__node_buckets.append(bucket.clone_with_placement_group(pg_name))
 
+    def get_placement_groups(self, bucket: NodeBucket) -> List[ht.PlacementGroup]:
+        return [b.placement_group for b in self.__node_buckets if b.nodearray == bucket.nodearray and b.placement_group]
+
     @apitrace
     def deallocate_nodes(self, nodes: List[Node]) -> DeallocateResult:
         return self._nodes_operation(
