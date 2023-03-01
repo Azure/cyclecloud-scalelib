@@ -4,6 +4,7 @@ import urllib3
 from urllib3.exceptions import InsecureRequestWarning
 import hpc.autoscale.hpclogging as log
 from collections import namedtuple
+from types import Optional
 from requests_cache import CachedSession
 
 class azurecost:
@@ -21,7 +22,7 @@ class azurecost:
             self.cache_root = "/tmp"
         else:
             self.cache_root = cost_config.get("cache_root")
-        self.dimensions = namedtuple("dimensions", "cost,usage,region,meterid,meter,metercat,metersubcat,resourcegroup,tags,currency")
+
         retail_name = f"{self.cache_root}/retail"
         self.retail_session = CachedSession(cache_name=retail_name,
                                             backend='filesystem',
@@ -47,14 +48,14 @@ class azurecost:
         self.az_array_hourly_t = namedtuple('az_array_hourly_t', (self.NODEARRAY_USAGE_HOURLY_FORMAT + ',' + self.DEFAULT_AZCOST_FORMAT))
         self.az_array_hourly_retail_t = namedtuple('az_array_hourly_retail_t', (self.NODEARRAY_USAGE_HOURLY_FORMAT + ',' + self.RETAIL_FORMAT))
 
-    def do_meter_lookup(self, sku_name, spot, region):
+    def do_meter_lookup(self, sku_name, spot, region) -> Optional[float]:
         """
         check cache storage if we have seen this meter's rate
         before.
         """
         return None
 
-    def check_cost_avail(self, start=None, end=None):
+    def check_cost_avail(self, start=None, end=None) -> bool:
         """
         For a given time period, check if we have
         cost data available. If time period is not
@@ -97,7 +98,7 @@ class azurecost:
         else:
             return self.az_array_hourly_retail_t
 
-    def get_nodearray(self, fout, start, end):
+    def get_nodearray(self, fout, start, end)-> None:
 
         def _process_usage_with_retail(az_fmt_t, fout, usage: dict):
 
@@ -135,7 +136,7 @@ class azurecost:
         if _fmt.__name__ == 'az_array_retail_t':
             return _process_usage_with_retail(_fmt, fout, usage)
 
-    def get_nodearray_hourly(self, fout, start, end):
+    def get_nodearray_hourly(self, fout, start, end) -> None:
 
         def _process_hourly_with_retail(az_fmt_t, fout, usage: dict):
             writer = csv.writer(fout, delimiter=',')
@@ -173,7 +174,7 @@ class azurecost:
         if _fmt.__name__ == 'az_array_hourly_retail_t':
             return _process_hourly_with_retail(_fmt, fout, usage)
 
-    def get_retail_rate(self, armskuname: str, armregionname: str, spot: bool):
+    def get_retail_rate(self, armskuname: str, armregionname: str, spot: bool) -> Optional[dict]:
 
         params = {}
         filters = f"armRegionName eq '{armregionname}' and armSkuName eq '{armskuname}' and serviceName eq 'Virtual Machines'"
@@ -201,7 +202,7 @@ class azurecost:
                 continue
             return e
 
-    def get_info_from_retail(self, meterId: str):
+    def get_info_from_retail(self, meterId: str)-> list:
 
         sku = 'armSkuName'
         region = 'armRegionName'
@@ -221,7 +222,7 @@ class azurecost:
                 sku_list.append((e[sku],e[region]))
         return sku_list
 
-    def get_usage(self, start: str, end: str, granularity: str):
+    def get_usage(self, start: str, end: str, granularity: str)-> dict:
 
         clustername = self.config['cluster_name']
         endpoint = f"{self.config['url']}/clusters/{clustername}/usage?expand=details"
