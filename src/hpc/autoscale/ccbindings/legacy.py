@@ -104,6 +104,7 @@ class ClusterBinding(ClusterBindingInterface):
                 str(n.node_attribute_overrides),
                 n.keep_alive,
                 n.name_format,
+                n.name_offset,
             ),
         )
 
@@ -117,13 +118,16 @@ class ClusterBinding(ClusterBindingInterface):
                 return (n.nodearray, -1)
 
         for key, p_nodes in p_nodes_dict.items():
-            nodearray, vm_size, pg, _, keep_alive, name_format = key
+            nodearray, vm_size, pg, _, keep_alive, name_format, name_offset = key
             request_set = NodeCreationRequestSet()
 
             if name_format:
                 request_set.name_format = name_format
             request_set.nodearray = nodearray
             request_set.count = len(p_nodes)
+            if name_offset is not None:
+                request_set.name_offset = name_offset
+            
             request_set.placement_group_id = pg
             request_set.definition = NodeCreationRequestSetDefinition()
             request_set.definition.machine_type = vm_size
@@ -532,3 +536,4 @@ def _get_session(config: Dict) -> requests.sessions.Session:
     raise AssertionError(
         "Could not connect to CycleCloud. Please see the log for more details."
     )
+

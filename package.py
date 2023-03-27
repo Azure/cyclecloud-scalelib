@@ -48,7 +48,8 @@ def build_sdist() -> str:
 
 
 def get_cycle_libs(args: Namespace) -> List[str]:
-    ret = [build_swagger(), build_sdist()]
+    # ret = [build_swagger(), build_sdist()]
+    ret = [build_sdist()]
 
     cyclecloud_api_file = "cyclecloud_api-{}-py2.py3-none-any.whl".format(
         CYCLECLOUD_API_VERSION
@@ -124,7 +125,7 @@ def execute() -> None:
         _add("packages/" + dep, dep_path)
         packages.append(dep_path)
 
-    check_call(["pip", "download"] + packages, cwd=build_dir)
+    check_call(["pip3", "download"] + packages, cwd=build_dir)
 
     print("Using build dir", build_dir)
     by_package: Dict[str, List[str]] = {}

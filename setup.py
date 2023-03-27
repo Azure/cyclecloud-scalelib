@@ -307,7 +307,7 @@ setup(
     include_package_data=True,
     install_requires=[
         "requests == 2.24.0",
-        "requests-cache",
+        "requests-cache == 0.7.5",
         "typing_extensions==3.7.4.3",
         "immutabledict==1.0.0",
         "jsonpickle==1.4.1",

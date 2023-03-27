@@ -722,15 +722,18 @@ class NodeManager:
                     logging.warning("%s no longer exists.", name)
                     node.exists = False
                     node.state = ht.NodeStatus("Off")
+                    node.target_state = ht.NodeStatus("Off")
                 else:
                     cc_node = updated_cc_nodes[name]
                     node.state = ht.NodeStatus(cc_node["Status"])
+                    node.target_state = ht.NodeStatus(cc_node["TargetState"])
                     if node.delayed_node_id.node_id:
                         assert node.delayed_node_id.node_id == cc_node["NodeId"]
                     else:
                         logging.info(
                             "Found nodeid for %s -> %s", node, cc_node["NodeId"]
                         )
+                        assert cc_node["NodeId"]
                         node.delayed_node_id.node_id = cc_node["NodeId"]
                     ret.append(node)
 
@@ -1009,6 +1012,9 @@ class NodeManager:
 
         self.__node_buckets.append(bucket.clone_with_placement_group(pg_name))
 
+    def get_placement_groups(self, bucket: NodeBucket) -> List[ht.PlacementGroup]:
+        return [b.placement_group for b in self.__node_buckets if b.nodearray == bucket.nodearray and b.placement_group]
+
     @apitrace
     def deallocate_nodes(self, nodes: List[Node]) -> DeallocateResult:
         return self._nodes_operation(
@@ -1053,7 +1059,7 @@ class NodeManager:
         self,
         nodes: List[Node],
         function: Callable[[List[Node]], NodeManagementResult],
-        ctor: Callable[[str, ht.OperationId, Optional[ht.RequestId], List[Node]], T],
+        ctor: Callable[[str, ht.OperationId, Optional[List[ht.RequestId]], List[Node]], T],
     ) -> T:
         managed_nodes = [node for node in nodes if node.managed]
         unmanaged_node_names = [node.name for node in nodes if not node.managed]
@@ -1094,7 +1100,7 @@ class NodeManager:
 
             affected_nodes.append(node)
 
-            if node.state in ["Terminating", "Off"]:
+            if node.target_state in ["Terminated", "Off"]:
                 self._remove_node_internally(node)
 
         return ctor(
@@ -1338,6 +1344,18 @@ def _new_node_manager_79(
     buckets = []
 
     cluster_limit = _cluster_limits(cluster_bindings.cluster_name, cluster_status)
+
+    filtered_nodes = []
+
+    for cc_node in nodes_list.nodes:
+        if "TargetState" not in cc_node:
+            logging.error("Node %s created without a TargetState.", cc_node.get("Name"))
+            logging.error(
+                "You may attempt to start manually, but ignoring for autoscale."
+            )
+            continue
+        else:
+            filtered_nodes.append(cc_node)
 
     cc_nodes_by_template = partition(nodes_list.nodes, lambda n: n["Template"])
 
