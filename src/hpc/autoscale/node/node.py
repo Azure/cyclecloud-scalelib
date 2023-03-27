@@ -112,6 +112,7 @@ class Node(ABC):
             gpu_count if gpu_count is not None else self.__aux_vm_info.gpu_count
         )
         self.name_format: Optional[str] = None  # f"{self.nodearray}-%s"
+        self.name_offset: Optional[int] = None
 
     @property
     def required(self) -> bool:
