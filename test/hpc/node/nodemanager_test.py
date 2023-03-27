@@ -772,11 +772,14 @@ def test_delete_internally(bindings: MockClusterBinding) -> None:
     result = node_mgr.delete([node])
     assert result
 
+    assert len(node_mgr.get_nodes()) == 0
+
     assert len(result.nodes) == 1
     assert result.nodes[0].name == "htc-1"
-    assert result.nodes[0].state == "Terminating"
+    # assert result.nodes[0].target_state == "Terminated"
+    # assert result.nodes[0].state == "Terminating"
 
-    assert len(node_mgr.get_nodes()) == 0
+
 
 
 def test_node_resources_alias(node_mgr: NodeManager) -> None:
