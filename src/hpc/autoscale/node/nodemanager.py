@@ -1440,7 +1440,7 @@ def _new_node_manager_79(
                     bucket.regional_quota_core_count,
                 )
 
-            if vm_family not in family_limits:
+            if vm_family not in family_limits and not spot:
                 family_limits[vm_family] = _SharedLimit(
                     "VM Family({})".format(vm_family),
                     bucket.family_consumed_core_count,
@@ -1513,14 +1513,16 @@ def _new_node_manager_79(
                     and n.get("PlacementGroupId") == pg_name
                 ]
 
-                family_limit: Union[_SpotLimit, _SharedLimit] = family_limits[vm_family]
-
                 if nodearray.get("Interruptible"):
                     # enabling spot/interruptible 0's out the family limit response
                     # as the regional limit is supposed to be used in its place,
                     # however that responsibility is on the caller and not the
                     # REST api. For this library we handle that for them.
                     family_limit = _SpotLimit(target_regional_limits[region])
+                else:
+                    family_limit: Union[_SpotLimit, _SharedLimit] = family_limits[
+                        vm_family
+                    ]
 
                 na_limit = nodearray_limits[nodearray_name]
                 # bug - unfortunately CycleCloud does not give an accurate 'available_count'
