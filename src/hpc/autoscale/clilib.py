@@ -1838,6 +1838,21 @@ def create_arg_parser(
             default=default_config,
             required=not bool(default_config),
         ).completer = default_completer  # type: ignore
+
+        # note this is true if you set the env variable
+        # AZURE_HPC_DEV=1
+        if hpcutil.AZURE_HPC_DEV:
+            new_parser.add_argument(
+                "--cluster-response",
+                required=False,
+                help="Path to a json file containing the response from a CycleCloud clusters/{cluster_name}/status call for debugging / reproduction.",
+            )
+            new_parser.add_argument(
+                "--nodes-response",
+                required=False,
+                help="Path to a json file containing the response from a CycleCloud clusters/{cluster_name}/nodes call for debugging / reproduction." + 
+                " Note that this is optional if --cluster-reponse is specified, but you must specify --cluster-response if you specify this",
+            )
         return new_parser
 
     configure_parser_functions = {}
@@ -1891,6 +1906,16 @@ def main(
     # parse list of config paths to a single config
     if hasattr(args, "config"):
         args.config = load_config(args.config)
+
+        # special handling for reproducing issues with reponses provided externally.
+        if hasattr(args, "cluster_response"):
+            if args.cluster_response:
+                args.config["_mock_bindings"] = {
+                    "name": "reproduce",
+                    "cluster_response": args.cluster_response
+                }
+            if args.nodes_response:
+                args.config["_mock_bindings"]["nodes_response"] = args.nodes_response
         logging.initialize_logging(args.config)
 
         # if applicable, set read_only/lock_file
@@ -1900,7 +1925,7 @@ def main(
 
     kwargs = {}
     for k in dir(args):
-        if k[0].islower() and k not in ["read_only", "func", "cmd"]:
+        if k[0].islower() and k not in ["read_only", "func", "cmd", "cluster_response", "nodes_response"]:
             kwargs[k] = getattr(args, k)
 
     if hasattr(module, "_initialize") and hasattr(args, "config"):
