@@ -275,7 +275,24 @@ def test_choice_ordering() -> None:
 
 def test_vm_family_limit(bindings: MockClusterBinding) -> None:
     bindings = MockClusterBinding("clusty")
+    bindings.add_nodearray("hpc", {"nodetype": "B"}, spot=True)
     bindings.add_nodearray("htc", {"nodetype": "A"})
+
+    # repro for bug #24 Adding a duplicate Standard_F4 in an unrelated
+    # nodearray should not affect the allocation of the other nodearray.
+    # However, the reported family quota count from CycleCloud will be 0
+    # for spot buckets and we cache the family quota count per vm size, without
+    # taking into account spot vs ondemand.
+    bindings.add_bucket(
+        "hpc",
+        "Standard_F4",
+        available_count=20,
+        max_count=20,
+        family_quota_count=0,
+        family_quota_core_count=0,
+        family_consumed_core_count=0,
+    )
+    
     bindings.add_bucket(
         "htc",
         "Standard_F4",
@@ -294,20 +311,16 @@ def test_vm_family_limit(bindings: MockClusterBinding) -> None:
         family_quota_core_count=120,
         family_consumed_core_count=0,
     )
-    nm = _node_mgr(bindings)
-    result = nm.allocate({}, node_count=100, all_or_nothing=False)
-    assert len(result.nodes) == 40
-    pass
-    # assert len(result.nodes) == 1
-    # assert result.nodes[0].vm_size == "Standard_F2"
 
-    # result = nm.allocate({}, vcpu_count=100000, all_or_nothing=False)
-    # assert result and len(result.nodes) == 30
-    # result = nm.allocate({"node.vm_sizex": "Standard_F4s"}, node_count=10, all_or_nothing=False)
-    # assert not result
-    # result = nm.allocate({}, node_count=20, all_or_nothing=False)
-    # assert result and len(result.nodes) == 10
-    # assert set(["htc"]) == set([n.nodearray for n in result.nodes])
+
+
+    nm = _node_mgr(bindings)
+    result = nm.allocate({"nodetype": "A"}, node_count=100, all_or_nothing=False)
+    assert len(result.nodes) == 40
+
+    result = nm.allocate({"nodetype": "B"}, node_count=100, all_or_nothing=False)
+    assert len(result.nodes) == 20
+
 
 
 def test_mock_bindings(bindings: MockClusterBinding) -> None:
@@ -778,8 +791,6 @@ def test_delete_internally(bindings: MockClusterBinding) -> None:
     assert result.nodes[0].name == "htc-1"
     # assert result.nodes[0].target_state == "Terminated"
     # assert result.nodes[0].state == "Terminating"
-
-
 
 
 def test_node_resources_alias(node_mgr: NodeManager) -> None:

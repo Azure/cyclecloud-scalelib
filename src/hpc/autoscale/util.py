@@ -18,6 +18,21 @@ if typing.TYPE_CHECKING:
 
 LEGACY = bool(int(os.getenv("AZUREHPC_LEGACY", "1")))
 
+# This env variable unlocks extra functionality in the CLI
+# for dev and support staff to reproduce issues locally with raw JSON responses from
+# raw json responses provided by a CX's CycleCloud instance. Specifically
+# /clusters/{cluster}/status response (cluster.json)
+# and, optionally, 
+# /clusters/{cluster}/nodes response (nodes.json)
+#
+# For example, let's assume I created a CLI based on clilib called azmycli.
+# > azmycli buckets --cluster-response path/to/cluster.json 
+# > azmycli nodes --node-list path/to/nodes.json --cluster-response path/to/cluster.json
+# It should work with any command that just needs a cluster_status and, optionally, a nodes response.
+# The idea here is that someone has provided a raw json response for the 
+# You can then feed these into your CLI to reproduce the issue locally.
+AZURE_HPC_DEV = bool(int(os.getenv("AZURE_HPC_DEV", "0")))
+
 
 @hpcwrapclass
 class IncrementingUUID:
