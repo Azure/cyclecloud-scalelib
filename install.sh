@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e
 
 SCHEDULER=scalelib
 INSTALL_PYTHON3=0
@@ -76,9 +77,7 @@ source $VENV/bin/activate
 # if you don't install it first. It has no dependencies so this is safe.
 pip install packages/*
 
-install_azscale.sh
-
-chmod +x $VENV/bin/azscale
+python3 -m hpc.autoscale.cliinstall install --cli azscale --cls hpc.autoscale.cli
 
 azscale -h 2>&1 > /dev/null || exit 1
 

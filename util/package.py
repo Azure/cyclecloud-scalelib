@@ -6,8 +6,13 @@ import shutil
 import sys
 import tarfile
 import tempfile
-from subprocess import check_call
-from typing import Dict, List, Optional
+from subprocess import check_call as _check_call
+from typing import Any, Dict, List, Optional
+
+
+def check_call(cmd: List[str], **kwargs: Dict[str, Any]) -> None:
+    print(" ".join(cmd))
+    _check_call(cmd, **kwargs)
 
 
 class Packager:
@@ -51,6 +56,11 @@ class Packager:
         self.build_scalelib()
         self.build_self()
 
+        source = os.path.abspath(self.cyclecloud_api_version)
+        dest = os.path.join(self.libs_dir, os.path.basename(source))
+        if dest != source:
+            shutil.copyfile(source, dest)
+
     def _run_sdist(self, directory=None) -> None:
         pwd = os.getcwd()
         if directory:
@@ -68,7 +78,6 @@ class Packager:
 
 
 def execute(packager: Packager) -> None:
-    
     argument_parser = argparse.ArgumentParser(
         "Builds a Scalelib based project with all dependencies."
     )
@@ -80,6 +89,8 @@ def execute(packager: Packager) -> None:
 
     packager.scalelib = args.cyclecloud_scalelib
     packager.cyclecloud_api_version = args.cyclecloud_api
+
+    packager.build()
 
     if not os.path.exists("dist"):
         os.makedirs("dist")
@@ -100,13 +111,15 @@ def execute(packager: Packager) -> None:
 
         with open(path, "rb") as fr:
             tf.addfile(tarinfo, fr)
-    
+
     packages = []
     for dep in os.listdir(packager.libs_dir):
         dep_path = os.path.abspath(os.path.join(packager.libs_dir, dep))
         _add("packages/" + dep, dep_path)
         packages.append(dep_path)
 
+    if not packages:
+        raise RuntimeError(f"No packages found in libs dir - {packager.libs_dir}")
     check_call(["pip3", "download"] + packages, cwd=build_dir)
 
     print("Using build dir", build_dir)

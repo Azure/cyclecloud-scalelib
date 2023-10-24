@@ -6,7 +6,7 @@ import typing
 from abc import ABC, abstractmethod
 
 import hpc.autoscale.hpclogging as logging
-from hpc.autoscale.hpctypes import Hostname, NodeId
+from hpc.autoscale.hpctypes import BucketId, Hostname, NodeId
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.util import parse_boot_timeout, parse_idle_timeout, partition_single
 
@@ -19,7 +19,7 @@ SQL_TRUE = 1
 SQL_FALSE = 0
 
 
-NodeHistoryResult = typing.List[typing.Tuple[NodeId, Hostname, float]]
+NodeHistoryResult = typing.List[typing.Tuple[NodeId, Hostname, float, BucketId]]
 
 
 class NodeHistory(ABC):
@@ -63,21 +63,21 @@ class NullNodeHistory(NodeHistory):
 
     def find_unmatched(self, for_at_least: float = 300) -> NodeHistoryResult:
         return [
-            (n.delayed_node_id.node_id, n.hostname_required, 0)
+            (n.delayed_node_id.node_id, n.hostname_required, 0, n.bucket_id)
             for n in self.nodes
             if n.delayed_node_id.node_id
         ]
 
     def find_booting(self, for_at_least: float = 1800) -> NodeHistoryResult:
         return [
-            (n.delayed_node_id.node_id, n.hostname_required, 0)
+            (n.delayed_node_id.node_id, n.hostname_required, 0, n.bucket_id)
             for n in self.nodes
             if n.delayed_node_id.node_id
         ]
 
     def find_ignored(self) -> NodeHistoryResult:
         return [
-            (n.delayed_node_id.node_id, n.hostname_required, 0)
+            (n.delayed_node_id.node_id, n.hostname_required, 0, n.bucket_id)
             for n in self.nodes
             if n.metadata.get("__ignore__")
         ]
@@ -177,7 +177,7 @@ class SQLiteNodeHistory(NodeHistory):
 
         rows = list(
             self._execute(
-                """SELECT node_id, instance_id, hostname, create_time, last_match_time, ready_time, ignore
+                """SELECT node_id, bucket_id, instance_id, hostname, create_time, last_match_time, ready_time, ignore
                          from nodes where delete_time IS NULL"""
             )
         )
@@ -211,6 +211,7 @@ class SQLiteNodeHistory(NodeHistory):
             if node.state == "Ready" or node.metadata.get("_running_job_"):
                 (
                     node_id,
+                    bucket_id,
                     instance_id,
                     hostname,
                     create_time,
@@ -222,6 +223,7 @@ class SQLiteNodeHistory(NodeHistory):
                     rows_by_id[node_id] = tuple(
                         [
                             node_id,
+                            bucket_id,
                             instance_id,
                             hostname,
                             create_time,
@@ -236,6 +238,7 @@ class SQLiteNodeHistory(NodeHistory):
             for row in rows_by_id.values():
                 (
                     node_id,
+                    bucket_id,
                     instance_id,
                     hostname,
                     create_time,
@@ -244,14 +247,14 @@ class SQLiteNodeHistory(NodeHistory):
                     ignore,
                 ) = row
                 ignore_int = SQL_TRUE if ignore else SQL_FALSE
-                expr = f"('{node_id}', '{instance_id}', '{hostname}', {create_time}, {match_time}, {ready_time}, NULL, {ignore_int})".lower()
+                expr = f"('{node_id}', '{bucket_id}', '{instance_id}', '{hostname}', {create_time}, {match_time}, {ready_time}, NULL, {ignore_int})".lower()
 
                 exprs.append(expr)
             block_size = int(os.getenv("SCALELIB_SQLITE_INSERT_BLOCK", "25"))
             for i in range(0, len(exprs), block_size):
                 sub_exprs = exprs[i : i + block_size]
                 values_expr = ",".join(sub_exprs)
-                stmt = "INSERT OR REPLACE INTO nodes (node_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time, ignore) VALUES {}".format(
+                stmt = "INSERT OR REPLACE INTO nodes (node_id, bucket_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time, ignore) VALUES {}".format(
                     values_expr
                 )
                 self._execute(stmt)
@@ -291,7 +294,7 @@ class SQLiteNodeHistory(NodeHistory):
         omega = now - for_at_least
         return list(
             self._execute(
-                "SELECT node_id, hostname, last_match_time from nodes where last_match_time < {}".format(
+                "SELECT node_id, hostname, last_match_time, bucket_id from nodes where last_match_time < {}".format(
                     omega
                 )
             )
@@ -303,7 +306,7 @@ class SQLiteNodeHistory(NodeHistory):
 
         return list(
             self._execute(
-                f"SELECT node_id, hostname, create_time as ctime from nodes where ctime < {omega} AND ready_time < create_time"
+                f"SELECT node_id, hostname, create_time, bucket_id as ctime from nodes where ctime < {omega} AND ready_time < create_time"
             )
         )
 
@@ -376,7 +379,7 @@ class SQLiteNodeHistory(NodeHistory):
     def find_ignored(self) -> NodeHistoryResult:
         return list(
             self._execute(
-                f"SELECT node_id, hostname, create_time as ctime from nodes where ignore"
+                f"SELECT node_id, hostname, create_time, bucket_id as ctime from nodes where ignore"
             )
         )
 

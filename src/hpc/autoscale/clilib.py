@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+from shutil import which
 import sys
 import traceback
 import typing
@@ -245,14 +246,24 @@ class CommonCLI(ABC):
         self.node_names: List[str] = []
         self.hostnames: List[str] = []
         self.__node_mgr: Optional[NodeManager] = None
+        self.__driver: SchedulerDriver = None
 
     def connect(self, config: Dict) -> None:
         """Tests connection to CycleCloud"""
         self._node_mgr(config)
 
-    @abstractmethod
     def _setup_shell_locals(self, config: Dict) -> Dict:
-        ...
+        shell_locals = {}
+        shell_locals["node_mgr"] = self._node_mgr(config)
+        shell_locals["driver"] = self._driver(config)
+        shell_locals["cli"] = self
+        shell_locals["demand_calc"] = self._demand_calc(config, shell_locals["driver"], shell_locals["node_mgr"])
+        shell_locals["config"] = config
+
+        jobs, sched_nodes = shell_locals["driver"]._read_jobs_and_nodes(config)
+        shell_locals["jobs"] = jobs
+        shell_locals["sched_nodes"] = sched_nodes
+        return shell_locals
 
     def shell_parser(self, parser: ArgumentParser) -> None:
         parser.set_defaults(read_only=False)
@@ -273,6 +284,11 @@ class CommonCLI(ABC):
         if script and not os.path.exists(script):
             error("Script does not exist: %s", script)
         shell(config, shell_locals, script)
+
+    def driver(self, config: Dict, force_refresh: bool = False) -> SchedulerDriver:
+        if self.__driver is None or force_refresh:
+            self.__driver = self._driver(config)
+        return self.__driver
 
     @abstractmethod
     def _driver(self, config: Dict) -> SchedulerDriver:
@@ -428,7 +444,6 @@ class CommonCLI(ABC):
         long: bool = False,
     ) -> None:
         """End-to-end autoscale process, including creation, deletion and joining of nodes."""
-        output_columns = output_columns or self._get_default_output_columns(config)
 
         if dry_run:
             logging.warning("Running gridengine autoscaler in dry run mode")
@@ -445,6 +460,8 @@ class CommonCLI(ABC):
         driver.initialize()
 
         config = driver.preprocess_config(config)
+
+        output_columns = output_columns or self._get_default_output_columns(config)
 
         logging.debug("Driver = %s", driver)
 
@@ -588,6 +605,7 @@ class CommonCLI(ABC):
         long: bool = False,
     ) -> None:
         """Dry-run version of autoscale."""
+        config = self._driver(config).preprocess_config(config)
         output_columns = output_columns or self._get_default_output_columns(config)
         self.autoscale(config, output_columns, output_format, dry_run=True, long=long)
 
@@ -1096,6 +1114,7 @@ class CommonCLI(ABC):
         validated_constraints = writer.getvalue()
 
         driver = self._driver(config)
+        config = driver.preprocess_config(config)
         output_columns = output_columns or self._get_default_output_columns(config)
         demand_calc, _ = self._demand_calc(config, driver)
 
@@ -1276,12 +1295,31 @@ class CommonCLI(ABC):
 
     def config_parser(self, parser: ArgumentParser) -> None:
         parser.set_defaults(read_only=False)
+        parser.add_argument("key", nargs="?", type=str, default=None)
 
-    def config(self, config: Dict, writer: TextIO = sys.stdout) -> None:
+    def config(self, config: Dict, key: Optional[str] = None, writer: TextIO = sys.stdout) -> None:
         """Writes the effective autoscale config, after any preprocessing, to stdout"""
         driver = self._driver(config)
         driver.preprocess_config(config)
-        json.dump(config, writer, indent=2)
+        if key:
+            section = config
+            toks = key.split(".")
+            for n, tok in enumerate(toks):
+                try:
+                    section = section[tok]
+                except:
+                    if len(toks) > 1:
+                        print(f"Could not find key {key} - specifically {tok} at index {n + 1}", file=sys.stderr)
+                    else:
+                        print(f"Could not find key {key}", file=sys.stderr)
+
+                    print(f"Available keys: {','.join(section.keys())}", file=sys.stderr)
+                    sys.exit(1)
+                
+            json.dump(config.get(key), writer, indent=2)
+        else:
+            json.dump(config, writer, indent=2)
+        
 
     def validate_constraint_parser(self, parser: ArgumentParser) -> None:
         self._add_constraint_expr(parser)
@@ -1388,10 +1426,11 @@ class CommonCLI(ABC):
         return os.path.join("/opt", "azurehpc", self.project_name)
 
     def initconfig_parser(self, parser: ArgumentParser) -> None:
-        parser.add_argument("--cluster-name", required=True)
-        parser.add_argument("--username", required=True)
+        jetpack = which("jetpack")
+        parser.add_argument("--cluster-name", required=not jetpack)
+        parser.add_argument("--username", required=not jetpack)
         parser.add_argument("--password")
-        parser.add_argument("--url", required=True)
+        parser.add_argument("--url", required=not jetpack)
         default_home = self.autoscale_home
 
         parser.add_argument(
@@ -1429,9 +1468,8 @@ class CommonCLI(ABC):
 
         self._initconfig_parser(parser)
 
-    @abstractmethod
     def _initconfig_parser(self, parser: ArgumentParser) -> None:
-        ...
+        pass
 
     def initconfig(self, writer: TextIO = sys.stdout, **config: Dict) -> None:
         """Creates an initial autoscale config. Writes to stdout"""
@@ -1444,14 +1482,26 @@ class CommonCLI(ABC):
                 if parent not in config:
                     config[parent] = {}
                 config[parent][child] = config.pop(key)
+
+        jetpack = which("jetpack")
+        if jetpack:
+            for config_key, jetpack_key in [("cluster_name", "cyclecloud.cluster.name"),
+                                            ("username", "cyclecloud.config.username"),
+                                            ("password", "cyclecloud.config.password"),
+                                            ("url", "cyclecloud.config.web_server")]:
+                if not config.get(config_key):
+                    config[config_key] = (
+                        check_output(["jetpack", "config", jetpack_key])
+                        .decode()
+                        .strip()
+                    )
+
         json.dump(config, writer, indent=2)
 
-    @abstractmethod
     def _initconfig(self, config: Dict) -> None:
-        ...
+        pass
 
     def analyze_parser(self, parser: ArgumentParser) -> None:
-
         parser.add_argument("--job-id", "-j", required=True)
         parser.add_argument("--long", "-l", action="store_true", default=False)
 

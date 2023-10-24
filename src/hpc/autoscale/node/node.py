@@ -61,6 +61,7 @@ class Node(ABC):
         software_configuration: ImmutableOrderedDict,
         keep_alive: bool,
         gpu_count: Optional[int] = None,
+        pcpu_count: Optional[int] = None,
     ) -> None:
         self.__name = name
         self.__nodearray = nodearray
@@ -110,6 +111,9 @@ class Node(ABC):
         self.__keep_alive = keep_alive
         self.__gpu_count = (
             gpu_count if gpu_count is not None else self.__aux_vm_info.gpu_count
+        )
+        self.__pcpu_count = (
+            pcpu_count if pcpu_count is not None else self.__aux_vm_info.pcpu_count
         )
         self.name_format: Optional[str] = None  # f"{self.nodearray}-%s"
         self.name_offset: Optional[int] = None

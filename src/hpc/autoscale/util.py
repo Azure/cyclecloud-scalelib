@@ -377,6 +377,7 @@ def parse_timeout(
         return value
     if isinstance(value, str):
         return int(value)
+
     section = node.nodearray if node else "default"
     key = section
     if key not in value:

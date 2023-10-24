@@ -20,11 +20,12 @@ from hpc.autoscale.util import (
 
 
 class SchedulerDriver(ABC):
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, mpi: bool=True) -> None:
         self.name = name
         self.__jobs_cache: Optional[List[Job]] = None
         self.__scheduler_nodes_cache: Optional[List[SchedulerNode]] = None
         self.__node_history: Optional[NodeHistory] = None
+        self._assume_mpi = mpi
 
     @property
     def autoscale_home(self) -> str:
@@ -49,7 +50,7 @@ class SchedulerDriver(ABC):
 
     def preprocess_node_mgr(self, config: Dict, node_mgr: NodeManager) -> None:
         add_ccnodeid_default_resource(node_mgr)
-        add_default_placement_groups(config, node_mgr)
+        add_default_placement_groups(config, node_mgr, self._assume_mpi)
 
     def validate_nodes(
         self, scheduler_nodes: List[SchedulerNode], cc_nodes: List[Node]
@@ -174,7 +175,7 @@ class SchedulerDriver(ABC):
         ...
 
 
-def add_default_placement_groups(config: Dict, node_mgr: NodeManager) -> None:
+def add_default_placement_groups(config: Dict, node_mgr: NodeManager, allow_mpi: bool=True) -> None:
     nas = config.get("nodearrays", {})
     for name, child in nas.items():
         if child.get("placement_groups"):
@@ -201,10 +202,10 @@ def add_default_placement_groups(config: Dict, node_mgr: NodeManager) -> None:
             continue
 
         buf_size = int(
-            nas.get(nodearray, {}).get("generated_placement_group_buffer", 2)
+            nas.get(nodearray, {}).get("generated_placement_group_buffer", 2 if allow_mpi else 0)
         )
         max_placement_groups = int(
-            nas.get(nodearray, {}).get("max_placement_groups", 10000)
+            nas.get(nodearray, {}).get("max_placement_groups", 10000 if allow_mpi else 0)
         )
 
         node_mgr.add_placement_group
@@ -233,3 +234,39 @@ def add_ccnodeid_default_resource(node_mgr: NodeManager) -> None:
     resource_name = "ccnodeid" if hpcutil.LEGACY else "aznodeid"
 
     node_mgr.add_default_resource({}, resource_name, get_node_id)
+
+
+class SimpleSchedulerDriver(SchedulerDriver):
+    def __init__(self, name: str, mpi: bool=True) -> None:
+        super().__init__(name, mpi)
+
+    def initialize(self) -> None:
+        pass
+
+    def preprocess_config(self, config: Dict) -> Dict:
+        return config
+
+    def validate_nodes(
+        self, scheduler_nodes: List[SchedulerNode], cc_nodes: List[Node]
+    ) -> None:
+        pass
+
+    def handle_failed_nodes(self, nodes: List[Node]) -> List[Node]:
+        return nodes
+    
+    def add_nodes_to_cluster(
+        self, nodes: List[Node], include_permanent: bool = False
+    ) -> List[Node]:
+        return nodes
+    
+    def handle_post_delete(self, nodes: List[Node]) -> List[Node]:
+        return nodes
+    
+    def handle_post_join_cluster(self, nodes: List[Node]) -> List[Node]:
+        return nodes
+
+    def handle_boot_timeout(self, nodes: List[Node]) -> List[Node]:
+        return nodes
+
+    def handle_draining(self, nodes: List[Node]) -> List[Node]:
+        return nodes    
