@@ -701,8 +701,13 @@ class CommonCLI(ABC):
         cons_dict["node.placement_group"] = placement_group
 
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer, quiet=True)
-        validated_cons = json.loads(writer.getvalue())
+        self.validate_constraint(config, constraint_expr, writer, quiet=False)
+        
+        constraint_raw = writer.getvalue()
+        if constraint_raw.strip():
+            validated_cons = json.loads(constraint_raw)
+        else:
+            validated_cons = {}
 
         if not isinstance(validated_cons, list):
             validated_cons = [validated_cons]
@@ -745,7 +750,7 @@ class CommonCLI(ABC):
                 demandprinter.print_demand(
                     columns=output_columns or self._get_default_output_columns(config),
                     demand_result=DemandResult(
-                        bootup_result.nodes, bootup_result.nodes, [], []
+                        bootup_result.nodes, bootup_result.nodes, [], [], node_mgr.get_buckets()
                     ),
                     output_format=output_format,
                     long=long,
@@ -1157,7 +1162,9 @@ class CommonCLI(ABC):
     ) -> None:
 
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer=writer, quiet=True)
+        self.validate_constraint(config, constraint_expr, writer=writer, quiet=False)
+        validated_cons = json.loads(writer.getvalue())
+        constraints = get_constraints(validated_cons)
 
         node_mgr = self._node_mgr(config)
         specified_output_columns = output_columns
@@ -1185,6 +1192,13 @@ class CommonCLI(ABC):
         if specified_output_columns is None:
             # fill in other columns
             for bucket in node_mgr.get_buckets():
+                skip = False
+                for cons in constraints:
+                    if not cons.satisfies_bucket(bucket):
+                        skip = True
+                        break
+                if skip:
+                    continue
                 for resource_name in bucket.resources:
                     if resource_name not in output_columns:
                         if (
