@@ -186,6 +186,13 @@ class DemandPrinter:
                         value = node.resources.get(column)
                     else:
                         value = node.metadata.get(column)
+                    
+                    if value is None:
+                        buckets = demand_result.buckets_by_id.get(node.bucket_id, [])
+                        if buckets:
+                            bucket = buckets[0]
+                            if hasattr(bucket, column):
+                                value = getattr(bucket, column)
 
                 if value is None:
                     value = self.__defaults.get(column)

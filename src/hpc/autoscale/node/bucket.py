@@ -91,6 +91,8 @@ class NodeBucket:
         max_placement_group_size: int,
         nodes: List["Node"],
         artificial: bool = False,
+        priority: int = 0,
+        last_capacity_failure: float = -1.0,
         valid: bool = True,
     ) -> None:
         # example node to be used to see if your job would match this
@@ -99,7 +101,8 @@ class NodeBucket:
         assert limits
         self.limits = limits
         self.max_placement_group_size = max_placement_group_size
-        self.priority = 0
+        self.priority = priority
+        self.__last_capacity_failure = last_capacity_failure
         # list of nodes cyclecloud currently says are in this bucket
         self.nodes = nodes
         self.__decrement_counter = 0
@@ -265,6 +268,11 @@ class NodeBucket:
     def valid(self) -> bool:
         return self._valid
 
+    def last_capacity_failure(self) -> Optional[float]:
+        if self.__last_capacity_failure < 0:
+            return None
+        return self.__last_capacity_failure
+
     def add_nodes(self, nodes: List["Node"]) -> None:
         assert self.valid
         new_by_id = partition(nodes, lambda n: n.delayed_node_id.transient_id)
@@ -326,7 +334,9 @@ class NodeBucket:
             self.max_placement_group_size,
             nodes=[],
             artificial=False,
-            valid=True,
+            priority=self.priority,
+            last_capacity_failure=self.__last_capacity_failure,
+            valid=True
         )
 
     def __str__(self) -> str:
