@@ -215,6 +215,7 @@ class DemandCalculator:
             required_nodes,
             unrequired_nodes,
             self.node_mgr.get_failed_nodes(),
+            buckets=self.node_mgr.get_buckets(),
         )
 
     @apitrace

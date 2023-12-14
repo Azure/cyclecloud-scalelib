@@ -10,6 +10,7 @@ import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.codeanalysis import hpcwrap, hpcwrapclass
 from hpc.autoscale.hpctypes import ResourceType
+from hpc.autoscale.node.bucket import NodeBucket
 from hpc.autoscale.results import SatisfiedResult
 
 ConstraintDict = typing.NewType("ConstraintDict", Dict[Any, Any])
@@ -1303,6 +1304,54 @@ class SharedNonConsumableConstraint(SharedConstraint):
         )
 
 
+class CapacityFailureBackoffConstraint(BaseNodeConstraint):
+    def __init__(self, backoff: int) -> None:
+        super().__init__()
+        self.backoff = backoff
+
+    def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        return SatisfiedResult("success", self, node)
+    
+    def _bucket_is_in_backoff(self, bucket: NodeBucket) -> bool:
+        if bucket.last_capacity_failure is None:
+            return False
+        
+        # backoff for _at least_ backoff seconds
+        return bucket.last_capacity_failure < self.backoff
+    
+    def satisfied_by_bucket(self, bucket: NodeBucket) -> SatisfiedResult:
+        if not self._bucket_is_in_backoff(bucket):
+            return SatisfiedResult("success", self, bucket.example_node)
+        
+        return SatisfiedResult("CapacityFailureBackoff", 
+                               self, 
+                               bucket.example_node, 
+                               reasons=[f"last_capacity_failure {bucket.last_capacity_failure} is too recent " + 
+                                        f"- it is less than backoff {self.backoff}"])
+    
+    def weight_buckets(self, bucket_weights: List[Tuple[NodeBucket, float]]) -> List[Tuple[NodeBucket, float]]:
+        ret = []
+        for bucket, weight in bucket_weights:
+            if self._bucket_is_in_backoff(bucket):
+                ret.append((bucket, 0))
+            else:
+                ret.append((bucket, weight))
+        return ret
+
+    def do_decrement(self, node: "Node") -> bool:
+        return True
+
+    def to_dict(self) -> Dict:
+        return {"capacity-failure-backoff": self.backoff}
+
+    @staticmethod
+    def from_dict(d: Dict) -> "CapacityFailureBackoffConstraint":
+        return CapacityFailureBackoffConstraint(d["capacity-failure-backoff"])
+
+    def __str__(self) -> str:
+        return "CapacityFailureBackoffConstraint({})".format(self.backoff)
+
+
 def _parse_node_property_constraint(
     attr: str, value: Union[ResourceType, Constraint]
 ) -> NodePropertyConstraint:
@@ -1496,6 +1545,7 @@ _CUSTOM_PARSERS: Dict[str, Callable[[Dict], NodeConstraint]] = {
     "in-a-placement-group": lambda d: InAPlacementGroup(),
     "shared-consumable-constraint": SharedConsumableConstraint.from_dict,
     "shared-non-consumable-constraint": SharedNonConsumableConstraint.from_dict,
+    "capacity-failure-backoff": CapacityFailureBackoffConstraint.from_dict,
 }
 
 

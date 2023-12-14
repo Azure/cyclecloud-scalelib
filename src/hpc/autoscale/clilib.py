@@ -1220,7 +1220,7 @@ class CommonCLI(ABC):
             config, writer.getvalue(), node_mgr.get_buckets()
         )
 
-        demand_result = DemandResult([], [f.example_node for f in filtered], [], [])
+        demand_result = DemandResult([], [f.example_node for f in filtered], [], [], node_mgr.get_buckets())
 
         config["output_columns"] = output_columns
 

@@ -1364,9 +1364,13 @@ def _new_node_manager_79(
     regional_spot_limits: Dict[str, _SharedLimit] = {}
     family_limits: Dict[str, _SharedLimit] = {}
 
+    default_priority = 1
+
     for nodearray_status in cluster_status.nodearrays:
         nodearray = nodearray_status.nodearray
         nodearray_name = nodearray_status.name
+        raw_priority = nodearray.get("Priority", default_priority)
+        nodearray_base_priority = raw_priority * 1000
 
         is_autoscale_disabled = (
             not nodearray.get("Configuration", {})
@@ -1412,7 +1416,7 @@ def _new_node_manager_79(
 
         spot = nodearray.get("Interruptible", False)
 
-        for bucket in nodearray_status.buckets:
+        for bucket_n, bucket in enumerate(nodearray_status.buckets):
             if not bucket.valid:
                 continue
 
@@ -1586,11 +1590,14 @@ def _new_node_manager_79(
                     except Exception:
                         return (n.name, 0)
 
+
                 node_bucket = NodeBucket(
                     node_def,
                     limits=bucket_limit,
                     max_placement_group_size=bucket.max_placement_group_size,
                     nodes=sorted(nodes, key=nodes_key),
+                    priority=nodearray_base_priority - bucket_n,
+                    last_capacity_failure=bucket.last_capacity_failure,
                 )
 
                 logging.debug(
