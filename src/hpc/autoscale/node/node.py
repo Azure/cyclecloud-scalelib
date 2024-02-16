@@ -108,8 +108,8 @@ class Node(ABC):
         self.__create_time = self.__last_match_time = self.__delete_time = 0.0
         self.__create_time_remaining = self.__idle_time_remaining = 0.0
         self.__keep_alive = keep_alive
-        self.__gpu_count = (
-            gpu_count if gpu_count is not None else self.__aux_vm_info.gpu_count
+        self.__gpu_count = max(
+            gpu_count if gpu_count is not None else 0, self.__aux_vm_info.gpu_count
         )
         self.name_format: Optional[str] = None  # f"{self.nodearray}-%s"
         self.name_offset: Optional[int] = None

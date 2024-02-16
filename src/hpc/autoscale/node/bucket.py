@@ -33,6 +33,7 @@ class NodeDefinition:
         spot: bool,
         subnet: ht.SubnetId,
         vcpu_count: int,
+        gpu_count: int,
         memory: ht.Memory,
         placement_group: Optional[ht.PlacementGroup],
         resources: ht.ResourceDict,
@@ -52,6 +53,8 @@ class NodeDefinition:
         self.subnet = subnet
         assert vcpu_count is not None
         self.vcpu_count = vcpu_count
+        assert gpu_count is not None
+        self.gpu_count = gpu_count
         assert memory is not None
         assert isinstance(memory, ht.Memory), "expected Memory, got {}".format(
             type(memory)
@@ -117,6 +120,7 @@ class NodeBucket:
             location=self.location,
             spot=definition.spot,
             vcpu_count=self.vcpu_count,
+            gpu_count=definition.gpu_count,
             memory=self.memory,
             infiniband=False,
             state=ht.NodeStatus("Off"),
