@@ -642,6 +642,7 @@ class NodeManager:
                 spot=False,
                 subnet=ht.SubnetId("unknown"),
                 vcpu_count=a_node.vcpu_count,
+                gpu_count=a_node.gpu_count,
                 memory=a_node.memory,
                 placement_group=placement_group,
                 resources=ht.ResourceDict(dict(deepcopy(a_node.resources))),
@@ -1417,6 +1418,8 @@ def _new_node_manager_79(
                 continue
 
             vcpu_count = bucket.virtual_machine.vcpu_count
+            gpu_count = bucket.virtual_machine.gpu_count
+            assert gpu_count is not None
 
             aux_vm_info = vm_sizes.get_aux_vm_size_info(
                 region, bucket.definition.machine_type
@@ -1570,6 +1573,7 @@ def _new_node_manager_79(
                     spot=spot,
                     subnet=subnet,
                     vcpu_count=vcpu_count,
+                    gpu_count=gpu_count,
                     memory=bucket_memory,
                     placement_group=pg_name,
                     resources=custom_resources,
