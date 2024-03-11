@@ -33,6 +33,7 @@ class NodeDefinition:
         spot: bool,
         subnet: ht.SubnetId,
         vcpu_count: int,
+        gpu_count: int,
         memory: ht.Memory,
         placement_group: Optional[ht.PlacementGroup],
         resources: ht.ResourceDict,
@@ -52,6 +53,8 @@ class NodeDefinition:
         self.subnet = subnet
         assert vcpu_count is not None
         self.vcpu_count = vcpu_count
+        assert gpu_count is not None
+        self.gpu_count = gpu_count
         assert memory is not None
         assert isinstance(memory, ht.Memory), "expected Memory, got {}".format(
             type(memory)
@@ -117,6 +120,7 @@ class NodeBucket:
             location=self.location,
             spot=definition.spot,
             vcpu_count=self.vcpu_count,
+            gpu_count=definition.gpu_count,
             memory=self.memory,
             infiniband=False,
             state=ht.NodeStatus("Off"),
@@ -136,7 +140,6 @@ class NodeBucket:
         ), "Requested too many nodes: %s > %s" % (count, self.available_count)
         assert self.family_available_count >= 0
         self.__decrement_counter += count
-        # self.limits.decrement(self.vcpu_count, count)
 
     def increment(self, count: int = 1) -> None:
         return self.decrement(-count)
@@ -150,12 +153,18 @@ class NodeBucket:
         self.__decrement_counter = 0
 
     @property
+    def max_count(self) -> int:
+        if self.placement_group:
+            self.max_placement_group_size
+        return self.limits.max_count
+
+    @property
     def available_count(self) -> int:
         # non-pg buckets return -1
         pg_available = self.limits.placement_group_available_count
 
         if pg_available < 0:
-            pg_available = 2 ** 32
+            pg_available = 2**32
 
         return (
             min(
@@ -325,10 +334,14 @@ class NodeBucket:
 
 
 def bucket_candidates(
-    candidates: List["NodeBucket"], constraints: List["constraintslib.NodeConstraint"],
+    candidates: List["NodeBucket"],
+    constraints: List["constraintslib.NodeConstraint"],
 ) -> CandidatesResult:
     if not candidates:
-        return CandidatesResult("NoBucketsDefined", child_results=[],)
+        return CandidatesResult(
+            "NoBucketsDefined",
+            child_results=[],
+        )
 
     for c in candidates:
         assert isinstance(c, NodeBucket)
