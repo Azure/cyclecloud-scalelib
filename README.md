@@ -49,6 +49,95 @@ The project includes several helpers for contributors to validate, test and form
 
 
 # Resources
+
+## Default Resources
+The cyclecloud-scalelib application matches scheduler resources to azure cloud resources to provide rich autoscaling and cluster configuration tools. We call these `default_resources` because they exist even for nodes that have not been materialized, versus resources that are defined after the node has joined the cluster, and potentially overrides these.
+
+Here is an example for matching PBSPro:
+```json
+{"default_resources": [
+   {
+      "select": {},
+      "name": "ncpus",
+      "value": "node.vcpu_count"
+   },
+   {
+      "select": {},
+      "name": "group_id",
+      "value": "node.placement_group"
+   },
+   {
+      "select": {},
+      "name": "host",
+      "value": "node.hostname"
+   },
+   {
+      "select": {},
+      "name": "mem",
+      "value": "node.memory"
+   },
+   {
+      "select": {},
+      "name": "vm_size",
+      "value": "node.vm_size"
+   },
+   {
+      "select": {},
+      "name": "disk",
+      "value": "size::20g"
+   }]
+}
+```
+
+Note that disk is currently hardcoded to size::20g because of platform limitations to determine how much disk a node will have. In the select statement, we can filter how the resources are applied, i.e. by VM Size or nodearray etc. Here is an example of handling VM Size specific disk size and gpus for a nodearray.
+
+```json
+   {
+      "select": {"node.vm_size": "Standard_F2"},
+      "name": "disk",
+      "value": "size::20g"
+   },
+   {
+      "select": {"node.vm_size": "Standard_H44rs"},
+      "name": "disk",
+      "value": "size::2t"
+   },
+   {
+      "select": {"node.nodearray": "gpuarray"},
+      "name": "ngpus",
+      "value": 8
+   }
+   ```
+
+   **Note that these are applied in order , and once a default value is defined for a matching potential node, other defaults are ignored**. This means that you should always use your most restrictive select filters first.
+
+   In other words, if we want to override the pcpu_count for just one nodearray, doing this will work:
+   ```json
+   {
+    "select": "node.nodearray": "special-nodearray",
+    "name": "ncpus",
+    "value": 42
+   },
+   {"select": {},
+   "name": "ncpus",
+   "value": "node.pcpu_count"
+   }
+   ```
+
+   However, this will ignore the second definition.
+   ```json
+   {"select": {},
+   "name": "ncpus",
+   "value": "node.pcpu_count"
+   },
+   {
+    "select": "node.nodearray": "special-nodearray",
+    "name": "ncpus",
+    "value": 42
+   },
+   ```
+
+
 # Node Properties
 
 | Property | Type | Description |
