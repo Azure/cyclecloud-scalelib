@@ -99,23 +99,12 @@ class ScaleLibCLI(CommonCLI):
     def _default_output_columns(
         self, config: Dict, cmd: Optional[str] = None
     ) -> List[str]:
-        if hpcutil.LEGACY:
-            return [
-                "name",
-                "hostname",
-                "instance_id",
-                "ccnodeid",
-                "required",
-                "job_ids",
-                "state",
-                "ctr@create_time_remaining",
-                "itr@idle_time_remaining",
-            ]
+        
         return [
             "name",
             "hostname",
             "instance_id",
-            "aznodeid@ccnodeid",
+            "ccnodeid",
             "required",
             "job_ids",
             "state",

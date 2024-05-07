@@ -1147,17 +1147,12 @@ class NodeManager:
         self.add_default_resource({}, "memmb", MemoryDefault("m"))
         self.add_default_resource({}, "memgb", MemoryDefault("g"))
         self.add_default_resource({}, "memtb", MemoryDefault("t"))
-        if hpcutil.LEGACY:
-            self.add_default_resource({}, "nodearray", "node.nodearray")
-            self.add_default_resource(
-                {}, "ccnodeid", lambda n: n.delayed_node_id.node_id
-            )
-        else:
-            self.add_default_resource({}, "pool", lambda n: n.nodearray)
-            self.add_default_resource(
-                {}, "aznodeid", lambda n: n.delayed_node_id.node_id
-            )
-
+        
+        self.add_default_resource({}, "nodearray", "node.nodearray")
+        self.add_default_resource(
+            {}, "ccnodeid", lambda n: n.delayed_node_id.node_id
+        )
+        
     def example_node(self, location: str, vm_size: str) -> Node:
         aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
 
