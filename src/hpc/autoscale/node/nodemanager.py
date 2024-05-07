@@ -654,7 +654,7 @@ class NodeManager:
             limits = null_bucket_limits(len(nodes_list), a_node.vcpu_count)
 
             bucket = NodeBucket(
-                node_def, limits, len(nodes_list), nodes_list, artificial=True
+                node_def, limits, len(nodes_list), nodes_list, artificial=True, valid=True,
             )
 
             self.__node_buckets.append(bucket)
@@ -685,7 +685,10 @@ class NodeManager:
         return self.new_nodes
 
     def get_buckets(self) -> List[NodeBucket]:
-        return self.__node_buckets
+        return [x for x in self.__node_buckets if x.valid]
+
+    def get_invalid_buckets(self) -> List[NodeBucket]:
+        return [x for x in self.__node_buckets if not x.valid]
 
     def get_buckets_by_id(self) -> Dict[ht.BucketId, NodeBucket]:
         return partition_single(self.get_buckets(), lambda b: b.bucket_id)
@@ -1414,9 +1417,6 @@ def _new_node_manager_79(
         spot = nodearray.get("Interruptible", False)
 
         for bucket in nodearray_status.buckets:
-            if not bucket.valid:
-                continue
-
             vcpu_count = bucket.virtual_machine.vcpu_count
             gpu_count = bucket.virtual_machine.gpu_count
             assert gpu_count is not None
@@ -1595,6 +1595,7 @@ def _new_node_manager_79(
                     limits=bucket_limit,
                     max_placement_group_size=bucket.max_placement_group_size,
                     nodes=sorted(nodes, key=nodes_key),
+                    valid=bucket.valid,
                 )
 
                 logging.debug(
