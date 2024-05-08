@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
     from hpc.autoscale.node.bucket import NodeBucket  # noqa:F401
 
 
-LEGACY = bool(int(os.getenv("AZUREHPC_LEGACY", "1")))
+LEGACY = True
 
 # This env variable unlocks extra functionality in the CLI
 # for dev and support staff to reproduce issues locally with raw JSON responses from

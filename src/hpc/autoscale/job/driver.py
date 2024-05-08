@@ -230,6 +230,6 @@ def add_ccnodeid_default_resource(node_mgr: NodeManager) -> None:
     def get_node_id(n: Node) -> Optional[str]:
         return n.delayed_node_id.node_id
 
-    resource_name = "ccnodeid" if hpcutil.LEGACY else "aznodeid"
+    resource_name = "ccnodeid"
 
     node_mgr.add_default_resource({}, resource_name, get_node_id)
