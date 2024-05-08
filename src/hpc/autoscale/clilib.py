@@ -1868,6 +1868,7 @@ def main(
                 }
             if args.nodes_response:
                 args.config["_mock_bindings"]["nodes_response"] = args.nodes_response
+        logging.set_context(f"[{args.cmd}]")
         logging.initialize_logging(args.config)
 
         # if applicable, set read_only/lock_file
