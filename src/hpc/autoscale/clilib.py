@@ -257,13 +257,16 @@ class CommonCLI(ABC):
     def shell_parser(self, parser: ArgumentParser) -> None:
         parser.set_defaults(read_only=False)
         parser.add_argument("--script", "-s", required=False)
+        parser.add_argument('rest', nargs=argparse.REMAINDER)
 
-    def shell(self, config: Dict, script: Optional[str] = None) -> None:
+    def shell(self, config: Dict, script: Optional[str] = None, rest: Optional[List[str]] = None) -> None:
         """
         Interactive python shell with relevant objects in local scope.
         Use --script to run python scripts
         """
         shell_locals = self._setup_shell_locals(config)
+        if rest:
+            shell_locals["shell_args"] = rest
 
         for t in [Job, ht.Memory, ht.Size, Node, SchedulerNode, NodeBucket]:
             simple_name = t.__name__.split(".")[-1]
