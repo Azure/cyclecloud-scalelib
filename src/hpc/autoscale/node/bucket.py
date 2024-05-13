@@ -91,6 +91,7 @@ class NodeBucket:
         max_placement_group_size: int,
         nodes: List["Node"],
         artificial: bool = False,
+        valid: bool = True,
     ) -> None:
         # example node to be used to see if your job would match this
         self.__definition = definition
@@ -104,6 +105,7 @@ class NodeBucket:
         self.__decrement_counter = 0
         example_node_name = ht.NodeName("{}-0".format(definition.nodearray))
         self._artificial = artificial
+        self._valid = valid
 
         # TODO infiniband
         from hpc.autoscale.node.node import Node
@@ -258,8 +260,13 @@ class NodeBucket:
     @property
     def supports_colocation(self) -> bool:
         return self.software_configuration.get("autoscale", {}).get("is_hpc", True)
+    
+    @property
+    def valid(self) -> bool:
+        return self._valid
 
     def add_nodes(self, nodes: List["Node"]) -> None:
+        assert self.valid
         new_by_id = partition(nodes, lambda n: n.delayed_node_id.transient_id)
         cur_by_id = partition(self.nodes, lambda n: n.delayed_node_id.transient_id)
 
@@ -276,6 +283,7 @@ class NodeBucket:
                 self.nodes.append(new_nodes[0])
 
     def clone_with_placement_group(self, pg_name: PlacementGroup) -> "NodeBucket":
+        assert self.valid
         if self.placement_group:
             # This will help us avoid available_count issues with existing pg limits
             # when no placement group is defined, the pg limit will be None so
@@ -318,6 +326,7 @@ class NodeBucket:
             self.max_placement_group_size,
             nodes=[],
             artificial=False,
+            valid=True,
         )
 
     def __str__(self) -> str:
@@ -337,6 +346,7 @@ def bucket_candidates(
     candidates: List["NodeBucket"],
     constraints: List["constraintslib.NodeConstraint"],
 ) -> CandidatesResult:
+    candidates = [c for c in candidates if c.valid]
     if not candidates:
         return CandidatesResult(
             "NoBucketsDefined",
