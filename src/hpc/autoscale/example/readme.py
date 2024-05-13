@@ -16,8 +16,8 @@ from hpc.autoscale.results import SatisfiedResult
 CONFIG: typing.Dict[str, typing.Any] = {
     "cluster_name": "sge",
     "url": "http://localhost:8080",
-    "username": "ryhamel",
-    "password": ")ya58uRU0#m%",
+    "username": "",
+    "password": "",
     "logging": {
         "config_file": os.path.abspath(os.path.join(__file__, "..", "logging.conf"))
     },
