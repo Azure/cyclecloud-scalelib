@@ -1,17 +1,38 @@
 import inspect
 import logging
+import logging.handlers
 import logging.config
 import os
 import sys
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 _PID = "%-5s" % os.getpid()
+_UID = os.getuid()
+_GID = os.getgid()
+
+
+class FileOwnerHandler:
+    def __call__(self, path: str) -> Tuple[int, int]:
+        if not os.path.exists(path):
+            return _UID, _GID
+        st_f = os.stat(path)
+        return st_f.st_uid, st_f.st_gid
 
 
 class HPCLogger(logging.Logger):
-    def __init__(self, name: str, level: int = logging.DEBUG) -> None:
+    def __init__(self, name: str, level: int = logging.DEBUG, file_owner_handler: FileOwnerHandler = FileOwnerHandler()) -> None:
         logging.Logger.__init__(self, name, level)
+        self.non_rotated_files = []
+        self.file_owner_handler = file_owner_handler
+    
+    def addHandler(self, hdlr: logging.Handler) -> None:
+        if isinstance(hdlr, logging.handlers.RotatingFileHandler):
+            if (_UID, _GID) != self.file_owner_handler(hdlr.baseFilename):
+                self.non_rotated_files.append(hdlr.baseFilename)
+                hdlr.maxBytes = 2**32
+
+        return super().addHandler(hdlr)
 
     def _log(  # type: ignore
         self,
@@ -25,6 +46,12 @@ class HPCLogger(logging.Logger):
         *stacklevel,
         **stacklevelkw
     ):
+        if self.non_rotated_files:
+            to_log = self.non_rotated_files + []
+            self.non_rotated_files = []
+            # this will not recurse because self.non_rotated_files is empty
+            self.warning(f"The following logs will not be rotated because the current user does not match the owner: {','.join(to_log)}")
+
         if extra is None:
             extra = {}
         if "context" not in extra:
