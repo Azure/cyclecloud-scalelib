@@ -127,14 +127,20 @@ as well as the _CycleCloud_ locker.
 The cluster template for the project is [here](templates/celery.txt). Follow the documentation for [importing a cluster](https://docs.microsoft.com/azure/cyclecloud/how-to/create-cluster?view=cyclecloud-7#importing-a-cluster-template).
 
 Once running, the _/root_ directory has all the scripts to operate
-the cluster and activate autoscaling.
+the cluster and activate autoscaling.  Before running the scripts however, you must start a celery worker to add tasks to.
 
 ```bash
 source ./.venv/celery/bin/activate
+celery -A tasks worker -D
+```
+Once celery is running, the scripts below can be run in any order to add work, 
+scale to meet demand, and check on the status of submitted tasks. 
+
+```bash
 python add_task.py
 python autoscale.py
 python check_tasks.py
 ```
 
-Run these scripts in any order to add work, 
-scale to meet demand, and 
+### Testing
+Scalelib supports integration testing through standard pytests.  Example tests can be found in _/root_ and all tests (on any role) can be run using `jetpack test`.

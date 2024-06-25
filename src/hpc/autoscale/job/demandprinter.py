@@ -125,7 +125,7 @@ class DemandPrinter:
                 nodearray_ord = [ord(x) for x in node.nodearray]
                 # 2**31 to make these come after private ips
                 # then nodearray name, then index
-                return tuple([2 ** 31] + nodearray_ord + [node_index])
+                return tuple([2**31] + nodearray_ord + [node_index])
             return tuple([-1] + name_toks)
 
         ordered_nodes = sorted(demand_result.compute_nodes, key=sort_by_ip_or_name)
@@ -363,7 +363,9 @@ def print_rows(
 
     if output_format.lower() == "json":
         json.dump(
-            [dict(zip(short_names, row)) for row in rows], stream, indent=2,
+            [dict(zip(short_names, row)) for row in rows],
+            stream,
+            indent=2,
         )
     else:
         widths = calculate_column_widths(short_names, rows)
