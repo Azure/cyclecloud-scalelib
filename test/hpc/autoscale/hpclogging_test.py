@@ -1,7 +1,8 @@
 from hpc.autoscale import hpclogging
+import io
 import logging.handlers
 import os
-from typing import Tuple
+from typing import Any, Tuple
 import tempfile
 
 
@@ -16,10 +17,8 @@ class MockFileOwnerHandler:
         return self.uid, self.gid
 
 def test_disable_log_rotation():
-    path = tempfile.mktemp()
+    fd, path = tempfile.mkstemp()
     # wrong uid/gid
-    with open(path, "w"):
-        pass
     try:
         mock_fh = MockFileOwnerHandler(path, os.getuid() + 1, os.getgid() + 1)
         logger = hpclogging.HPCLogger("test", file_owner_handler=mock_fh)
@@ -33,6 +32,7 @@ def test_disable_log_rotation():
         handler.close()
         assert f"The following logs will not be rotated because the current user does not match the owner: {path}\ntest" == open(path).read().strip()
     finally:
+        os.close(fd)
         os.remove(path)
 
     # correct uid/gid
@@ -52,3 +52,41 @@ def test_disable_log_rotation():
         assert f"test" == open(path).read().strip()
     finally:
         os.remove(path)
+
+
+def test_root_chown() -> None:
+    class MockFileHandler:
+        fd, baseFilename = tempfile.mkstemp()
+        mode = "a"
+        encoding = None
+        def _open(self) -> io.TextIOWrapper:
+            raise RuntimeError()
+        
+        def __enter__(self) -> "MockFileHandler":
+            return self
+        
+        def __exit__(self, *args: Any, **kwargs: Any) -> None:
+            os.close(self.fd)
+            os.remove(self.baseFilename)
+
+    mock_fh = MockFileHandler()
+    try:
+        mock_fh._open()
+        assert False
+    except RuntimeError:
+        pass
+
+    orig_uid, orig_gid = hpclogging._UID, hpclogging._GID
+    hpclogging._UID = hpclogging._GID = 0
+    try:
+        import pwd, grp
+        user = pwd.getpwuid(os.getuid()).pw_name
+        group = grp.getgrgid(os.getgid()).gr_name
+        hpclogging.set_default_log_user(user, group)
+        hpclogging.make_chown_handler(mock_fh)
+        # assert mock_fh is patched with a new _open implementation
+        mock_fh._open().close()
+
+    finally:
+        hpclogging._UID = orig_uid
+        hpclogging._GID = orig_gid

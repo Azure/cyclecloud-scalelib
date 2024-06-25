@@ -1,15 +1,28 @@
+import grp
 import inspect
+import io
 import logging
 import logging.handlers
 import logging.config
 import os
+import pwd
 import sys
 import time
+import types
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+
 
 _PID = "%-5s" % os.getpid()
 _UID = os.getuid()
 _GID = os.getgid()
+_DEFAULT_LOG_USER = os.getenv("SCALELIB_LOG_USER")
+_DEFAULT_LOG_GROUP = os.getenv("SCALELIB_LOG_GROUP")
+
+
+def set_default_log_user(user: str, group: str) -> None:
+    global _DEFAULT_LOG_USER, _DEFAULT_LOG_GROUP
+    _DEFAULT_LOG_USER = user
+    _DEFAULT_LOG_GROUP = group
 
 
 class FileOwnerHandler:
@@ -20,17 +33,57 @@ class FileOwnerHandler:
         return st_f.st_uid, st_f.st_gid
 
 
+def make_chown_handler(
+    hdlr: logging.handlers.RotatingFileHandler,
+    file_owner_handler: FileOwnerHandler = FileOwnerHandler(),
+) -> Any:
+
+    log_uid = pwd.getpwnam(_DEFAULT_LOG_USER).pw_uid if _DEFAULT_LOG_USER else _UID
+    log_gid = grp.getgrnam(_DEFAULT_LOG_GROUP).gr_gid if _DEFAULT_LOG_GROUP else _GID
+
+    def _open_with_chown(self):
+        if _UID == 0 and (log_uid, log_gid) != (_UID, _GID):
+            with open(self.baseFilename, self.mode, encoding=self.encoding) as fd:
+                fd.write("")
+            os.chown(self.baseFilename, log_uid, log_gid)
+
+        return open(self.baseFilename, self.mode, encoding=self.encoding)
+
+    # override the method for all newly created files
+    hdlr._open = types.MethodType(_open_with_chown, hdlr)
+
+    # chown the existing file, which will almost always be created eagerly
+    if (
+        _UID == 0
+        and (log_uid, log_gid) != (_UID, _GID)
+        and os.path.exists(hdlr.baseFilename)
+    ):
+        cur_uid, cur_gid = file_owner_handler(hdlr.baseFilename)
+        if (cur_uid, cur_gid) != (log_uid, log_gid):
+            os.chown(hdlr.baseFilename, log_uid, log_gid)
+
+    return hdlr
+
+
 class HPCLogger(logging.Logger):
-    def __init__(self, name: str, level: int = logging.DEBUG, file_owner_handler: FileOwnerHandler = FileOwnerHandler()) -> None:
+    def __init__(
+        self,
+        name: str,
+        level: int = logging.DEBUG,
+        file_owner_handler: FileOwnerHandler = FileOwnerHandler(),
+    ) -> None:
         logging.Logger.__init__(self, name, level)
         self.non_rotated_files = []
         self.file_owner_handler = file_owner_handler
-    
+
     def addHandler(self, hdlr: logging.Handler) -> None:
         if isinstance(hdlr, logging.handlers.RotatingFileHandler):
-            if (_UID, _GID) != self.file_owner_handler(hdlr.baseFilename):
+            if _UID == 0:
+                # patches hdlr's _open function in constructor
+                hdlr = make_chown_handler(hdlr)
+            elif (_UID, _GID) != self.file_owner_handler(hdlr.baseFilename):
                 self.non_rotated_files.append(hdlr.baseFilename)
-                hdlr.maxBytes = 2**32
+                hdlr.maxBytes = 2 ** 32
 
         return super().addHandler(hdlr)
 
