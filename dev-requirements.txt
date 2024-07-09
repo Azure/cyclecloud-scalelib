@@ -7,9 +7,9 @@ flake8==4.0.1
 hypothesis==6.31.0
 typeguard
 isort==4.3.21
-requests >= 2.24.0
+requests >= 2.31.0
 typing_extensions
 immutabledict==1.0.0
-jsonpickle==1.4.1
+jsonpickle==1.5.2
 gnureadline
 requests-cache==0.7.5
