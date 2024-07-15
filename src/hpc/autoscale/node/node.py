@@ -279,7 +279,7 @@ class Node(ABC):
         self, value: Optional[ht.PlacementGroup]
     ) -> Optional[ht.PlacementGroup]:
         if value:
-            value = ht.PlacementGroup(re.sub("[^a-zA-z0-9-_]", "_", value))
+            value = ht.PlacementGroup(re.sub("[^a-zA-Z0-9-_]", "_", value))
         self.placement_group = value
         return self.placement_group
 
