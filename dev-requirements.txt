@@ -7,7 +7,7 @@ flake8==4.0.1
 hypothesis==6.31.0
 typeguard
 isort==4.3.21
-requests >= 2.31.0
+requests >= 2.32.3
 typing_extensions
 immutabledict==1.0.0
 jsonpickle==1.5.2
