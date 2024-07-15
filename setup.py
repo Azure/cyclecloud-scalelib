@@ -306,7 +306,7 @@ setup(
     package_dir={"": "src", "conf": "conf"},
     include_package_data=True,
     install_requires=[
-        "requests == 2.31.0",
+        "requests == 2.24.0",
         "requests-cache == 0.7.5",
         "typing_extensions==3.7.4.3",
         "immutabledict==1.0.0",
