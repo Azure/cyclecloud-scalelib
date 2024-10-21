@@ -12,7 +12,7 @@ from setuptools.command.test import test as TestCommand  # noqa: N812
 
 import inspect
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
 SWAGGER_URL = "https://oss.sonatype.org/content/repositories/releases/io/swagger/swagger-codegen-cli/2.2.1/swagger-codegen-cli-2.2.1.jar"
 SWAGGER_CLI = SWAGGER_URL.split("/")[-1]
