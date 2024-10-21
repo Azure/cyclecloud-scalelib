@@ -12,7 +12,7 @@ CC_VERSION=$(jetpack config cyclecloud.cookbooks.version)
 wget --no-check-certificate ${cs_hostname}/static/tools/cyclecloud_api-${CC_VERSION}-py2.py3-none-any.whl
 pip install cyclecloud_api-${CC_VERSION}-py2.py3-none-any.whl
 
-jetpack download --project celery-autoscale-demo cyclecloud-scalelib-1.0.4.tar.gz $CYCLECLOUD_SPEC_PATH/files/
+jetpack download --project celery-autoscale-demo cyclecloud-scalelib-1.0.5.tar.gz $CYCLECLOUD_SPEC_PATH/files/
 pip install $CYCLECLOUD_SPEC_PATH/files/cyclecloud-scalelib-1.0.3.tar.gz
 
 LOGGING_CONF=$(python -c 'import hpc.autoscale, os; print(os.path.abspath(os.path.join(hpc.autoscale.__file__, "..", "logging.conf")))')

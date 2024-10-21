@@ -704,7 +704,7 @@ class CommonCLI(ABC):
         cons_dict["node.placement_group"] = placement_group
 
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer, quiet=True)
+        self.validate_constraint(config, constraint_expr, writer, quiet=False)
         validated_cons = json.loads(writer.getvalue())
 
         if not isinstance(validated_cons, list):
