@@ -76,7 +76,7 @@ class ClusterBinding(ClusterBindingInterface):
         return self.__cluster_name
 
     @hpcwrap
-    def create_nodes(self, nodes: List[Node]) -> NodeCreationResult:
+    def create_nodes(self, nodes: List[Node], request_id: Optional[str] = None) -> NodeCreationResult:
         if self.read_only:
             ret = NodeCreationResult()
             ret.operation_id = str(uuid.uuid4())
@@ -91,8 +91,10 @@ class ClusterBinding(ClusterBindingInterface):
 
         creation_request = NodeCreationRequest()
         creation_request.sets = []
+        creation_request.request_id = request_id
         # the node attributes aren't hashable, so a string representation
         # is good enough to ensure they are all the same across the list.
+
         p_nodes_dict = partition(
             nodes,
             lambda n: (
@@ -101,6 +103,8 @@ class ClusterBinding(ClusterBindingInterface):
                 n.placement_group,
                 str(n.node_attribute_overrides),
                 n.keep_alive,
+                n.name_format,
+                n.name_offset,
             ),
         )
 
@@ -114,15 +118,20 @@ class ClusterBinding(ClusterBindingInterface):
                 return (n.nodearray, -1)
 
         for key, p_nodes in p_nodes_dict.items():
-            nodearray, vm_size, pg, _, keep_alive = key
+            nodearray, vm_size, pg, _, keep_alive, name_format, name_offset = key
             request_set = NodeCreationRequestSet()
 
+            if name_format:
+                request_set.name_format = name_format
             request_set.nodearray = nodearray
             request_set.count = len(p_nodes)
+            if name_offset is not None:
+                request_set.name_offset = name_offset
+            
             request_set.placement_group_id = pg
             request_set.definition = NodeCreationRequestSetDefinition()
             request_set.definition.machine_type = vm_size
-
+            
             if p_nodes[0].node_attribute_overrides:
                 request_set.node_attributes = deepcopy(
                     p_nodes[0].node_attribute_overrides
@@ -274,7 +283,7 @@ class ClusterBinding(ClusterBindingInterface):
         self._log_response(http_response, result)
         return result
 
-    @notreadonly
+    @hpcwrap
     def start_nodes(
         self,
         nodes: Optional[List[Node]] = None,
@@ -285,6 +294,53 @@ class ClusterBinding(ClusterBindingInterface):
         custom_filter: str = None,
         request_id: Optional[str] = None,
     ) -> NodeManagementResult:
+        if self.read_only:
+            ret = NodeCreationResult()
+            ret.operation_id = str(uuid.uuid4())
+
+            node_records: List[Dict]
+            if not nodes:
+
+                all_nodes: List[Dict] = []
+                for rnodes in self._read_only_nodes.values():
+                    all_nodes.extend(rnodes)
+
+                if names:
+                    node_records = [n for n in all_nodes if n["Name"] in names]
+                elif node_ids:
+                    node_records = [n for n in all_nodes if n["NodeId"] in node_ids]
+                elif hostnames:
+                    node_records = [n for n in all_nodes if n["Hostname"] in hostnames]
+                elif ip_addresses:
+                    node_records = [
+                        n for n in all_nodes if n["PrivateIp"] in ip_addresses
+                    ]
+                elif custom_filter:
+                    raise RuntimeError(
+                        "custom_filter is not supported with run_only mode (--dry-run)"
+                    )
+                elif request_id:
+                    node_records = [
+                        n for n in all_nodes if n["RequestId"] == request_id
+                    ]
+                else:
+                    raise RuntimeError(
+                        "Please specify at least one of nodes, names, node_ids, hostnames, ip_addresses, custom_filter or request_id"
+                    )
+
+            else:
+                node_records = [_node_to_ccnode(n) for n in nodes]
+
+            ret.sets = [NodeCreationResultSet(added=len(node_records))]
+
+            for n in nodes or []:
+                n.exists = True
+                n.target_state = ht.NodeStatus("Started")
+                if not n.delayed_node_id.node_id:
+                    n.delayed_node_id.node_id = ht.NodeId("dryrun-" + str(uuid.uuid4()))
+
+            self._read_only_nodes[ht.OperationId(ret.operation_id)] = node_records
+            return ret
 
         request = self._node_management_request(
             nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
@@ -373,14 +429,20 @@ class ClusterBinding(ClusterBindingInterface):
         as_json = json.dumps(r.to_dict())
 
         logging.debug(
-            "[%s] Response: Status=%s -> %s", caller, s.status_code, as_json[:100],
+            "[%s] Response: Status=%s -> %s",
+            caller,
+            s.status_code,
+            as_json[:100],
         )
 
         if logging.getLogger().getEffectiveLevel() > logging.FINE:
             return
 
         logging.fine(
-            "[%s] Full response: Status=%s -> %s", caller, s.status_code, as_json,
+            "[%s] Full response: Status=%s -> %s",
+            caller,
+            s.status_code,
+            as_json,
         )
 
     @notreadonly
@@ -474,3 +536,4 @@ def _get_session(config: Dict) -> requests.sessions.Session:
     raise AssertionError(
         "Could not connect to CycleCloud. Please see the log for more details."
     )
+

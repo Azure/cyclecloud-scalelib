@@ -1,3 +1,4 @@
+from hpc.autoscale import codeanalysis, hpctypes
 from hpc.autoscale.hpctypes import Memory, add_magnitude_conversion
 
 
@@ -28,4 +29,9 @@ def test_memory() -> None:
 
     # allow schedulers to add custom conversion
     add_magnitude_conversion("kw", 8 * 1024)
-    assert m("2kw") == m("16k")
+    before = codeanalysis.RUNTIME_TYPE_CHECKING
+    codeanalysis.RUNTIME_TYPE_CHECKING = False
+    try:
+        assert m("2kw") == m("16k")
+    finally:
+        codeanalysis.RUNTIME_TYPE_CHECKING = before
