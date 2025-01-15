@@ -268,6 +268,7 @@ class NodeBucket:
     def valid(self) -> bool:
         return self._valid
 
+    @property
     def last_capacity_failure(self) -> Optional[float]:
         if self.__last_capacity_failure < 0:
             return None
