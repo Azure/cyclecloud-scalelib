@@ -29,7 +29,7 @@ from hpc.autoscale.node.bucket import NodeBucket
 from hpc.autoscale.node.constraints import NodeConstraint, get_constraints
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import NodeHistory
-from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
+from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager, new_cluster_bindings
 from hpc.autoscale.results import (
     DefaultContextHandler,
     EarlyBailoutResult,
@@ -763,6 +763,21 @@ class CommonCLI(ABC):
                 error(str(bootup_result))
         else:
             error(str(result))
+
+
+    def debug_cluster_status_parser(self, parser: ArgumentParser) -> None:
+        parser.add_argument("--nodes", action="store_true", default=False)
+        parser.set_defaults(read_only=True)
+
+    
+    def debug_cluster_status(self, config: Dict, nodes: bool) -> None:
+        """
+        Dumps cluster/{cluster_name}/status call to stdout for support and debug purposes.
+        """
+        bindings = new_cluster_bindings(config)
+        obj = bindings.get_cluster_status(nodes)
+        json.dump(obj.to_dict(), sys.stdout, indent=2)
+
 
     def _node_name_completer(
         self,
