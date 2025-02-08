@@ -1,4 +1,8 @@
 import typing
+import os
+import configparser
+from hpc.autoscale import hpclogging as logging
+
 from typing import Any, Dict, Iterable, List, NewType, Optional, Union
 
 from hpc.autoscale import hpctypes as ht
@@ -34,6 +38,20 @@ def _check_type(**kwargs: Any) -> None:
         name, expected_type, type(value), value
     )
 
+
+def _initialize_job_config() -> None:
+    config_path = os.getenv("AUTOSCALE_JOB_CONFIG", "/opt/cycle/pbspro/autoscale.conf")
+    cwd = os.getcwd()
+    if os.path.exists(config_path):
+        job_config = configparser.ConfigParser()
+        job_config.read(config_path)
+        jobsize = int(job_config['overallocate']['jobsize'])
+        extranode = int(job_config['overallocate']['extranode'])
+        return jobsize,extranode
+    else:
+        jobsize = 0
+        extranode = 0
+        return jobsize,extranode
 
 @hpcwrapclass
 class Job:
@@ -71,9 +89,15 @@ class Job:
         self.__iterations = iterations
         self.__iterations_remaining = iterations
 
+
         _check_type(node_count=node_count, type=int)
-        self.__node_count = node_count
-        self.__nodes_remaining = node_count
+        jobsize, extranode = _initialize_job_config()
+        if node_count >= jobsize:
+            self.__node_count = node_count + extranode
+            self.__nodes_remaining = node_count + extranode
+        else:
+            self.__node_count = node_count
+            self.__nodes_remaining = node_count
 
         _check_type(colocated=colocated, type=bool)
         self.__colocated = colocated
