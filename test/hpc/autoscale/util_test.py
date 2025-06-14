@@ -57,7 +57,8 @@ def test_partition() -> None:
 
 def test_new_singleton_lock() -> None:
     assert isinstance(new_singleton_lock({"lock_file": None}), NullSingletonLock)
-    lock_file = tempfile.mktemp()
+    fd, lock_file = tempfile.mkstemp()
+    os.close(fd)  # close unused fd
     singleton_lock = new_singleton_lock({"lock_file": lock_file})
     assert isinstance(singleton_lock, SingletonFileLock)
     assert os.path.exists(lock_file)
