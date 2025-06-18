@@ -29,7 +29,7 @@ class ClusterBindingInterface(ABC):
         ...
 
     @abc.abstractmethod
-    def create_nodes(self, nodes: List[node.Node]) -> NodeCreationResult:
+    def create_nodes(self, nodes: List[node.Node], request_id: Optional[str]) -> NodeCreationResult:
         pass
 
     @abc.abstractmethod
@@ -97,7 +97,8 @@ class ClusterBindingInterface(ABC):
         node_ids: Optional[List[NodeId]] = None,
         hostnames: Optional[List[Hostname]] = None,
         ip_addresses: Optional[List[IpAddress]] = None,
-        custom_filter: str = None,
+        custom_filter: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> NodeManagementResult:
         pass
 

@@ -11,6 +11,7 @@ from hpc.autoscale.job.schedulernode import SchedulerNode
 from hpc.autoscale.node.nodehistory import SQLiteNodeHistory
 from hpc.autoscale.node.nodemanager import new_node_manager
 from hpc.autoscale.job.demandprinter import print_demand
+from hpc.autoscale.util import json_load
 
 import pdb
 
@@ -37,7 +38,7 @@ def celery_status():
     master_name = socket.gethostname()
     nodes = set()
     i = 0
-    for arr in [appc.active(), appc.reserved()]:
+    for arr in (arr for arr in [appc.active(), appc.reserved()] if arr != None):
         i += 1
         for k, v in arr.items():
             on_master = False
@@ -55,35 +56,8 @@ def celery_status():
     celery_d.scheduler_nodes = [SchedulerNode(hostname=x) for x in list(nodes)]
     return celery_d
 
-def setup():
-    logging.basicConfig(
-        format="%(asctime)-15s: %(levelname)s %(message)s",
-        stream=sys.stderr,
-        level=logging.DEBUG,
-    )
-
-    # Depends on cluserinit to write json files
-    try:
-        with open("/root/cyclecloud.config.json") as open_file:
-            cc_config = json.load(open_file)
-        with open("/root/cyclecloud.cluster.name.json") as open_file:
-            cc_cluster_config = json.load(open_file)
-        CONFIG = {}
-        CONFIG["cluster_name"] = cc_cluster_config["cyclecloud.cluster.name"]
-        CONFIG["url"] = cc_config["web_server"]
-        CONFIG["username"] = cc_config["username"]
-        CONFIG["password"] = cc_config["password"]
-    except:
-        CONFIG = {
-            "cluster_name": "celery",
-            "url": "https://127.0.0.1:37140",
-            "username": "username",
-            "password": "password",
-        }
-    return CONFIG
-
 def auto():
-    CONFIG = setup()
+    CONFIG = json_load("/opt/cycle/scalelib/autoscale.json")
 
     MIN_CORE_COUNT = 4
     WARM_BUFFER = 2
