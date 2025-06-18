@@ -235,7 +235,7 @@ class azurecost:
         pw = self.config['password']
 
         urllib3.disable_warnings(InsecureRequestWarning)
-        res = requests.get(url=endpoint, params=params, auth=(uname,pw), verify=False)
+        res = requests.get(url=endpoint, params=params, auth=(uname,pw), verify=False) # CodeQL [SM03157] both endpoints are under user control and users may choose a self-signed certificate
         if res.status_code != 200:
             log.error(res.reason)
             res.raise_for_status()
