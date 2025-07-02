@@ -19,7 +19,7 @@ class DemandResult:
         matched_nodes: List[Node],
         unmatched_nodes: List[Node],
         failed_nodes: List[Node],
-        buckets: List[NodeBucket],
+        buckets: List[NodeBucket] = [],
     ) -> None:
         self.new_nodes = new_nodes
         self.matched_nodes = matched_nodes
