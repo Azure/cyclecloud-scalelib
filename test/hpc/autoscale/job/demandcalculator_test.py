@@ -37,7 +37,7 @@ def teardown_function(function) -> None:
 def test_no_buckets():
     node_mgr = NodeManager(MockClusterBinding(), [])
     dc = DemandCalculator(
-        node_mgr, NullNodeHistory(), singleton_lock=util.NullSingletonLock()
+        {}, node_mgr, NullNodeHistory(), singleton_lock=util.NullSingletonLock()
     )
     result = dc._add_job(Job("1", {"ncpus": 2}))
     assert not result
@@ -138,9 +138,21 @@ def test_two_buckets_one_viable_partial_match_htc(mixedbindings):
         max_size=9,
         unique=True,
     ),
-    s.lists(s.integers(1, 25), min_size=1, max_size=10,),
-    s.lists(s.integers(1, 32), min_size=20, max_size=20,),
-    s.lists(s.integers(1, 2 ** 31), min_size=10, max_size=10,),
+    s.lists(
+        s.integers(1, 25),
+        min_size=1,
+        max_size=10,
+    ),
+    s.lists(
+        s.integers(1, 32),
+        min_size=20,
+        max_size=20,
+    ),
+    s.lists(
+        s.integers(1, 2 ** 31),
+        min_size=10,
+        max_size=10,
+    ),
 )
 @settings(deadline=None)
 def test_iterations_hypothesis(
@@ -164,7 +176,10 @@ def test_iterations_hypothesis(
             for b in range(num_buckets):
                 vm_size = for_region[vm_indices[n * num_buckets + b]]
                 bindings.add_bucket(
-                    nodearray, vm_size, max_count=10, available_count=10,
+                    nodearray,
+                    vm_size,
+                    max_count=10,
+                    available_count=10,
                 )
 
         return _new_dc(bindings)
@@ -214,7 +229,13 @@ def test_bug100(mixedbindings) -> None:
     dcalc = _new_dc(mixedbindings)
 
     # # 100 cores
-    dcalc.add_job(Job("tc-10", {"node.nodearray": "htc", "ncpus": 1}, iterations=10,))
+    dcalc.add_job(
+        Job(
+            "tc-10",
+            {"node.nodearray": "htc", "ncpus": 1},
+            iterations=10,
+        )
+    )
     demand = dcalc.finish()
 
     assert len(demand.new_nodes) == 3
@@ -295,7 +316,12 @@ def _mpi_job(job_name="1", nodes=1, placeby="pg", resources=None):
     constraints = get_constraints([resources])
     constraints.append(InAPlacementGroup())
     constraints.append(ExclusiveNode())
-    return Job(job_name, constraints=constraints, node_count=nodes, colocated=True,)
+    return Job(
+        job_name,
+        constraints=constraints,
+        node_count=nodes,
+        colocated=True,
+    )
 
 
 def _htc_job(job_name="1", slot_count=1, resources=None):
