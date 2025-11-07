@@ -10,10 +10,12 @@ import typing
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 from fnmatch import fnmatch
+from subprocess import check_output
 from typing import Any, Callable, Dict, Iterable, List, Optional, TextIO, Tuple, Union
 
 from hpc.autoscale import hpclogging as logging
 from hpc.autoscale import hpctypes as ht
+from hpc.autoscale import util as hpcutil
 from hpc.autoscale.job import demandprinter
 from hpc.autoscale.job.demand import DemandResult
 from hpc.autoscale.job.demandcalculator import DemandCalculator, new_demand_calculator
@@ -27,22 +29,28 @@ from hpc.autoscale.node.bucket import NodeBucket
 from hpc.autoscale.node.constraints import NodeConstraint, get_constraints
 from hpc.autoscale.node.node import Node
 from hpc.autoscale.node.nodehistory import NodeHistory
-from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager
+from hpc.autoscale.node.nodemanager import NodeManager, new_node_manager, new_cluster_bindings
 from hpc.autoscale.results import (
     DefaultContextHandler,
     EarlyBailoutResult,
     MatchResult,
     register_result_handler,
 )
-from hpc.autoscale.util import json_dump, load_config, partition_single
+from hpc.autoscale.util import (
+    json_dump,
+    load_config,
+    parse_boot_timeout,
+    parse_idle_timeout,
+    partition_single,
+)
 
 
 def _print(*msg: Any) -> None:
-    if os.getenv("SCALELIB_AUTOCOMPLETE_LOG"):
-        log_file = os.getenv("SCALELIB_AUTOCOMPLETE_LOG")
-        assert log_file
-        with open(log_file, "a") as fw:
-            print(*msg, file=fw)
+    # if os.getenv("SCALELIB_AUTOCOMPLETE_LOG"):
+    log_file = os.getenv("SCALELIB_AUTOCOMPLETE_LOG", "/tmp/scalelib_autocomplete.log")
+    assert log_file
+    with open(log_file, "a") as fw:
+        print(*msg, file=fw)
 
 
 def error(msg: Any, *args: Any) -> None:
@@ -127,7 +135,7 @@ class ReraiseAssertionInterpreter(code.InteractiveConsole):
     ) -> None:
         code.InteractiveConsole.__init__(self, locals=locals, filename=filename)
         self.reraise = reraise
-        hist_file = os.path.expanduser("~/.cyclegehistory")
+        hist_file = os.path.expanduser("~/.azurehpchistory")
 
         if os.path.exists(hist_file):
             with open(hist_file) as fr:
@@ -168,12 +176,16 @@ class ShellDict(dict):
             setattr(self, attr_safe_key, value)
 
 
-def shell(config: Dict, shell_locals: Dict[str, Any], script: Optional[str],) -> None:
+def shell(
+    config: Dict,
+    shell_locals: Dict[str, Any],
+    script: Optional[str],
+) -> None:
     """
     Provides read only interactive shell. type gehelp()
     in the shell for more information
     """
-    banner = "\nCycleCloud Autoscale Shell"
+    banner = "\nScaleLib Shell"
     interpreter = ReraiseAssertionInterpreter(locals=shell_locals)
     try:
         __import__("readline")
@@ -234,6 +246,10 @@ class CommonCLI(ABC):
         self.hostnames: List[str] = []
         self.__node_mgr: Optional[NodeManager] = None
 
+    def connect(self, config: Dict) -> None:
+        """Tests connection to CycleCloud"""
+        self._node_mgr(config)
+
     @abstractmethod
     def _setup_shell_locals(self, config: Dict) -> Dict:
         ...
@@ -241,13 +257,16 @@ class CommonCLI(ABC):
     def shell_parser(self, parser: ArgumentParser) -> None:
         parser.set_defaults(read_only=False)
         parser.add_argument("--script", "-s", required=False)
+        parser.add_argument('rest', nargs=argparse.REMAINDER)
 
-    def shell(self, config: Dict, script: Optional[str] = None) -> None:
+    def shell(self, config: Dict, script: Optional[str] = None, rest: Optional[List[str]] = None) -> None:
         """
         Interactive python shell with relevant objects in local scope.
         Use --script to run python scripts
         """
         shell_locals = self._setup_shell_locals(config)
+        if rest:
+            shell_locals["shell_args"] = rest
 
         for t in [Job, ht.Memory, ht.Size, Node, SchedulerNode, NodeBucket]:
             simple_name = t.__name__.split(".")[-1]
@@ -269,6 +288,9 @@ class CommonCLI(ABC):
     def _get_example_nodes(
         self, config: Union[List[Dict], Dict], force: bool = False
     ) -> List[Node]:
+        if isinstance(config, str):
+            with open(config) as fr:
+                config = json.load(fr)
         if self.example_nodes:
             return self.example_nodes
 
@@ -284,6 +306,7 @@ class CommonCLI(ABC):
             self.example_nodes = [Node.from_dict(x) for x in cache["example-nodes"]]
             self.node_names = cache["node-names"]
             self.hostnames = cache["hostnames"]
+            self._read_completion_data(cache)
         else:
             node_mgr = self._node_mgr(config, driver)
             self.example_nodes = self._make_example_nodes(config, node_mgr)
@@ -302,13 +325,27 @@ class CommonCLI(ABC):
                     "node-names": self.node_names,
                     "hostnames": self.hostnames,
                 }
+                self._add_completion_data(to_dump)
+
                 json_dump(to_dump, fw)
 
         return self.example_nodes
 
+    def _add_completion_data(self, completion_json: Dict) -> None:
+        pass
+
+    def _read_completion_data(self, completion_json: Dict) -> None:
+        pass
+
     def _node_mgr(
-        self, config: Dict, driver: Optional[SchedulerDriver] = None
+        self,
+        config: Dict,
+        driver: Optional[SchedulerDriver] = None,
+        force: bool = False,
     ) -> NodeManager:
+        if force:
+            self.__node_mgr = None
+
         if self.__node_mgr is not None:
             return self.__node_mgr
         driver = driver or self._driver(config)
@@ -323,9 +360,12 @@ class CommonCLI(ABC):
         return self._driver(config).new_node_history(config)
 
     def _demand_calc(
-        self, config: Dict, driver: SchedulerDriver
+        self,
+        config: Dict,
+        driver: SchedulerDriver,
+        node_mgr: Optional[NodeManager] = None,
     ) -> Tuple[DemandCalculator, List[Job]]:
-        node_mgr = self._node_mgr(config, driver)
+        node_mgr = node_mgr or self._node_mgr(config, driver)
         node_history = self._node_history(config)
         driver = self._driver(config)
 
@@ -347,13 +387,14 @@ class CommonCLI(ABC):
         config: Dict,
         driver: Optional[SchedulerDriver] = None,
         ctx_handler: Optional[DefaultContextHandler] = None,
+        node_mgr: Optional[NodeManager] = None,
     ) -> DemandCalculator:
         driver = driver or self._driver(config)
         if not ctx_handler:
             ctx_handler = self._ctx_handler(config)
             register_result_handler(ctx_handler)
 
-        dcalc, jobs = self._demand_calc(config, driver)
+        dcalc, jobs = self._demand_calc(config, driver, node_mgr)
         logging.info(
             "Calculating demand for %s jobs: %s", len(jobs), [j.name for j in jobs]
         )
@@ -390,7 +431,6 @@ class CommonCLI(ABC):
         long: bool = False,
     ) -> None:
         """End-to-end autoscale process, including creation, deletion and joining of nodes."""
-
         output_columns = output_columns or self._get_default_output_columns(config)
 
         if dry_run:
@@ -423,7 +463,11 @@ class CommonCLI(ABC):
 
         nodes_to_delete = driver.handle_failed_nodes(invalid_nodes)
 
-        demand_calculator = self._demand(config, driver, ctx_handler)
+        node_mgr = self._node_mgr(config, driver)
+
+        driver.validate_nodes(scheduler_nodes, node_mgr.get_nodes())
+
+        demand_calculator = self._demand(config, driver, ctx_handler, node_mgr)
 
         failed_nodes = demand_calculator.node_mgr.get_failed_nodes()
         failed_nodes_to_delete = driver.handle_failed_nodes(failed_nodes)
@@ -463,14 +507,17 @@ class CommonCLI(ABC):
 
         # we also tell the driver about nodes that are unmatched. It filters them out
         # and returns a list of ones we can delete.
-        idle_timeout = int(config.get("idle_timeout", 300))
-        boot_timeout = int(config.get("boot_timeout", 3600))
-        logging.fine("Idle timeout is %s", idle_timeout)
+
+        def idle_at_least(node: Node) -> float:
+            return parse_idle_timeout(config, node)
+
+        def booting_at_least(node: Node) -> float:
+            return parse_boot_timeout(config, node)
 
         unmatched_for_5_mins = demand_calculator.find_unmatched_for(
-            at_least=idle_timeout
+            at_least=idle_at_least
         )
-        timed_out_booting = demand_calculator.find_booting(at_least=boot_timeout)
+        timed_out_booting = demand_calculator.find_booting(at_least=booting_at_least)
 
         # I don't care about nodes that have keep_alive=true
         timed_out_booting = [n for n in timed_out_booting if not n.keep_alive]
@@ -480,22 +527,21 @@ class CommonCLI(ABC):
 
         if timed_out_booting:
             logging.info(
-                "The following nodes have timed out while booting: %s",
+                "BootTimeout reached: %s",
                 timed_out_booting,
             )
             timed_out_to_deleted = driver.handle_boot_timeout(timed_out_booting) or []
 
         if unmatched_for_5_mins:
             node_expr = ", ".join([str(x) for x in unmatched_for_5_mins])
-            logging.info(
-                "Unmatched for at least %s seconds: %s", idle_timeout, node_expr
-            )
+            logging.info("IdleTimeout reached: %s", node_expr)
             unmatched_nodes_to_delete = (
                 driver.handle_draining(unmatched_for_5_mins) or []
             )
-
-        nodes_to_delete = []
-        for node in timed_out_to_deleted + unmatched_nodes_to_delete:
+        nodes_to_delete.extend(timed_out_to_deleted + unmatched_nodes_to_delete)
+        can_not_delete_bc_assigned = [n for n in nodes_to_delete if n.assignments]
+        nodes_to_delete = [n for n in nodes_to_delete if not n.assignments]
+        for node in can_not_delete_bc_assigned:
             if node.assignments:
                 logging.warning(
                     "%s has jobs assigned to it so we will take no action.", node
@@ -575,6 +621,7 @@ class CommonCLI(ABC):
         ).completer = self._vm_size_completer  # type: ignore
 
         parser.add_argument("-p", "--placement-group", type=str, required=False)
+        parser.add_argument("--name-format", type=str, required=False)
         parser.add_argument(
             "-S", "--software-configuration", type=json_type, required=False
         )
@@ -608,6 +655,7 @@ class CommonCLI(ABC):
         strategy: Optional[str],
         exclusive: bool,
         exclusive_task: bool,
+        name_format: Optional[str],
         software_configuration: Optional[Dict],
         node_attribute_overrides: Optional[Dict],
         output_columns: Optional[List[str]],
@@ -656,8 +704,13 @@ class CommonCLI(ABC):
         cons_dict["node.placement_group"] = placement_group
 
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer)
-        validated_cons = json.loads(writer.getvalue())
+        self.validate_constraint(config, constraint_expr, writer, quiet=False)
+        
+        constraint_raw = writer.getvalue()
+        if constraint_raw.strip():
+            validated_cons = json.loads(constraint_raw)
+        else:
+            validated_cons = {}
 
         if not isinstance(validated_cons, list):
             validated_cons = [validated_cons]
@@ -679,7 +732,7 @@ class CommonCLI(ABC):
         if result:
 
             for node in result.nodes:
-
+                node.name_format = name_format
                 node.keep_alive = keep_alive
 
                 if software_configuration:
@@ -695,12 +748,12 @@ class CommonCLI(ABC):
 
             bootup_result = node_mgr.bootup()
             if bootup_result:
-                assert bootup_result.nodes
+                # assert bootup_result.nodes
 
                 demandprinter.print_demand(
                     columns=output_columns or self._get_default_output_columns(config),
                     demand_result=DemandResult(
-                        bootup_result.nodes, bootup_result.nodes, [], []
+                        bootup_result.nodes, bootup_result.nodes, [], [], node_mgr.get_buckets()
                     ),
                     output_format=output_format,
                     long=long,
@@ -710,6 +763,21 @@ class CommonCLI(ABC):
                 error(str(bootup_result))
         else:
             error(str(result))
+
+
+    def debug_cluster_status_parser(self, parser: ArgumentParser) -> None:
+        parser.add_argument("--nodes", action="store_true", default=False)
+        parser.set_defaults(read_only=True)
+
+    
+    def debug_cluster_status(self, config: Dict, nodes: bool) -> None:
+        """
+        Dumps cluster/{cluster_name}/status call to stdout for support and debug purposes.
+        """
+        bindings = new_cluster_bindings(config)
+        obj = bindings.get_cluster_status(nodes)
+        json.dump(obj.to_dict(), sys.stdout, indent=2)
+
 
     def _node_name_completer(
         self,
@@ -819,16 +887,48 @@ class CommonCLI(ABC):
             _print(traceback.format_exc())
             raise
 
+    def _all_vm_size_completer(
+        self,
+        prefix: str,
+        action: argparse.Action,
+        parser: ArgumentParser,
+        parsed_args: argparse.Namespace,
+    ) -> List[str]:
+
+        try:
+            from hpc.autoscale.node import vm_sizes as vmlib
+
+            output_prefix = ""
+
+            if "," in prefix:
+                rest_of_list = prefix[: prefix.rindex(",")]
+                output_prefix = "{},".format(rest_of_list)
+            return [
+                "{}{},".format(output_prefix, x) for x in vmlib.all_possible_vm_sizes()
+            ]
+        except Exception:
+            import traceback
+
+            _print(traceback.format_exc())
+            raise
+
     def join_nodes_parser(self, parser: ArgumentParser) -> None:
         parser.set_defaults(read_only=False)
+        parser.add_argument("--include-permanent", action="store_true", default=False)
         self._add_hostnames(parser)
         self._add_nodenames(parser)
 
     def join_nodes(
-        self, config: Dict, hostnames: List[str], node_names: List[str]
+        self,
+        config: Dict,
+        hostnames: List[str],
+        node_names: List[str],
+        include_permanent: bool = False,
     ) -> None:
         """Adds selected nodes to the scheduler"""
         driver, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
+        if include_permanent:
+            self._node_history(config).unmark_ignored(nodes)
         joined_nodes = driver.add_nodes_to_cluster(nodes)
         print("Joined the following nodes:")
         for n in joined_nodes or []:
@@ -846,6 +946,7 @@ class CommonCLI(ABC):
         self._add_hostnames(parser)
         self._add_nodenames(parser)
         parser.add_argument("--force", action="store_true", default=False)
+        parser.add_argument("--permanent", action="store_true", default=False)
         parser.set_defaults(read_only=False)
 
     def remove_nodes(
@@ -854,9 +955,17 @@ class CommonCLI(ABC):
         hostnames: List[str],
         node_names: List[str],
         force: bool = False,
+        permanent: bool = False,
     ) -> None:
         """Removes the node from the scheduler without terminating the actual instance."""
-        self.delete_nodes(config, hostnames, node_names, force, do_delete=False)
+        self.delete_nodes(
+            config,
+            hostnames,
+            node_names,
+            do_delete=False,
+            force=force,
+            permanent=permanent,
+        )
 
     def delete_nodes_parser(self, parser: ArgumentParser) -> None:
         self._add_hostnames(parser)
@@ -869,10 +978,10 @@ class CommonCLI(ABC):
         config: Dict,
         hostnames: List[str],
         node_names: List[str],
-        force: bool = False,
         do_delete: bool = True,
+        force: bool = False,
+        permanent: bool = False,
     ) -> None:
-        """Deletes node, including draining post delete handling"""
         driver, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
 
         if not force:
@@ -887,7 +996,8 @@ class CommonCLI(ABC):
 
                 if node.keep_alive and do_delete:
                     error(
-                        "%s is marked as KeepAlive=true. Please exclude this.", node,
+                        "%s is marked as KeepAlive=true. Please exclude this.",
+                        node,
                     )
 
                 if node.required:
@@ -898,7 +1008,7 @@ class CommonCLI(ABC):
                     )
 
         drained_nodes = driver.handle_draining(nodes) or []
-        print("Drained the following nodes that have joined PBS:")
+        print("Drained the following nodes that have joined {}:".format(driver.name))
         for n in drained_nodes:
             print("   ", n)
 
@@ -909,9 +1019,16 @@ class CommonCLI(ABC):
                 print("   ", n)
 
         removed_nodes = driver.handle_post_delete(nodes) or []
-        print("Removed the following nodes from PBS:")
+        print("Removed the following nodes from {}:".format(driver.name))
         for n in removed_nodes:
             print("   ", n)
+
+        # This should only happen when do_delete=false, but as an extra asssertion
+        if permanent and not do_delete:
+            print(
+                "Ignoring the removed nodes until join_nodes --include-permanent is called."
+            )
+            self._node_history(self.config).mark_ignored(removed_nodes)
 
     def default_output_columns_parser(self, parser: ArgumentParser) -> None:
         cmds = [
@@ -996,7 +1113,9 @@ class CommonCLI(ABC):
     ) -> None:
         """Query nodes"""
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer=io.StringIO())
+        self.validate_constraint(
+            config, constraint_expr, writer=io.StringIO(), quiet=True
+        )
         validated_constraints = writer.getvalue()
 
         driver = self._driver(config)
@@ -1009,7 +1128,10 @@ class CommonCLI(ABC):
 
         demand_result = DemandResult([], filtered, [], [])
         demandprinter.print_demand(
-            output_columns, demand_result, output_format=output_format, long=long,
+            output_columns,
+            demand_result,
+            output_format=output_format,
+            long=long,
         )
 
     def buckets_parser(self, parser: ArgumentParser) -> None:
@@ -1027,11 +1149,14 @@ class CommonCLI(ABC):
     ) -> None:
         """Prints out autoscale bucket information, like limits etc"""
         writer = io.StringIO()
-        self.validate_constraint(config, constraint_expr, writer=writer)
+        self.validate_constraint(config, constraint_expr, writer=writer, quiet=False)
+        validated_cons = json.loads(writer.getvalue())
+        constraints = get_constraints(validated_cons)
 
         node_mgr = self._node_mgr(config)
         specified_output_columns = output_columns
         output_format = output_format or "table"
+
         output_columns = output_columns or [
             "nodearray",
             "placement_group",
@@ -1045,9 +1170,20 @@ class CommonCLI(ABC):
         if specified_output_columns is None:
             # fill in other columns
             for bucket in node_mgr.get_buckets():
+                skip = False
+                for cons in constraints:
+                    if not cons.satisfies_bucket(bucket):
+                        skip = True
+                        break
+                if skip:
+                    continue
                 for resource_name in bucket.resources:
                     if resource_name not in output_columns:
-                        output_columns.append(resource_name)
+                        if (
+                            resource_name not in ["memkb", "memmb", "memtb", "memb"]
+                            and resource_name not in output_columns
+                        ):
+                            output_columns.append(resource_name)
 
         for bucket in node_mgr.get_buckets():
             for attr in dir(bucket.limits):
@@ -1062,25 +1198,32 @@ class CommonCLI(ABC):
             config, writer.getvalue(), node_mgr.get_buckets()
         )
 
-        demand_result = DemandResult([], [f.example_node for f in filtered], [], [])
+        demand_result = DemandResult([], [f.example_node for f in filtered], [], [], node_mgr.get_buckets())
 
         config["output_columns"] = output_columns
 
         demandprinter.print_demand(
-            output_columns, demand_result, output_format=output_format, long=long,
+            output_columns,
+            demand_result,
+            output_format=output_format,
+            long=long,
         )
 
     def limits_parser(self, parser: ArgumentParser) -> None:
         self._add_output_format(parser, default="json")
 
     def limits(
-        self, config: Dict, output_format: OutputFormat, long: bool = False,
+        self,
+        config: Dict,
+        output_format: OutputFormat,
+        long: bool = False,
     ) -> None:
-        """
-        Writes a detailed set of limits for each bucket. Defaults to json due to number of fields.
+        f"""
+        Writes a detailed set of limits for each "bucket". Defaults to json due to number of fields.
         """
         node_mgr = self._node_mgr(config)
         output_format = output_format or "json"
+        
         output_columns = [
             "nodearray",
             "placement_group",
@@ -1089,7 +1232,7 @@ class CommonCLI(ABC):
             "vcpu_count",
             "available_count",
         ]
-
+        
         for bucket in node_mgr.get_buckets():
 
             for attr in dir(bucket.limits):
@@ -1109,7 +1252,10 @@ class CommonCLI(ABC):
         )
 
         demandprinter.print_demand(
-            output_columns, demand_result, output_format=output_format, long=long,
+            output_columns,
+            demand_result,
+            output_format=output_format,
+            long=long,
         )
 
     def config_parser(self, parser: ArgumentParser) -> None:
@@ -1219,12 +1365,18 @@ class CommonCLI(ABC):
 
         return driver, demand_calc, found_nodes
 
+    @property
+    def autoscale_home(self) -> str:
+        if os.getenv("AUTOSCALE_HOME"):
+            return os.environ["AUTOSCALE_HOME"]
+        return os.path.join("/opt", "azurehpc", self.project_name)
+
     def initconfig_parser(self, parser: ArgumentParser) -> None:
         parser.add_argument("--cluster-name", required=True)
         parser.add_argument("--username", required=True)
         parser.add_argument("--password")
         parser.add_argument("--url", required=True)
-        default_home = self._driver({}).autoscale_home
+        default_home = self.autoscale_home
 
         parser.add_argument(
             "--log-config",
@@ -1261,13 +1413,6 @@ class CommonCLI(ABC):
 
         self._initconfig_parser(parser)
 
-        parser.add_argument(
-            "--read-only-resources",
-            dest="pbspro__read_only_resources",
-            type=str_list,
-            default=["host", "vnode"],
-        )
-
     @abstractmethod
     def _initconfig_parser(self, parser: ArgumentParser) -> None:
         ...
@@ -1294,7 +1439,12 @@ class CommonCLI(ABC):
         parser.add_argument("--job-id", "-j", required=True)
         parser.add_argument("--long", "-l", action="store_true", default=False)
 
-    def analyze(self, config: Dict, job_id: str, long: bool = False,) -> None:
+    def analyze(
+        self,
+        config: Dict,
+        job_id: str,
+        long: bool = False,
+    ) -> None:
         """
         Prints out relevant reasons that a job was not matched to any nodes.
         """
@@ -1305,7 +1455,7 @@ class CommonCLI(ABC):
                 columns_str = "120"
             columns = int(columns_str)
         else:
-            columns = 2 ** 31
+            columns = 2**31
 
         ctx_handler = DefaultContextHandler("[demand-cli]")
 
@@ -1600,7 +1750,10 @@ def _query_with_constraints(
 
 def _parse_constraint(constraint_expr: str) -> List[NodeConstraint]:
     try:
-        constraint_parsed = json.loads(constraint_expr)
+        if constraint_expr:
+            constraint_parsed = json.loads(constraint_expr)
+        else:
+            constraint_parsed = []
     except Exception as e:
         print(
             "Could not parse constraint as json '{}' - {}".format(constraint_expr, e),
@@ -1635,7 +1788,10 @@ def create_arg_parser(
         return [x.strip() for x in x.split(",")]
 
     help_msg = io.StringIO()
-    default_install_dir = os.path.join("/", "opt", "cycle", project_name)
+
+    default_install_dir = os.path.join("/", "opt", "azurehpc", project_name)
+    if hasattr(module, "autoscale_dir"):
+        default_install_dir = getattr(module, "autoscale_dir")
 
     def add_parser(
         name: str,
@@ -1650,6 +1806,7 @@ def create_arg_parser(
         default_config = default_config or os.path.join(
             default_install_dir, "autoscale.json"
         )
+
         if not os.path.exists(default_config):
             default_config = None
 
@@ -1662,10 +1819,24 @@ def create_arg_parser(
         new_parser.add_argument(
             "--config",
             "-c",
-            default=[default_config] if default_config else [],
+            default=default_config,
             required=not bool(default_config),
-            action="append",
         ).completer = default_completer  # type: ignore
+
+        # note this is true if you set the env variable
+        # AZURE_HPC_DEV=1
+        if hpcutil.AZURE_HPC_DEV:
+            new_parser.add_argument(
+                "--cluster-response",
+                required=False,
+                help="Path to a json file containing the response from a CycleCloud clusters/{cluster_name}/status call for debugging / reproduction.",
+            )
+            new_parser.add_argument(
+                "--nodes-response",
+                required=False,
+                help="Path to a json file containing the response from a CycleCloud clusters/{cluster_name}/nodes call for debugging / reproduction." + 
+                " Note that this is optional if --cluster-reponse is specified, but you must specify --cluster-response if you specify this",
+            )
         return new_parser
 
     configure_parser_functions = {}
@@ -1718,7 +1889,18 @@ def main(
 
     # parse list of config paths to a single config
     if hasattr(args, "config"):
-        args.config = load_config(*args.config)
+        args.config = load_config(args.config)
+
+        # special handling for reproducing issues with reponses provided externally.
+        if hasattr(args, "cluster_response"):
+            if args.cluster_response:
+                args.config["_mock_bindings"] = {
+                    "name": "reproduce",
+                    "cluster_response": args.cluster_response
+                }
+            if args.nodes_response:
+                args.config["_mock_bindings"]["nodes_response"] = args.nodes_response
+        logging.set_context(f"[{args.cmd}]")
         logging.initialize_logging(args.config)
 
         # if applicable, set read_only/lock_file
@@ -1728,7 +1910,7 @@ def main(
 
     kwargs = {}
     for k in dir(args):
-        if k[0].islower() and k not in ["read_only", "func", "cmd"]:
+        if k[0].islower() and k not in ["read_only", "func", "cmd", "cluster_response", "nodes_response"]:
             kwargs[k] = getattr(args, k)
 
     if hasattr(module, "_initialize") and hasattr(args, "config"):
