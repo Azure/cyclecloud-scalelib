@@ -1600,7 +1600,8 @@ def _new_node_manager_79(
                     nodes=sorted(nodes, key=nodes_key),
                     priority=nodearray_base_priority - bucket_n,
                     last_capacity_failure=bucket.last_capacity_failure,
-                    valid=bucket.valid
+                    valid=bucket.valid,
+                    spot_placement_score=getattr(bucket, 'spot_placement_score', None),
                 )
 
                 logging.debug(
