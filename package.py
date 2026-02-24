@@ -11,7 +11,7 @@ from subprocess import check_call
 from typing import Dict, List, Optional
 
 CYCLECLOUD_SCALELIB_VERSION = "1.0.9"
-CYCLECLOUD_API_VERSION = "8.1.0"
+CYCLECLOUD_API_VERSION = "8.9.0"
 
 
 def build_swagger() -> str:
