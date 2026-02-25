@@ -62,6 +62,7 @@ class MockClusterBinding(ClusterBindingInterface):
         self.subnet_id = "subnetid1"
         self.state = "Started"
         self.target_state = "Started"
+        self.last_used_ip = [10, 1, 0, 1]
 
     @property
     def cluster_name(self) -> ClusterName:
@@ -148,6 +149,7 @@ class MockClusterBinding(ClusterBindingInterface):
         assert aux_info.vm_family != "unknown", vm_size
 
         vcpu_count = aux_info.vcpu_count
+        gpu_count = aux_info.gpu_count
 
         bucket_status = NodearrayBucketStatus()
         bucket_status.valid = valid
@@ -203,6 +205,7 @@ class MockClusterBinding(ClusterBindingInterface):
         bucket_status.definition.machine_type = vm_size
         bucket_status.virtual_machine = NodearrayBucketStatusVirtualMachine()
         bucket_status.virtual_machine.vcpu_count = vcpu_count
+        bucket_status.virtual_machine.gpu_count = gpu_count
         bucket_status.virtual_machine.memory = aux_info.memory.convert_to("g").value
 
         bucket_status.virtual_machine.infiniband = aux_info.infiniband
@@ -326,12 +329,23 @@ class MockClusterBinding(ClusterBindingInterface):
 
         return self.nodes[name]
 
-    def create_nodes(self, new_nodes: List[Node]) -> NodeCreationResult:
+    def create_nodes(
+        self, new_nodes: List[Node], request_id: Optional[str]
+    ) -> NodeCreationResult:
+        for n in new_nodes:
+            assert not n.exists
+            assert not n.delayed_node_id.node_id
+            n.delayed_node_id.node_id = NodeId(str(uuid4()))
+            n.target_state = NodeStatus("Started")
+
         for node in new_nodes:
             assert node.name not in self.nodes, "{} already in {}".format(
                 node.name, list(self.nodes)
             )
             self.nodes[node.name] = node.clone()
+            self.nodes[node.name].metadata["__request_id__"] = request_id
+            self.nodes[node.name].target_state = NodeStatus("Started")
+            assert self.nodes[node.name].delayed_node_id.node_id
 
             for bucket in self._get_buckets(node.location, node.vm_family):
                 if bucket.bucket_id == node.bucket_id:
@@ -375,6 +389,7 @@ class MockClusterBinding(ClusterBindingInterface):
         for n in new_nodes:
             # TODO add node statuses as constants / util functions.
             n.state = NodeStatus("Allocating")
+            n.target_state = NodeStatus("Started")
 
         self.operations[result.operation_id] = MockNodeManagementResult(
             result.operation_id, cloned_nodes
@@ -398,9 +413,11 @@ class MockClusterBinding(ClusterBindingInterface):
 
         result_nodes: List[Node] = []
         for name in names:
+            assert name in self.nodes
             if name in self.nodes:
                 node = self.nodes[name]
                 node.state = NodeStatus("Terminating")
+                node.target_state = NodeStatus("Terminated")
                 result_nodes.append(node)
         result = MockNodeManagementResult(OperationId(str(uuid.uuid4())), result_nodes)
         result.operation_id = OperationId(str(uuid.uuid4()))
@@ -432,15 +449,24 @@ class MockClusterBinding(ClusterBindingInterface):
 
         return response
 
+    def _all_booting_nodes(self) -> List[Node]:
+        ret = []
+        for node in self.nodes.values():
+            if node.target_state == "Started":
+                ret.append(node)
+        return ret
+
     def get_nodes(
         self,
         operation_id: Optional[OperationId] = None,
         request_id: Optional[RequestId] = None,
     ) -> NodeList:
 
+        assert not request_id
+
         # TODO what is the actual error?
         if not operation_id:
-            all_nodes = _nodes_to_ccnode(list(self.nodes.values()))
+            all_nodes = _nodes_to_ccnode(self._all_booting_nodes())
             return NodeList(nodes=all_nodes)
 
         if operation_id not in self.operations:
@@ -453,11 +479,16 @@ class MockClusterBinding(ClusterBindingInterface):
         assert operation_id in self.operations
 
         mgmt_result = self.operations[operation_id]
-        cc_nodes = [
-            _node_to_ccnode(self.nodes[n.name])
-            for n in mgmt_result.nodes
-            if n.name in self.nodes
-        ]
+
+        cc_nodes = []
+        for mgmt_node in mgmt_result.nodes:
+            if mgmt_node.name in self.nodes:
+                node = self.nodes[mgmt_node.name]
+                assert node.target_state
+                # if node.target_state != "Terminated":
+                cc_nodes.append(_node_to_ccnode(node))
+            else:
+                logging.error("Unknown node! %s", mgmt_node.name)
         return NodeList(nodes=cc_nodes, operation_id=operation_id)
 
     def remove_nodes(
@@ -478,7 +509,8 @@ class MockClusterBinding(ClusterBindingInterface):
         node_ids: Optional[List[NodeId]] = None,
         hostnames: Optional[List[Hostname]] = None,
         ip_addresses: Optional[List[IpAddress]] = None,
-        custom_filter: str = None,
+        custom_filter: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> NodeManagementResult:
         raise NotImplementedError()
 
@@ -509,6 +541,22 @@ class MockClusterBinding(ClusterBindingInterface):
         node_names = node_names or list(self.nodes.keys())
         for node_name in node_names:
             self.nodes[NodeName(node_name)].state = NodeStatus(state)
+                    
+    def _next_ip(self) -> IpAddress:
+        if self.last_used_ip[-1] == 255:
+            self.last_used_ip[-1] = 1
+            self.last_used_ip[-2] += self.last_used_ip[-2] + 1
+        else:
+            self.last_used_ip[-1] += 1
+        return IpAddress(".".join([str(x) for x in self.last_used_ip]))
+
+    def assign_ip(self, node_names: List[str]) -> None:
+        for node_name in node_names:
+            assert (
+                node_name in self.nodes
+            ), f"{node_name} not in {list(self.nodes.keys())}"
+            self.nodes[node_name]._Node__private_ip = self._next_ip()
+            assert self.nodes[node_name].private_ip
 
     def __str__(self) -> str:
         return "MockBindings()"
@@ -538,7 +586,9 @@ class MockNodeManagementResult(NodeManagementResult):
         NodeManagementResult.__init__(self, nodes=mgmt_nodes, operation_id=operation_id)
 
 
-def _node_to_ccnode(n: Node, target_state: str = "Started") -> NodeRecord:
+def _node_to_ccnode(n: Node) -> NodeRecord:
+
+    assert n.delayed_node_id.node_id
     ret = {
         "Name": n.name,
         "Template": n.nodearray,
@@ -551,7 +601,7 @@ def _node_to_ccnode(n: Node, target_state: str = "Started") -> NodeRecord:
         # "CoreCount":
         # "Memory":
         "Status": n.state,
-        "TargetState": target_state,
+        "TargetState": n.target_state,
         "PlacementGroupId": n.placement_group,
         "Infiniband": n.infiniband,
         "Configuration": {},

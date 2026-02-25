@@ -10,6 +10,7 @@ import hpc.autoscale.hpclogging as logging
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.codeanalysis import hpcwrap, hpcwrapclass
 from hpc.autoscale.hpctypes import ResourceType
+from hpc.autoscale.node.bucket import NodeBucket
 from hpc.autoscale.results import SatisfiedResult
 
 ConstraintDict = typing.NewType("ConstraintDict", Dict[Any, Any])
@@ -104,10 +105,21 @@ class NodeResourceConstraint(BaseNodeConstraint):
     ```
     """
 
-    def __init__(self, attr: str, *values: ht.ResourceTypeAtom) -> None:
+    def __init__(self, attr: str, *values: ht.ResourceTypeAtom, **flags: Any) -> None:
         self.attr = attr
         self.values: List[ResourceType] = list(values)
         self.weight = 100
+        self.case_insensitive: bool = flags.pop("case_insensitive", False)
+
+        if flags:
+            raise RuntimeError(
+                "Unknown flag(s) passed to %s: %s", self.__class__, flags
+            )
+        if self.case_insensitive:
+            for i in range(len(self.values)):
+                value = self.values[i]
+                if isinstance(value, str):
+                    self.values[i] = value.lower()
 
     def weight_buckets(
         self, bucket_weights: List[Tuple["NodeBucket", float]]
@@ -120,6 +132,8 @@ class NodeResourceConstraint(BaseNodeConstraint):
                 ret.append((bucket, 0.0))
                 continue
             target = bucket.example_node.available[self.attr]
+            if self.case_insensitive and isinstance(target, str):
+                target = target.lower()
 
             for n, value in enumerate(self.values):
                 if isinstance(value, str) and isinstance(target, str):
@@ -143,7 +157,11 @@ class NodeResourceConstraint(BaseNodeConstraint):
         if value != target:
             if len(self.values) > 1:
                 return "Resource[name={} value={}] is not one of the options {} for node[name={} attr={}]".format(
-                    self.attr, repr(target), self.values, node.name, self.attr,
+                    self.attr,
+                    repr(target),
+                    self.values,
+                    node.name,
+                    self.attr,
                 )
             else:
                 return "Resource[name={} value={}] != node[name={} {}={}]".format(
@@ -165,6 +183,9 @@ class NodeResourceConstraint(BaseNodeConstraint):
             )
         target = node.available[self.attr]
 
+        if self.case_insensitive and isinstance(target, str):
+            target = target.lower()
+
         for n, value in enumerate(self.values):
             if isinstance(value, str) and isinstance(target, str):
                 matches = fnmatch(target, value)
@@ -172,7 +193,12 @@ class NodeResourceConstraint(BaseNodeConstraint):
                 matches = target == value
             if matches:
                 score = len(self.values) - n
-                return SatisfiedResult("success", self, node, score=score,)
+                return SatisfiedResult(
+                    "success",
+                    self,
+                    node,
+                    score=score,
+                )
 
         if node._is_example_node():
             node_str = "Bucket[array={} vm_size={} attr={}]".format(
@@ -182,15 +208,22 @@ class NodeResourceConstraint(BaseNodeConstraint):
             node_str = "Node[name={} attr={}]".format(node.name, self.attr)
 
         if len(self.values) > 1:
-            msg = "Resource[name={} value={}] is not one of the options {} for {}".format(
-                self.attr, repr(target), self.values, node_str
+            msg = (
+                "Resource[name={} value={}] is not one of the options {} for {}".format(
+                    self.attr, repr(target), self.values, node_str
+                )
             )
         else:
             msg = "Resource[name={} value={}] != {} for {}".format(
                 self.attr, repr(target), repr(self.values[0]), node_str
             )
 
-        return SatisfiedResult("InvalidOption", self, node, [msg],)
+        return SatisfiedResult(
+            "InvalidOption",
+            self,
+            node,
+            [msg],
+        )
 
     def __str__(self) -> str:
         if len(self.values) == 1:
@@ -244,7 +277,12 @@ class MinResourcePerNode(BaseNodeConstraint):
         if self.attr not in node.available:
             # TODO log
             msg = "Resource[name={}] is not defined for {}".format(self.attr, node_str)
-            return SatisfiedResult("UndefinedResource", self, node, [msg],)
+            return SatisfiedResult(
+                "UndefinedResource",
+                self,
+                node,
+                [msg],
+            )
 
         try:
             target = node.available[self.attr]
@@ -255,7 +293,11 @@ class MinResourcePerNode(BaseNodeConstraint):
             )
 
             if target >= self.value:
-                return SatisfiedResult("success", self, node,)
+                return SatisfiedResult(
+                    "success",
+                    self,
+                    node,
+                )
 
         except TypeError as e:
             logging.warning(
@@ -267,7 +309,7 @@ class MinResourcePerNode(BaseNodeConstraint):
             )
 
         if node._is_example_node():
-            msg = "Resource[name={} value={}] < Bucket[array={} vm_size={} value={}]".format(
+            msg = "Resource[name={} value={}] > Bucket[array={} vm_size={} value={}]".format(
                 self.attr,
                 repr(self.value),
                 node.nodearray,
@@ -275,10 +317,18 @@ class MinResourcePerNode(BaseNodeConstraint):
                 repr(node.available[self.attr]),
             )
         else:
-            msg = "Resource[name={} value={}] < Node[name={} value={}]".format(
-                self.attr, repr(self.value), node.name, repr(node.available[self.attr]),
+            msg = "Resource[name={} value={}] > Node[name={} value={}]".format(
+                self.attr,
+                repr(self.value),
+                node.name,
+                repr(node.available[self.attr]),
             )
-        return SatisfiedResult("InsufficientResource", self, node, reasons=[msg],)
+        return SatisfiedResult(
+            "InsufficientResource",
+            self,
+            node,
+            reasons=[msg],
+        )
 
     def do_decrement(self, node: "Node") -> bool:
         if self.attr not in node.available:
@@ -293,7 +343,11 @@ class MinResourcePerNode(BaseNodeConstraint):
         if remaining < self.value:
             raise RuntimeError(
                 "Attempted to allocate more {} than is available for {}: {} < {} ({})".format(
-                    self.attr, node.name, remaining, self.value, str(self),
+                    self.attr,
+                    node.name,
+                    remaining,
+                    self.value,
+                    str(self),
                 )
             )
         node.available[self.attr] = remaining - self.value
@@ -306,7 +360,7 @@ class MinResourcePerNode(BaseNodeConstraint):
         available = node.available[self.attr]
 
         if self.value == 0:
-            return 2 ** 31
+            return 2**31
 
         return int(available // self.value)
 
@@ -361,7 +415,12 @@ class ExclusiveNode(BaseNodeConstraint):
                 msg = "[name={} hostname={}] already has an exclusive job: {}".format(
                     node.name, node.hostname, node.assignments
                 )
-                return SatisfiedResult("ExclusiveRequirementFailed", self, node, [msg],)
+                return SatisfiedResult(
+                    "ExclusiveRequirementFailed",
+                    self,
+                    node,
+                    [msg],
+                )
         return SatisfiedResult("success", self, node)
 
     def do_decrement(self, node: "Node") -> bool:
@@ -413,17 +472,28 @@ class InAPlacementGroup(BaseNodeConstraint):
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
         if node.placement_group:
-            return SatisfiedResult("success", self, node,)
+            return SatisfiedResult(
+                "success",
+                self,
+                node,
+            )
 
         if node.name.endswith("-0"):
-            msg = "Bucket[array={} vm_size={} id={}] is not in a placement group".format(
-                node.nodearray, node.vm_size, node.bucket_id
+            msg = (
+                "Bucket[array={} vm_size={} id={}] is not in a placement group".format(
+                    node.nodearray, node.vm_size, node.bucket_id
+                )
             )
         else:
             msg = "Node[name={} hostname={}] is not in a placement group".format(
                 node.name, node.hostname
             )
-        return SatisfiedResult("NotInAPlacementGroup", self, node, [msg],)
+        return SatisfiedResult(
+            "NotInAPlacementGroup",
+            self,
+            node,
+            [msg],
+        )
 
     def minimum_space(self, node: "Node") -> int:
         if not node.placement_group:
@@ -486,7 +556,10 @@ class Or(BaseNodeConstraint):
 
             if result:
                 return SatisfiedResult(
-                    "success", self, node, score=len(self.constraints) - n,
+                    "success",
+                    self,
+                    node,
+                    score=len(self.constraints) - n,
                 )
 
             if hasattr(result, "reasons"):
@@ -553,7 +626,12 @@ class XOr(BaseNodeConstraint):
                     msg = "Multiple expressions evaluated as true. See below:\n\t{}\n\t{}".format(
                         xor_result.message, expr_result.message
                     )
-                    return SatisfiedResult("XORFailed", self, node, [msg] + reasons,)
+                    return SatisfiedResult(
+                        "XORFailed",
+                        self,
+                        node,
+                        [msg] + reasons,
+                    )
                 # assign the first true expression as the final result
                 xor_result = expr_result
             elif hasattr(expr_result, "reasons"):
@@ -793,13 +871,20 @@ class NodePropertyConstraint(BaseNodeConstraint):
     ) -> List[Tuple["NodeBucket", float]]:
         ret: List[Tuple["NodeBucket", float]] = []
         for bucket, weight in bucket_weights:
+            if weight == 0:
+                ret.append((bucket, weight))
+                continue
+            new_weight = 0.0
             for n, value in enumerate(self.values):
                 err_msg = self._satisfied(bucket.example_node, value)
-                if err_msg:
-                    new_weight = 0.0
-                else:
-                    new_weight = float(len(self.values) - n)
-                ret.append((bucket, new_weight))
+                if not err_msg:
+                    target = self._get_target_value(bucket.example_node)
+                    new_weight = weight + 100 * float(
+                        len(self.values) - self.values.index(target)
+                    )
+                    break
+            ret.append((bucket, new_weight))
+
         return ret
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
@@ -808,10 +893,20 @@ class NodePropertyConstraint(BaseNodeConstraint):
             err_msg = self._satisfied(node, value)
             if not err_msg:
                 score = len(self.values) - n
-                return SatisfiedResult("success", self, node, score=score,)
+                return SatisfiedResult(
+                    "success",
+                    self,
+                    node,
+                    score=score,
+                )
             err_msgs.append(err_msg)
 
-        return SatisfiedResult("InvalidOption", self, node, err_msgs,)
+        return SatisfiedResult(
+            "InvalidOption",
+            self,
+            node,
+            err_msgs,
+        )
 
     def _satisfied(
         self, node: "Node", value: typing.Union[None, ht.ResourceTypeAtom]
@@ -832,8 +927,10 @@ class NodePropertyConstraint(BaseNodeConstraint):
             node_str = "Node[name={} attr={}]".format(node.name, self.attr)
 
         if len(self.values) > 1:
-            return "Property[name={} value={}] is not one of the options {} for {}".format(
-                self.attr, target, self.values, node_str
+            return (
+                "Property[name={} value={}] is not one of the options {} for {}".format(
+                    self.attr, target, self.values, node_str
+                )
             )
         else:
             return "Property[name={} value={}] != {} for {}".format(
@@ -1086,7 +1183,10 @@ class SharedConsumableConstraint(SharedConstraint):
         )
 
         return "Shared(name={}, source={}, current={}, request={})".format(
-            self.shared_resources[0].resource_name, sources, current, self.amount,
+            self.shared_resources[0].resource_name,
+            sources,
+            current,
+            self.amount,
         )
 
     def to_dict(self) -> Dict:
@@ -1204,6 +1304,54 @@ class SharedNonConsumableConstraint(SharedConstraint):
         )
 
 
+class CapacityFailureBackoffConstraint(BaseNodeConstraint):
+    def __init__(self, backoff: int) -> None:
+        super().__init__()
+        self.backoff = backoff
+
+    def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        return SatisfiedResult("success", self, node)
+    
+    def _bucket_is_in_backoff(self, bucket: NodeBucket) -> bool:
+        if bucket.last_capacity_failure is None:
+            return False
+        
+        # backoff for _at least_ backoff seconds
+        return bucket.last_capacity_failure < self.backoff
+    
+    def satisfied_by_bucket(self, bucket: NodeBucket) -> SatisfiedResult:
+        if not self._bucket_is_in_backoff(bucket):
+            return SatisfiedResult("success", self, bucket.example_node)
+        
+        return SatisfiedResult("CapacityFailureBackoff", 
+                               self, 
+                               bucket.example_node, 
+                               reasons=[f"last_capacity_failure {bucket.last_capacity_failure} is too recent " + 
+                                        f"- it is less than backoff {self.backoff}"])
+    
+    def weight_buckets(self, bucket_weights: List[Tuple[NodeBucket, float]]) -> List[Tuple[NodeBucket, float]]:
+        ret = []
+        for bucket, weight in bucket_weights:
+            if self._bucket_is_in_backoff(bucket):
+                ret.append((bucket, 0))
+            else:
+                ret.append((bucket, weight))
+        return ret
+
+    def do_decrement(self, node: "Node") -> bool:
+        return True
+
+    def to_dict(self) -> Dict:
+        return {"capacity-failure-backoff": self.backoff}
+
+    @staticmethod
+    def from_dict(d: Dict) -> "CapacityFailureBackoffConstraint":
+        return CapacityFailureBackoffConstraint(d["capacity-failure-backoff"])
+
+    def __str__(self) -> str:
+        return "CapacityFailureBackoffConstraint({})".format(self.backoff)
+
+
 def _parse_node_property_constraint(
     attr: str, value: Union[ResourceType, Constraint]
 ) -> NodePropertyConstraint:
@@ -1233,7 +1381,10 @@ def _parse_node_property_constraint(
 
 @hpcwrap
 def new_job_constraint(
-    attr: str, value: Union[ResourceType, Constraint, list], in_alias: bool = False
+    attr: str,
+    value: Union[ResourceType, Constraint, list],
+    in_alias: bool = False,
+    case_insensitive: bool = False,
 ) -> NodeConstraint:
 
     if attr in _CUSTOM_PARSERS:
@@ -1287,10 +1438,10 @@ def new_job_constraint(
             size = ht.Memory.value_of(value)
             return MinResourcePerNode(attr, size)
 
-        return NodeResourceConstraint(attr, value)
+        return NodeResourceConstraint(attr, value, case_insensitive=case_insensitive)
 
     elif isinstance(value, bool):
-        return NodeResourceConstraint(attr, value)
+        return NodeResourceConstraint(attr, value, case_insensitive=case_insensitive)
 
     elif isinstance(value, list):
 
@@ -1317,7 +1468,7 @@ def new_job_constraint(
         if attr.startswith("node."):
             return _parse_node_property_constraint(attr, value)
 
-        return NodeResourceConstraint(attr, *value)
+        return NodeResourceConstraint(attr, *value, case_insensitive=case_insensitive)
 
     elif (
         isinstance(value, int)
@@ -1328,7 +1479,7 @@ def new_job_constraint(
         return MinResourcePerNode(attr, value)
 
     elif value is None:
-        return NodeResourceConstraint(attr, value)
+        return NodeResourceConstraint(attr, value, case_insensitive=case_insensitive)
         # raise RuntimeError("None is not an allowed value. For attr {}".format(attr))
 
     else:
@@ -1340,7 +1491,9 @@ def new_job_constraint(
 
 
 @hpcwrap
-def get_constraint(constraint_expression: Constraint) -> NodeConstraint:
+def get_constraint(
+    constraint_expression: Constraint, case_insensitive: bool = False
+) -> NodeConstraint:
     ret = get_constraints([constraint_expression])
     assert len(ret) == 1, "Expression=%s len(ret)==%s" % (
         constraint_expression,
@@ -1350,7 +1503,9 @@ def get_constraint(constraint_expression: Constraint) -> NodeConstraint:
 
 
 @hpcwrap
-def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConstraint]:
+def get_constraints(
+    constraint_expressions: List[Constraint], case_insensitive: bool = False
+) -> List[NodeConstraint]:
     if isinstance(constraint_expressions, dict):
         constraint_expressions = [constraint_expressions]
 
@@ -1375,7 +1530,7 @@ def get_constraints(constraint_expressions: List[Constraint],) -> List[NodeConst
             and_constraints = []
             for attr, value in constraint_expression.items():
                 # TODO
-                c = new_job_constraint(attr, value)
+                c = new_job_constraint(attr, value, case_insensitive=case_insensitive)
                 assert c is not None
                 and_constraints.append(c)
             if len(and_constraints) > 1:
@@ -1390,6 +1545,7 @@ _CUSTOM_PARSERS: Dict[str, Callable[[Dict], NodeConstraint]] = {
     "in-a-placement-group": lambda d: InAPlacementGroup(),
     "shared-consumable-constraint": SharedConsumableConstraint.from_dict,
     "shared-non-consumable-constraint": SharedNonConsumableConstraint.from_dict,
+    "capacity-failure-backoff": CapacityFailureBackoffConstraint.from_dict,
 }
 
 

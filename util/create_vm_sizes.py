@@ -9,16 +9,30 @@ from hpc.autoscale.node.vm_sizes import AuxVMSizeInfo
 from hpc.autoscale.util import partition, partition_single
 
 
+PROXIED_LOCATIONS = {
+    "_comment_": "This is a mapping of locations that are not available in the Azure API, but are proxied to another location.",
+    "usdodcentral": "southcentralus",
+    "usdodeast": "southcentralus",
+    "usdodtexas": "southcentralus",
+    "usgovarizona": "southcentralus",
+    "usgoviowa": "southcentralus",
+    "usgovtexas": "southcentralus",
+    "usgovvirginia": "southcentralus",
+    "usseceast": "southcentralus",
+    "ussecwest": "southcentralus",
+}
+
+
 def create_vm_sizes(cache_path: Optional[str] = None) -> None:
 
     if cache_path and os.path.exists(cache_path):
         raw = open(cache_path).read()
     else:
-
-        if which("az"):
+        az_path = which("az")
+        if az_path:
             raw = check_output(
                 [
-                    os.path.expanduser("~/.virtualenvs/azcli/bin/az"),
+                    az_path,
                     "vm",
                     "list-skus",
                     "--all",
@@ -108,7 +122,8 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
         )
     else:
         print(
-            "Warning: cycle_server found! Skipping validation", file=sys.stderr,
+            "Warning: cycle_server found! Skipping validation",
+            file=sys.stderr,
         )
         cs_mts = []
 
@@ -144,7 +159,8 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
         if row["Location"] not in vm_sizes:
             vm_sizes[row["Location"]] = {}
 
-    final_vm_sizes: Dict = {}
+    final_vm_sizes: Dict = {"proxied-locations": PROXIED_LOCATIONS}
+    
     for loc in sorted(vm_sizes):
         final_vm_sizes[loc] = loc_dict = {}
         for vm_size in sorted(vm_sizes[loc]):
@@ -157,7 +173,7 @@ def create_vm_sizes(cache_path: Optional[str] = None) -> None:
         old_data = json.load(fr)
 
     missing_locations = set(old_data.keys()) - set(final_vm_sizes.keys())
-    new_locations = set(final_vm_sizes.keys()) - set(old_data.keys())
+    new_locations = set(final_vm_sizes.keys()) - set(old_data.keys()) - set(["proxied-locations"])
     if missing_locations:
         print("WARNING: Missing locations:", ",".join(missing_locations))
     if missing_locations:

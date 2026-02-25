@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
 from cyclecloud.model.ClusterStatusModule import ClusterStatus
 from cyclecloud.model.NodearrayBucketStatusModule import NodearrayBucketStatus
 from cyclecloud.model.NodeCreationResultModule import NodeCreationResult
+from cyclecloud.model.NodeListModule import NodeList
 from cyclecloud.model.NodeManagementResultModule import NodeManagementResult
 from cyclecloud.model.NodeManagementResultNodeModule import NodeManagementResultNode
 from cyclecloud.model.PlacementGroupStatusModule import PlacementGroupStatus
@@ -13,6 +14,7 @@ from immutabledict import ImmutableOrderedDict
 from typing_extensions import Literal
 
 import hpc.autoscale.hpclogging as logging
+import hpc.autoscale.util as hpcutil
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.ccbindings import new_cluster_bindings
 from hpc.autoscale.ccbindings.interface import ClusterBindingInterface
@@ -73,7 +75,9 @@ class NodeManager:
     """
 
     def __init__(
-        self, cluster_bindings: ClusterBindingInterface, node_buckets: List[NodeBucket],
+        self,
+        cluster_bindings: ClusterBindingInterface,
+        node_buckets: List[NodeBucket],
     ) -> None:
         self.__cluster_bindings = cluster_bindings
         self.__node_buckets = node_buckets
@@ -84,6 +88,7 @@ class NodeManager:
 
         self.__default_resources: List[_DefaultResource] = []
         self.__journal: List[_JournalEntry] = []
+        self._next_node_name_hook: Optional[Callable[[NodeBucket, int], str]] = None
         # list of nodes a user has 'allocated'.
         # self.new_nodes = []  # type: List[Node]
 
@@ -92,7 +97,9 @@ class NodeManager:
         return [
             n
             for n in self.get_nodes()
-            if not n.exists and not (n.state == "Deallocated" and not n._allocated)
+            if not n.exists
+            and n.state != "Stopping"
+            and not (n.state == "Deallocated" and not n._allocated)
         ]
 
     def _add_bucket(self, bucket: NodeBucket) -> None:
@@ -107,8 +114,11 @@ class NodeManager:
         allow_existing: bool = True,
         all_or_nothing: bool = False,
         assignment_id: Optional[str] = None,
+        node_namer: Optional[Callable[[], str]] = None,
     ) -> AllocationResult:
-
+        if isinstance(constraints, dict):
+            constraints = [constraints]
+            
         if not allow_existing:
             constraints = get_constraints([{"node.exists": False}]) + constraints
 
@@ -128,7 +138,8 @@ class NodeManager:
         candidates_result = bucket_candidates(self.get_buckets(), parsed_constraints)
         if not candidates_result:
             return AllocationResult(
-                "NoCandidatesFound", reasons=candidates_result.reasons,
+                "NoCandidatesFound",
+                reasons=candidates_result.reasons,
             )
 
         logging.debug(
@@ -292,7 +303,9 @@ class NodeManager:
         if remaining < slot_count:
             commited_nodes = self._commit(bucket, list(allocated_nodes.values()))
             return AllocationResult(
-                "success", nodes=commited_nodes, slots_allocated=slot_count - remaining,
+                "success",
+                nodes=commited_nodes,
+                slots_allocated=slot_count - remaining,
             )
         self._rollback(bucket)
         if alloc_result:
@@ -423,6 +436,9 @@ class NodeManager:
                 satisfied = True
 
             if satisfied:
+                
+                do_decrement = node.state == "Deallocated" and not node.assignments
+
                 per_node = _per_node(node, constraints)
                 journal_entry = _JournalEntry(
                     node, constraints, per_node, assignment_id
@@ -434,9 +450,12 @@ class NodeManager:
                 self.__journal.append(journal_entry)
                 allocated_nodes[node.name] = (node, node)
 
+                if do_decrement:
+                    bucket.decrement(1)
+
                 if remaining_slots() <= 0:
                     break
-
+        
         while remaining_slots() > 0 and bucket.available_count > 0:
             node_name = self._next_node_name(bucket)
             new_node = node_from_bucket(
@@ -577,28 +596,32 @@ class NodeManager:
     def _next_node_name(self, bucket: NodeBucket) -> ht.NodeName:
         index = 1
         while True:
-            name = ht.NodeName("{}-{}".format(bucket.nodearray, index))
+            if self._next_node_name_hook:
+                name = ht.NodeName(self._next_node_name_hook(bucket, index))
+            else:
+                name = ht.NodeName("{}-{}".format(bucket.nodearray, index))
             if name not in self._node_names:
                 self._node_names[name] = False
                 return name
             index += 1
 
+    def set_node_name_hook(self, hook: Callable[[NodeBucket, int], str]) -> None:
+        self._next_node_name_hook = hook
+
     @apitrace
     def add_unmanaged_nodes(self, existing_nodes: List[UnmanagedNode]) -> None:
-        def _bid_and_pg(n: Node) -> Tuple[ht.BucketId, Optional[ht.PlacementGroup]]:
-            return (n.bucket_id, n.placement_group)
 
         by_key: Dict[
-            Tuple[ht.BucketId, Optional[ht.PlacementGroup]], List[Node]
+            Tuple[Optional[ht.PlacementGroup], ht.BucketId], List[Node]
         ] = partition(
             # typing will complain that List[Node] is List[UnmanagedNode]
             # just a limitation of python3's typing
             existing_nodes,  # type: ignore
-            _bid_and_pg,
+            lambda n: (n.placement_group, n.bucket_id),
         )
 
         buckets = partition_single(
-            self.__node_buckets, lambda b: (b.bucket_id, b.placement_group)
+            self.__node_buckets, lambda b: (b.placement_group, b.bucket_id)
         )
 
         for key, nodes_list in by_key.items():
@@ -606,19 +629,20 @@ class NodeManager:
                 buckets[key].add_nodes(nodes_list)
                 continue
 
-            bucket_id, placement_group = key
+            placement_group, bucket_id = key
 
             a_node = nodes_list[0]
             # create a null definition, limits and bucket for each
             # unique set of unmanaged nodes
             node_def = NodeDefinition(
                 nodearray=ht.NodeArrayName("__unmanaged__"),
-                bucket_id=bucket_id,
+                bucket_id=ht.BucketId(bucket_id),
                 vm_size=ht.VMSize("unknown"),
                 location=ht.Location("unknown"),
                 spot=False,
                 subnet=ht.SubnetId("unknown"),
                 vcpu_count=a_node.vcpu_count,
+                gpu_count=a_node.gpu_count,
                 memory=a_node.memory,
                 placement_group=placement_group,
                 resources=ht.ResourceDict(dict(deepcopy(a_node.resources))),
@@ -630,7 +654,7 @@ class NodeManager:
             limits = null_bucket_limits(len(nodes_list), a_node.vcpu_count)
 
             bucket = NodeBucket(
-                node_def, limits, len(nodes_list), nodes_list, artificial=True
+                node_def, limits, len(nodes_list), nodes_list, artificial=True, valid=True,
             )
 
             self.__node_buckets.append(bucket)
@@ -661,16 +685,29 @@ class NodeManager:
         return self.new_nodes
 
     def get_buckets(self) -> List[NodeBucket]:
-        return self.__node_buckets
+        return [x for x in self.__node_buckets if x.valid]
+
+    def get_invalid_buckets(self) -> List[NodeBucket]:
+        return [x for x in self.__node_buckets if not x.valid]
 
     def get_buckets_by_id(self) -> Dict[ht.BucketId, NodeBucket]:
         return partition_single(self.get_buckets(), lambda b: b.bucket_id)
+
+    @apitrace
+    def get_nodes_by_request_id(self, request_id: ht.RequestId) -> List[Node]:
+        relevant_node_list = self.__cluster_bindings.get_nodes(
+            request_id=request_id
+        )
+        return self._get_nodes_by_id(relevant_node_list)
 
     @apitrace
     def get_nodes_by_operation(self, operation_id: ht.OperationId) -> List[Node]:
         relevant_node_list = self.__cluster_bindings.get_nodes(
             operation_id=operation_id
         )
+        return self._get_nodes_by_id(relevant_node_list)
+
+    def _get_nodes_by_id(self, relevant_node_list: NodeList) -> List[Node]:
         relevant_node_names = [n["Name"] for n in relevant_node_list.nodes]
         updated_cluster_status = self.__cluster_bindings.get_cluster_status(True)
 
@@ -689,15 +726,18 @@ class NodeManager:
                     logging.warning("%s no longer exists.", name)
                     node.exists = False
                     node.state = ht.NodeStatus("Off")
+                    node.target_state = ht.NodeStatus("Off")
                 else:
                     cc_node = updated_cc_nodes[name]
                     node.state = ht.NodeStatus(cc_node["Status"])
+                    node.target_state = ht.NodeStatus(cc_node["TargetState"])
                     if node.delayed_node_id.node_id:
                         assert node.delayed_node_id.node_id == cc_node["NodeId"]
                     else:
                         logging.info(
                             "Found nodeid for %s -> %s", node, cc_node["NodeId"]
                         )
+                        assert cc_node["NodeId"]
                         node.delayed_node_id.node_id = cc_node["NodeId"]
                     ret.append(node)
 
@@ -707,14 +747,16 @@ class NodeManager:
     def bootup(
         self,
         nodes: Optional[List[Node]] = None,
-        request_id: Optional[ht.RequestId] = None,
+        request_id_start: Optional[ht.RequestId] = None,
+        request_id_create: Optional[ht.RequestId] = None,
     ) -> BootupResult:
         nodes = nodes or self.new_nodes
+        request_ids = [x for x in [request_id_start, request_id_create] if x]
         if not nodes:
             return BootupResult(
                 "success",
                 ht.OperationId(""),
-                request_id,
+                request_ids,
                 reasons=["No new nodes required or created."],
             )
 
@@ -726,15 +768,9 @@ class NodeManager:
 
         if nodes_to_start:
             start_result: NodeManagementResult = self.__cluster_bindings.start_nodes(
-                nodes_to_start
+                nodes_to_start, request_id=request_id_start
             )
             operation_id = start_result.operation_id
-
-            for s in start_result.sets:
-                if s.message:
-                    logging.warning(s.message)
-                else:
-                    logging.info("Started %d nodes", s.added)
 
             started_nodes = self.get_nodes_by_operation(start_result.operation_id)
 
@@ -753,7 +789,7 @@ class NodeManager:
         if nodes_to_create:
 
             create_result: NodeCreationResult = self.__cluster_bindings.create_nodes(
-                nodes_to_create
+                nodes_to_create, request_id=request_id_create
             )
 
             if operation_id:
@@ -782,7 +818,7 @@ class NodeManager:
                     node.state = ht.NodeStatus("Unknown")
 
         return BootupResult(
-            "success", ht.OperationId(operation_id), request_id, booted_nodes
+            "success", ht.OperationId(operation_id), request_ids, booted_nodes
         )
 
     @property
@@ -832,6 +868,7 @@ class NodeManager:
         modifier_magnitude: Optional[Union[int, float]] = None,
         allow_none: bool = True,
     ) -> None:
+        assert resource_name
         if isinstance(default_value, str):
             if default_value.startswith("node."):
                 attr = default_value[len("node.") :]  # noqa: E203
@@ -854,7 +891,11 @@ class NodeManager:
                                 + " for node/bucket %s because the node/bucket did not define %s as a resource"
                             )
                             logging.warning(
-                                msg, attr, alias, node, alias,
+                                msg,
+                                attr,
+                                alias,
+                                node,
+                                alias,
                             )
                             value = ""
 
@@ -878,7 +919,11 @@ class NodeManager:
                                 + " in its software_configuration"
                             )
                             logging.warning(
-                                msg, attr, alias, node, alias,
+                                msg,
+                                attr,
+                                alias,
+                                node,
+                                alias,
                             )
                             value = ""
 
@@ -971,6 +1016,9 @@ class NodeManager:
 
         self.__node_buckets.append(bucket.clone_with_placement_group(pg_name))
 
+    def get_placement_groups(self, bucket: NodeBucket) -> List[ht.PlacementGroup]:
+        return [b.placement_group for b in self.__node_buckets if b.nodearray == bucket.nodearray and b.placement_group]
+
     @apitrace
     def deallocate_nodes(self, nodes: List[Node]) -> DeallocateResult:
         return self._nodes_operation(
@@ -996,9 +1044,9 @@ class NodeManager:
         )
 
     @apitrace
-    def start_nodes(self, nodes: List[Node]) -> StartResult:
+    def start_nodes(self, nodes: List[Node], request_id: Optional[str] = None) -> StartResult:
         return self._nodes_operation(
-            nodes, self.__cluster_bindings.start_nodes, StartResult
+            nodes, lambda n: self.__cluster_bindings.start_nodes(n, request_id=request_id), StartResult
         )
 
     @apitrace
@@ -1015,7 +1063,7 @@ class NodeManager:
         self,
         nodes: List[Node],
         function: Callable[[List[Node]], NodeManagementResult],
-        ctor: Callable[[str, ht.OperationId, Optional[ht.RequestId], List[Node]], T],
+        ctor: Callable[[str, ht.OperationId, Optional[List[ht.RequestId]], List[Node]], T],
     ) -> T:
         managed_nodes = [node for node in nodes if node.managed]
         unmanaged_node_names = [node.name for node in nodes if not node.managed]
@@ -1056,7 +1104,7 @@ class NodeManager:
 
             affected_nodes.append(node)
 
-            if node.state in ["Terminating", "Off"]:
+            if node.target_state in ["Terminated", "Off"]:
                 self._remove_node_internally(node)
 
         return ctor(
@@ -1102,9 +1150,12 @@ class NodeManager:
         self.add_default_resource({}, "memmb", MemoryDefault("m"))
         self.add_default_resource({}, "memgb", MemoryDefault("g"))
         self.add_default_resource({}, "memtb", MemoryDefault("t"))
+        
         self.add_default_resource({}, "nodearray", "node.nodearray")
-        self.add_default_resource({}, "ccnodeid", lambda n: n.delayed_node_id.node_id)
-
+        self.add_default_resource(
+            {}, "ccnodeid", lambda n: n.delayed_node_id.node_id
+        )
+        
     def example_node(self, location: str, vm_size: str) -> Node:
         aux_info = vm_sizes.get_aux_vm_size_info(location, vm_size)
 
@@ -1266,7 +1317,8 @@ def _cluster_limits(cluster_name: str, cluster_status: ClusterStatus) -> _Shared
 
 
 def _new_node_manager_79(
-    cluster_bindings: ClusterBindingInterface, autoscale_config: Dict,
+    cluster_bindings: ClusterBindingInterface,
+    autoscale_config: Dict,
 ) -> NodeManager:
     cluster_status = cluster_bindings.get_cluster_status(nodes=True)
     nodes_list = cluster_bindings.get_nodes()
@@ -1282,21 +1334,42 @@ def _new_node_manager_79(
             n for n in cluster_status.nodes if n["Name"] not in mimic_on_prem
         ]
 
+    assume_standalone_hostnames = autoscale_config.get(
+        "assume_standalone_hostnames", False
+    )
+
     all_node_names = [n["Name"] for n in nodes_list.nodes]
 
     buckets = []
 
     cluster_limit = _cluster_limits(cluster_bindings.cluster_name, cluster_status)
 
+    filtered_nodes = []
+
+    for cc_node in nodes_list.nodes:
+        if "TargetState" not in cc_node:
+            logging.error("Node %s created without a TargetState.", cc_node.get("Name"))
+            logging.error(
+                "You may attempt to start manually, but ignoring for autoscale."
+            )
+            continue
+        else:
+            filtered_nodes.append(cc_node)
+
     cc_nodes_by_template = partition(nodes_list.nodes, lambda n: n["Template"])
 
     nodearray_limits: Dict[str, _SharedLimit] = {}
     regional_limits: Dict[str, _SharedLimit] = {}
+    regional_spot_limits: Dict[str, _SharedLimit] = {}
     family_limits: Dict[str, _SharedLimit] = {}
+
+    default_priority = 1
 
     for nodearray_status in cluster_status.nodearrays:
         nodearray = nodearray_status.nodearray
         nodearray_name = nodearray_status.name
+        raw_priority = nodearray.get("Priority", default_priority)
+        nodearray_base_priority = raw_priority * 1000
 
         is_autoscale_disabled = (
             not nodearray.get("Configuration", {})
@@ -1306,7 +1379,8 @@ def _new_node_manager_79(
 
         if is_autoscale_disabled:
             logging.fine(
-                "Ignoring nodearray %s because autoscale.enabled=false", nodearray_name,
+                "Ignoring nodearray %s because autoscale.enabled=false",
+                nodearray_name,
             )
             continue
 
@@ -1322,7 +1396,10 @@ def _new_node_manager_79(
         active_na_core_count = 0
         active_na_count = 0
         for cc_node in cc_nodes_by_template.get(nodearray_name, []):
-            if cc_node["TargetState"] != "Allocation":
+
+            reached_final_state = cc_node["TargetState"] == cc_node["Status"]
+            booting = cc_node["TargetState"] == "Started"
+            if reached_final_state and not booting:
                 continue
             aux_vm_info = vm_sizes.get_aux_vm_size_info(region, cc_node["MachineType"])
             active_na_count += 1
@@ -1338,26 +1415,37 @@ def _new_node_manager_79(
 
         spot = nodearray.get("Interruptible", False)
 
-        for bucket in nodearray_status.buckets:
+        for bucket_n, bucket in enumerate(nodearray_status.buckets):
             if not bucket.valid:
                 continue
 
             vcpu_count = bucket.virtual_machine.vcpu_count
+            gpu_count = bucket.virtual_machine.gpu_count
+            assert gpu_count is not None
 
             aux_vm_info = vm_sizes.get_aux_vm_size_info(
                 region, bucket.definition.machine_type
             )
             assert isinstance(aux_vm_info, vm_sizes.AuxVMSizeInfo)
             vm_family = aux_vm_info.vm_family
+            if vm_family == "unknown":
+                vm_family = bucket.definition.machine_type
 
-            if region not in regional_limits:
-                regional_limits[region] = _SharedLimit(
+            # bugfix: If spot instances came first, their regional limits were imposed on
+            # other buckets.
+            if nodearray.get("Interruptible"):
+                target_regional_limits = regional_spot_limits
+            else:
+                target_regional_limits = regional_limits
+
+            if region not in target_regional_limits:
+                target_regional_limits[region] = _SharedLimit(
                     "Region({})".format(region),
                     bucket.regional_consumed_core_count,
                     bucket.regional_quota_core_count,
                 )
 
-            if vm_family not in family_limits:
+            if vm_family not in family_limits and not spot:
                 family_limits[vm_family] = _SharedLimit(
                     "VM Family({})".format(vm_family),
                     bucket.family_consumed_core_count,
@@ -1416,34 +1504,51 @@ def _new_node_manager_79(
 
                 bucket_id = bucket.bucket_id
 
+                for n in nodes_list.nodes:
+                    ov = autoscale_config.get("_node-overrides", {})
+                    n.update(ov.get(n.get(""), {}))
+
                 # TODO the bucket has a list of node names
                 cc_node_records = [
                     n
                     for n in nodes_list.nodes
                     if n["Template"] == nodearray_name
                     and n["MachineType"] == bucket.definition.machine_type
+                    and (n["TargetState"] == "Started" or n["Status"] == "Deallocated")
                     and n.get("PlacementGroupId") == pg_name
                 ]
 
-                family_limit: Union[_SpotLimit, _SharedLimit] = family_limits[vm_family]
                 if nodearray.get("Interruptible"):
                     # enabling spot/interruptible 0's out the family limit response
                     # as the regional limit is supposed to be used in its place,
                     # however that responsibility is on the caller and not the
                     # REST api. For this library we handle that for them.
-                    family_limit = _SpotLimit(regional_limits[region])
+                    family_limit = _SpotLimit(target_regional_limits[region])
+                else:
+                    family_limit: Union[_SpotLimit, _SharedLimit] = family_limits[
+                        vm_family
+                    ]
 
+                na_limit = nodearray_limits[nodearray_name]
+                # bug - unfortunately CycleCloud does not give an accurate 'available_count'
+                # here. It excludes nodes in the process of being terminated. While this 
+                # was originally intentional, combined with the bug where CC ignores the 
+                # nodearray limit when starting deallocated nodes, we need to guard against that.
+                # Our nodearray_limits already adds in nodes that are in the process of terminating / stopping,
+                # so flooring the effective avail count gets us the correct behavior. 
+                avail_count_with_na = min(na_limit._available_count(vcpu_count), bucket.available_count)
+                avail_core_count_with_na = min(na_limit._available_count(1), bucket.available_core_count)
                 bucket_limit = BucketLimits(
                     vcpu_count,
-                    regional_limits[region],
+                    target_regional_limits[region],
                     cluster_limit,
-                    nodearray_limits[nodearray_name],
+                    na_limit,
                     family_limit,
                     placement_group_limit,
                     active_core_count=bucket.active_core_count,
                     active_count=bucket.active_count,
-                    available_core_count=bucket.available_core_count,
-                    available_count=bucket.available_count,
+                    available_core_count=avail_core_count_with_na,
+                    available_count=avail_count_with_na,
                     max_core_count=bucket.max_core_count,
                     max_count=bucket.max_count,
                 )
@@ -1457,7 +1562,9 @@ def _new_node_manager_79(
                             % cc_node_rec
                         )
                         continue
-                    node = _node_from_cc_node(cc_node_rec, bucket, region)
+                    node = _node_from_cc_node(
+                        cc_node_rec, bucket, region, assume_standalone_hostnames
+                    )
                     nodes.append(node)
 
                 node_def = NodeDefinition(
@@ -1468,6 +1575,7 @@ def _new_node_manager_79(
                     spot=spot,
                     subnet=subnet,
                     vcpu_count=vcpu_count,
+                    gpu_count=gpu_count,
                     memory=bucket_memory,
                     placement_group=pg_name,
                     resources=custom_resources,
@@ -1484,11 +1592,16 @@ def _new_node_manager_79(
                     except Exception:
                         return (n.name, 0)
 
+
                 node_bucket = NodeBucket(
                     node_def,
                     limits=bucket_limit,
                     max_placement_group_size=bucket.max_placement_group_size,
                     nodes=sorted(nodes, key=nodes_key),
+                    priority=nodearray_base_priority - bucket_n,
+                    last_capacity_failure=bucket.last_capacity_failure,
+                    valid=bucket.valid,
+                    spot_placement_score=getattr(bucket, 'spot_placement_score', None),
                 )
 
                 logging.debug(
@@ -1503,14 +1616,36 @@ def _new_node_manager_79(
 
 
 def _node_from_cc_node(
-    cc_node_rec: dict, bucket: NodearrayBucketStatus, region: ht.Location
+    cc_node_rec: dict,
+    bucket: NodearrayBucketStatus,
+    region: ht.Location,
+    assume_standalone_hostnames: bool = False,
 ) -> Node:
     node_id = ht.NodeId(cc_node_rec["NodeId"])
     node_name = ht.NodeName(cc_node_rec["Name"])
     nodearray_name = cc_node_rec["Template"]
     vm_size_node = cc_node_rec["MachineType"]
+    software_configuration = ImmutableOrderedDict(cc_node_rec.get("Configuration", {}))
     hostname = cc_node_rec.get("Hostname")
     private_ip = cc_node_rec.get("PrivateIp")
+
+    is_standalone_dns = (
+        software_configuration.get("cyclecloud", {})
+        .get("hosts", {})
+        .get("standalone_dns", {})
+        .get("enabled", True)
+    )
+    if is_standalone_dns and assume_standalone_hostnames and private_ip:
+        ip_bytes = [int(x) for x in private_ip.split(".")]
+        assumed_hostname = (
+            "ip-" + ("".join(["{0:0{1}x}".format(x, 2) for x in ip_bytes])).upper()
+        )
+        if hostname != assumed_hostname:
+            logging.debug(
+                f"Assuming hostname {assumed_hostname} (currently is {hostname}) for {node_name}"
+            )
+            hostname = assumed_hostname
+
     instance_id = cc_node_rec.get("InstanceId")
     vcpu_count = cc_node_rec.get("CoreCount") or bucket.virtual_machine.vcpu_count
     node_memory_gb = cc_node_rec.get("Memory") or (bucket.virtual_machine.memory)
@@ -1524,8 +1659,6 @@ def _node_from_cc_node(
     resources = deepcopy(
         cc_node_rec.get("Configuration", {}).get("autoscale", {}).get("resources", {})
     )
-
-    software_configuration = ImmutableOrderedDict(cc_node_rec.get("Configuration", {}))
 
     return Node(
         node_id=DelayedNodeId(node_name, node_id=node_id),

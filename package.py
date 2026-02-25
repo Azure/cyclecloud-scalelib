@@ -10,11 +10,28 @@ from argparse import Namespace
 from subprocess import check_call
 from typing import Dict, List, Optional
 
-CYCLECLOUD_SCALELIB_VERSION = "0.2.0"
-CYCLECLOUD_API_VERSION = "8.1.0"
+CYCLECLOUD_SCALELIB_VERSION = "1.0.9"
+CYCLECLOUD_API_VERSION = "8.9.0"
+
+
+def build_swagger() -> str:
+    check_call([sys.executable, "setup.py", "swagger"])
+    check_call([sys.executable, "setup.py", "sdist"], cwd="clusters")
+    sdists = glob.glob(
+        "clusters/dist/swagger-client-{}.tar.gz".format(CYCLECLOUD_SCALELIB_VERSION)
+    )
+    assert len(sdists) == 1, "Found %d sdist packages, expected 1" % len(sdists)
+    path = sdists[0]
+    fname = os.path.basename(path)
+    dest = os.path.join("libs", fname)
+    if os.path.exists(dest):
+        os.remove(dest)
+    shutil.move(path, dest)
+    return fname
 
 
 def build_sdist() -> str:
+    
     cmd = [sys.executable, "setup.py", "sdist"]
     check_call(cmd)
     sdists = glob.glob(
@@ -31,6 +48,7 @@ def build_sdist() -> str:
 
 
 def get_cycle_libs(args: Namespace) -> List[str]:
+    # ret = [build_swagger(), build_sdist()]
     ret = [build_sdist()]
 
     cyclecloud_api_file = "cyclecloud_api-{}-py2.py3-none-any.whl".format(
@@ -107,7 +125,7 @@ def execute() -> None:
         _add("packages/" + dep, dep_path)
         packages.append(dep_path)
 
-    check_call(["pip", "download"] + packages, cwd=build_dir)
+    check_call(["pip3", "download"] + packages, cwd=build_dir)
 
     print("Using build dir", build_dir)
     by_package: Dict[str, List[str]] = {}

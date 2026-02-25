@@ -1,13 +1,37 @@
 import json
 import os
+import re
 import sys
+import typing
 import uuid as uuidlib
 import warnings
 from abc import ABC, abstractmethod
 from functools import reduce
-from typing import Any, Callable, Dict, List, TextIO, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, TextIO, TypeVar, Union
 
 from hpc.autoscale.codeanalysis import hpcwrapclass
+
+if typing.TYPE_CHECKING:
+    from hpc.autoscale.node.node import Node
+    from hpc.autoscale.node.bucket import NodeBucket  # noqa:F401
+
+
+LEGACY = True
+
+# This env variable unlocks extra functionality in the CLI
+# for dev and support staff to reproduce issues locally with raw JSON responses from
+# raw json responses provided by a CX's CycleCloud instance. Specifically
+# /clusters/{cluster}/status response (cluster.json)
+# and, optionally, 
+# /clusters/{cluster}/nodes response (nodes.json)
+#
+# For example, let's assume I created a CLI based on clilib called azmycli.
+# > azmycli buckets --cluster-response path/to/cluster.json 
+# > azmycli nodes --node-list path/to/nodes.json --cluster-response path/to/cluster.json
+# It should work with any command that just needs a cluster_status and, optionally, a nodes response.
+# The idea here is that someone has provided a raw json response for the 
+# You can then feed these into your CLI to reproduce the issue locally.
+AZURE_HPC_DEV = bool(int(os.getenv("AZURE_HPC_DEV", "0")))
 
 
 @hpcwrapclass
@@ -72,7 +96,8 @@ def partition_single(
             if strict or not reduce(lambda x, y: x == y, value):  # type: ignore
                 raise RuntimeError(
                     "Could not partition list into single values - key={} values={}".format(
-                        key, value,
+                        key,
+                        value,
                     )
                 )
         ret[key] = value[0]
@@ -297,4 +322,70 @@ def _dict_merge(d1: Dict, d2: Dict) -> Dict:
         if k not in ret:
             ret[k] = v2
 
+    return ret
+
+
+def is_valid_hostname(config: Dict, node: "Node") -> bool:
+    # delayed import, as logging will import this module
+    from hpc.autoscale import hpclogging as logging
+
+    if not node.hostname:
+        return False
+
+    valid_hostnames: Optional[List[str]] = config.get("valid_hostnames")
+
+    if not valid_hostnames:
+        if is_standalone_dns(node):
+            valid_hostnames = ["^ip-[0-9A-Za-z]{8}$"]
+        else:
+            return True
+
+    for valid_hostname in valid_hostnames:
+        if re.match(valid_hostname, node.hostname):
+            return True
+
+    logging.warning(
+        "Rejecting invalid hostname '%s': Did not match any of the following patterns: %s",
+        node.hostname,
+        valid_hostnames,
+    )
+    return False
+
+
+def is_standalone_dns(node_or_bucket: Union["Node", "NodeBucket"]) -> bool:
+    return (
+        node_or_bucket.software_configuration.get("cyclecloud", {})
+        .get("hosts", {})
+        .get("standalone_dns", {})
+        .get("enabled", True)
+    )
+
+
+def parse_idle_timeout(config: Dict, node: Optional["Node"] = None) -> int:
+    return parse_timeout("idle_timeout", 300, config, node)
+
+
+def parse_boot_timeout(config: Dict, node: Optional["Node"] = None) -> int:
+    return parse_timeout("boot_timeout", 1800, config, node)
+
+
+def parse_timeout(
+    timeout_key: str, default_value: int, config: Dict, node: Optional["Node"] = None
+) -> int:
+    value: Union[int, str, Dict] = config.get(timeout_key, default_value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value)
+    section = node.nodearray if node else "default"
+    key = section
+    if key not in value:
+        key = "default"
+    if key not in value:
+        return default_value
+    ret = value.get(key)
+    if not ret:
+        return default_value
+    if isinstance(ret, str):
+        return int(ret)
     return ret

@@ -17,7 +17,7 @@ Category = Applications
     Region = $Region
     KeyPairLocation = ~/.ssh/cyclecloud.pem
             
-        [[[cluster-init celery-autoscale-demo:default:1.0.0]]]
+        [[[cluster-init celery-autoscale-demo:default:1.0.9]]]
         Optional = True
 
         [[[configuration]]]
@@ -30,9 +30,9 @@ Category = Applications
     
         [[[configuration]]]
 
-        [[[cluster-init celery-autoscale-demo:broker:1.0.0]]]
+        [[[cluster-init celery-autoscale-demo:broker:1.0.9]]]
         Optional = True
-        [[[cluster-init celery-autoscale-demo:worker:1.0.0]]]
+        [[[cluster-init celery-autoscale-demo:worker:1.0.9]]]
         Optional = True
 
         [[[network-interface eth0]]]
@@ -46,6 +46,7 @@ Category = Applications
     [[nodearray worker]]
     MachineType = $ExecuteMachineType
     MaxCoreCount = $MaxExecuteCoreCount
+    
 
     Interruptible = $UseLowPrio
     AdditionalClusterInitSpecs = $ExecuteClusterInitSpecs
@@ -54,7 +55,7 @@ Category = Applications
         [[[configuration]]]
         celery.broker.privateip = ${broker.instance.privateip}
 
-        [[[cluster-init celery-autoscale-demo:worker:1.0.0]]]
+        [[[cluster-init celery-autoscale-demo:worker:1.0.9]]]
         Optional = True
 
 

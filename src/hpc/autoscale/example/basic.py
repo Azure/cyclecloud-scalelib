@@ -16,7 +16,11 @@ _exit_code = 0
 
 @hpcwrapclass
 class BasicDriver:
-    def __init__(self, jobs: List[Job], scheduler_nodes: List[SchedulerNode],) -> None:
+    def __init__(
+        self,
+        jobs: List[Job],
+        scheduler_nodes: List[SchedulerNode],
+    ) -> None:
         self.jobs = jobs
         self.scheduler_nodes = scheduler_nodes
 

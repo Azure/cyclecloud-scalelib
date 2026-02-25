@@ -1,4 +1,5 @@
 # test: ignore
+import glob
 import os
 import shutil
 import sys
@@ -11,7 +12,10 @@ from setuptools.command.test import test as TestCommand  # noqa: N812
 
 import inspect
 
-__version__ = "0.2.0"
+__version__ = "1.0.9"
+
+SWAGGER_URL = "https://oss.sonatype.org/content/repositories/releases/io/swagger/swagger-codegen-cli/2.2.1/swagger-codegen-cli-2.2.1.jar"
+SWAGGER_CLI = SWAGGER_URL.split("/")[-1]
 
 
 class PyTest(TestCommand):
@@ -267,6 +271,34 @@ class TypeChecking(Command):
         run_type_checking()
 
 
+class Swagger(Command):
+    user_options: List[str] = []
+
+    def initialize_options(self) -> None:
+        pass
+
+    def finalize_options(self) -> None:
+        pass
+
+    def run(self) -> None:
+        if not os.path.exists(".tools"):
+            os.makedirs(".tools")
+        
+        if not os.path.exists(f".tools/{SWAGGER_CLI}"):
+            check_call(["wget", SWAGGER_URL], cwd=".tools")
+
+        if not os.path.exists("clusters"):
+            os.makedirs("clusters")
+        
+        check_call(["java", "-jar", f"../.tools/{SWAGGER_CLI}", "generate", "-i", "../swagger/Clusters.json", "-l", "python"], cwd="clusters")
+        check_call([sys.executable, "setup.py", "sdist"], cwd="clusters")
+        for fil in glob.glob("clusters/dist/*.gz"):
+            dest = os.path.join("dist", os.path.basename(fil))
+            if os.path.exists(dest):
+                os.remove(dest)
+            shutil.move(fil, dest)
+
+
 setup(
     name="cyclecloud-scalelib",
     version=__version__,
@@ -274,18 +306,21 @@ setup(
     package_dir={"": "src", "conf": "conf"},
     include_package_data=True,
     install_requires=[
-        "requests >= 2.24.0",
-        "typing_extensions",
+        "requests == 2.32.5",
+        "requests-cache == 0.7.5",
+        "typing_extensions==3.7.4.3",
         "immutabledict==1.0.0",
-        "jsonpickle==1.4.1",
+        "jsonpickle==1.5.2",
         "argcomplete==1.12.2",
-        "certifi==2020.12.5",
+        "certifi==2023.7.22",
+        "chardet==5.2.0",
     ]
-    + ["urllib3==1.25.11"],  # noqa: W503
+    + ["urllib3==2.5.0"],  # noqa: W503
     tests_require=["pytest==3.2.3"],
     cmdclass={
         "test": PyTest,
         "docs": AutoDoc,
+        "swagger": Swagger,
         "format": Formatter,
         "types": TypeChecking,
         "commithook": PreCommitHook,

@@ -1,8 +1,10 @@
+import os
 import sys
 from argparse import ArgumentParser
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from hpc.autoscale import clilib
+from hpc.autoscale import util as hpcutil
 from hpc.autoscale.clilib import CommonCLI, ShellDict, disablecommand
 from hpc.autoscale.job.demandprinter import OutputFormat
 from hpc.autoscale.job.driver import SchedulerDriver
@@ -14,6 +16,9 @@ from hpc.autoscale.util import partition, partition_single
 
 
 class GenericDriver(SchedulerDriver):
+    def __init__(self, project_name: str) -> None:
+        super().__init__(project_name)
+
     def initialize(self) -> None:
         pass
 
@@ -69,9 +74,15 @@ class ScaleLibCLI(CommonCLI):
 
     @disablecommand
     def join_nodes(
-        self, config: Dict, hostnames: List[str], node_names: List[str]
+        self,
+        config: Dict,
+        hostnames: List[str],
+        node_names: List[str],
+        include_permanent: bool = False,
     ) -> None:
-        return super().join_nodes(config, hostnames, node_names)
+        return super().join_nodes(
+            config, hostnames, node_names, include_permanent=include_permanent
+        )
 
     @disablecommand
     def remove_nodes(
@@ -88,6 +99,7 @@ class ScaleLibCLI(CommonCLI):
     def _default_output_columns(
         self, config: Dict, cmd: Optional[str] = None
     ) -> List[str]:
+        
         return [
             "name",
             "hostname",
@@ -141,4 +153,4 @@ def main(argv: Iterable[str], default_config: Optional[str] = None) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    main(sys.argv[1 if os.path.isfile(sys.argv[0]) else 0 :])
