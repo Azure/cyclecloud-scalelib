@@ -90,6 +90,30 @@ class ClusterBindingInterface(ABC):
         pass
 
     @abc.abstractmethod
+    def reimage_nodes(
+        self,
+        nodes: Optional[List[node.Node]] = None,
+        names: Optional[List[NodeName]] = None,
+        node_ids: Optional[List[NodeId]] = None,
+        hostnames: Optional[List[Hostname]] = None,
+        ip_addresses: Optional[List[IpAddress]] = None,
+        custom_filter: str = None,
+    ) -> NodeManagementResult:
+        pass
+
+    @abc.abstractmethod
+    def restart_nodes(
+        self,
+        nodes: Optional[List[node.Node]] = None,
+        names: Optional[List[NodeName]] = None,
+        node_ids: Optional[List[NodeId]] = None,
+        hostnames: Optional[List[Hostname]] = None,
+        ip_addresses: Optional[List[IpAddress]] = None,
+        custom_filter: str = None,
+    ) -> NodeManagementResult:
+        pass
+
+    @abc.abstractmethod
     def start_nodes(
         self,
         nodes: Optional[List[node.Node]] = None,

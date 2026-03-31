@@ -283,6 +283,56 @@ class ClusterBinding(ClusterBindingInterface):
         self._log_response(http_response, result)
         return result
 
+    @notreadonly
+    def reimage_nodes(
+        self,
+        nodes: Optional[List[Node]] = None,
+        names: Optional[List[ht.NodeName]] = None,
+        node_ids: Optional[List[ht.NodeId]] = None,
+        hostnames: Optional[List[ht.Hostname]] = None,
+        ip_addresses: Optional[List[ht.IpAddress]] = None,
+        custom_filter: str = None,
+        request_id: Optional[str] = None,
+    ) -> NodeManagementResult:
+
+        request = self._node_management_request(
+            nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
+        )
+
+        logging.fine(json.dumps(request.to_dict()))
+
+        http_response, result = self.clusters_module.reimage_nodes(
+            self.session, self.cluster_name, request
+        )
+
+        self._log_response(http_response, result)
+        return result
+
+    @notreadonly
+    def restart_nodes(
+        self,
+        nodes: Optional[List[Node]] = None,
+        names: Optional[List[ht.NodeName]] = None,
+        node_ids: Optional[List[ht.NodeId]] = None,
+        hostnames: Optional[List[ht.Hostname]] = None,
+        ip_addresses: Optional[List[ht.IpAddress]] = None,
+        custom_filter: str = None,
+        request_id: Optional[str] = None,
+    ) -> NodeManagementResult:
+
+        request = self._node_management_request(
+            nodes, names, node_ids, hostnames, ip_addresses, custom_filter, request_id
+        )
+
+        logging.fine(json.dumps(request.to_dict()))
+
+        http_response, result = self.clusters_module.restart_nodes(
+            self.session, self.cluster_name, request
+        )
+
+        self._log_response(http_response, result)
+        return result
+
     @hpcwrap
     def start_nodes(
         self,
