@@ -43,7 +43,9 @@ from hpc.autoscale.results import (
     DeallocateResult,
     DeleteResult,
     MatchResult,
+    ReimageResult,
     RemoveResult,
+    RestartResult,
     SatisfiedResult,
     ShutdownResult,
     StartResult,
@@ -1041,6 +1043,18 @@ class NodeManager:
     def shutdown_nodes(self, nodes: List[Node]) -> ShutdownResult:
         return self._nodes_operation(
             nodes, self.__cluster_bindings.shutdown_nodes, ShutdownResult
+        )
+
+    @apitrace
+    def reimage_nodes(self, nodes: List[Node]) -> ReimageResult:
+        return self._nodes_operation(
+            nodes, self.__cluster_bindings.reimage_nodes, ReimageResult
+        )
+
+    @apitrace
+    def restart_nodes(self, nodes: List[Node]) -> RestartResult:
+        return self._nodes_operation(
+            nodes, self.__cluster_bindings.restart_nodes, RestartResult
         )
 
     @apitrace

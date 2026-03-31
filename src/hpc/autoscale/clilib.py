@@ -967,6 +967,46 @@ class CommonCLI(ABC):
             permanent=permanent,
         )
 
+    def reimage_nodes_parser(self, parser: ArgumentParser) -> None:
+        self._add_hostnames(parser)
+        self._add_nodenames(parser)
+        parser.set_defaults(read_only=False)
+
+    def reimage_nodes(
+        self,
+        config: Dict,
+        hostnames: List[str],
+        node_names: List[str],
+    ) -> None:
+        """Reimages the specified nodes."""
+        if not hostnames and not node_names:
+            error("Please specify at least one hostname with -H/--hostnames or node name with -N/--node-names")
+        _, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
+        result = demand_calc.node_mgr.reimage_nodes(nodes)
+        print("Reimaging the following nodes:")
+        for n in result.nodes or []:
+            print("   ", n)
+
+    def restart_nodes_parser(self, parser: ArgumentParser) -> None:
+        self._add_hostnames(parser)
+        self._add_nodenames(parser)
+        parser.set_defaults(read_only=False)
+
+    def restart_nodes(
+        self,
+        config: Dict,
+        hostnames: List[str],
+        node_names: List[str],
+    ) -> None:
+        """Restarts the specified nodes."""
+        if not hostnames and not node_names:
+            error("Please specify at least one hostname with -H/--hostnames or node name with -N/--node-names")
+        _, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
+        result = demand_calc.node_mgr.restart_nodes(nodes)
+        print("Restarting the following nodes:")
+        for n in result.nodes or []:
+            print("   ", n)
+
     def delete_nodes_parser(self, parser: ArgumentParser) -> None:
         self._add_hostnames(parser)
         self._add_nodenames(parser)

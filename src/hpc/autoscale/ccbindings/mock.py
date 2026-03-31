@@ -424,6 +424,58 @@ class MockClusterBinding(ClusterBindingInterface):
         self.operations[result.operation_id] = result
         return result
 
+    def reimage_nodes(
+        self,
+        nodes: Optional[List[Node]] = None,
+        names: Optional[List[NodeName]] = None,
+        node_ids: Optional[List[NodeId]] = None,
+        hostnames: Optional[List[Hostname]] = None,
+        ip_addresses: Optional[List[IpAddress]] = None,
+        custom_filter: str = None,
+    ) -> NodeManagementResult:
+        if not names:
+            assert nodes
+            names = [n.name for n in nodes]
+            nodes = None
+
+        result_nodes: List[Node] = []
+        for name in names:
+            assert name in self.nodes
+            if name in self.nodes:
+                node = self.nodes[name]
+                node.state = NodeStatus("Reimaging")
+                node.target_state = NodeStatus("Started")
+                result_nodes.append(node)
+        result = MockNodeManagementResult(OperationId(str(uuid.uuid4())), result_nodes)
+        self.operations[result.operation_id] = result
+        return result
+
+    def restart_nodes(
+        self,
+        nodes: Optional[List[Node]] = None,
+        names: Optional[List[NodeName]] = None,
+        node_ids: Optional[List[NodeId]] = None,
+        hostnames: Optional[List[Hostname]] = None,
+        ip_addresses: Optional[List[IpAddress]] = None,
+        custom_filter: str = None,
+    ) -> NodeManagementResult:
+        if not names:
+            assert nodes
+            names = [n.name for n in nodes]
+            nodes = None
+
+        result_nodes: List[Node] = []
+        for name in names:
+            assert name in self.nodes
+            if name in self.nodes:
+                node = self.nodes[name]
+                node.state = NodeStatus("Restarting")
+                node.target_state = NodeStatus("Started")
+                result_nodes.append(node)
+        result = MockNodeManagementResult(OperationId(str(uuid.uuid4())), result_nodes)
+        self.operations[result.operation_id] = result
+        return result
+
     def deallocate_nodes(
         self,
         nodes: Optional[List[Node]] = None,
@@ -541,7 +593,7 @@ class MockClusterBinding(ClusterBindingInterface):
         node_names = node_names or list(self.nodes.keys())
         for node_name in node_names:
             self.nodes[NodeName(node_name)].state = NodeStatus(state)
-                    
+
     def _next_ip(self) -> IpAddress:
         if self.last_used_ip[-1] == 255:
             self.last_used_ip[-1] = 1

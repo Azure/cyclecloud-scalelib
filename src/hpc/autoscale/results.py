@@ -304,6 +304,16 @@ class TerminateResult(NodeOperationResult):
 
 
 @hpcwrapclass
+class ReimageResult(NodeOperationResult):
+    ...
+
+
+@hpcwrapclass
+class RestartResult(NodeOperationResult):
+    ...
+
+
+@hpcwrapclass
 class EarlyBailoutResult(Result):
     def __init__(
         self,
