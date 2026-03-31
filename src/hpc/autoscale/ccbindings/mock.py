@@ -447,7 +447,6 @@ class MockClusterBinding(ClusterBindingInterface):
                 node.target_state = NodeStatus("Started")
                 result_nodes.append(node)
         result = MockNodeManagementResult(OperationId(str(uuid.uuid4())), result_nodes)
-        result.operation_id = OperationId(str(uuid.uuid4()))
         self.operations[result.operation_id] = result
         return result
 
@@ -474,7 +473,6 @@ class MockClusterBinding(ClusterBindingInterface):
                 node.target_state = NodeStatus("Started")
                 result_nodes.append(node)
         result = MockNodeManagementResult(OperationId(str(uuid.uuid4())), result_nodes)
-        result.operation_id = OperationId(str(uuid.uuid4()))
         self.operations[result.operation_id] = result
         return result
 
@@ -595,7 +593,7 @@ class MockClusterBinding(ClusterBindingInterface):
         node_names = node_names or list(self.nodes.keys())
         for node_name in node_names:
             self.nodes[NodeName(node_name)].state = NodeStatus(state)
-                    
+
     def _next_ip(self) -> IpAddress:
         if self.last_used_ip[-1] == 255:
             self.last_used_ip[-1] = 1

@@ -979,7 +979,9 @@ class CommonCLI(ABC):
         node_names: List[str],
     ) -> None:
         """Reimages the specified nodes."""
-        driver, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
+        if not hostnames and not node_names:
+            error("Please specify at least one hostname with -H/--hostnames or node name with -N/--node-names")
+        _, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
         result = demand_calc.node_mgr.reimage_nodes(nodes)
         print("Reimaging the following nodes:")
         for n in result.nodes or []:
@@ -997,7 +999,9 @@ class CommonCLI(ABC):
         node_names: List[str],
     ) -> None:
         """Restarts the specified nodes."""
-        driver, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
+        if not hostnames and not node_names:
+            error("Please specify at least one hostname with -H/--hostnames or node name with -N/--node-names")
+        _, demand_calc, nodes = self._find_nodes(config, hostnames, node_names)
         result = demand_calc.node_mgr.restart_nodes(nodes)
         print("Restarting the following nodes:")
         for n in result.nodes or []:
