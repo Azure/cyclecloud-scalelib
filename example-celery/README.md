@@ -4,14 +4,14 @@ _Celery_ is a python-based distributed task queues
 
 ## An Autoscale Routine
 
-A very simple autoscaler that integrates _Celery_ with 
+A very simple autoscaler that integrates _Celery_ with
 _scalelib_ can be written in [single file](specs/broker/cluster-init/files/autoscale.py).
-It's the intention that this can be extended to 
+It's the intention that this can be extended to
 many other HPC schedulers for use with CycleCloud.
-We refer to code which integrating with the scheduler 
+We refer to code which integrating with the scheduler
 as the scheduler driver.
 
-The autoscale routine is meant to be (nearly) stateless 
+The autoscale routine is meant to be (nearly) stateless
 and run on a regular scheduler. Each iteration would:
 
 1. [driver] Collect host and job information
@@ -21,7 +21,7 @@ and run on a regular scheduler. Each iteration would:
 1. [driver] Disable or delete hosts with no existing demand
 
 _Scalelib_ maintains a list of cluster nodes managed by
-CycleCloud which can act as the ground-truth for the 
+CycleCloud which can act as the ground-truth for the
 scheduler driver to add or remove nodes as
 part of their normal autoscale lifecycle.
 
@@ -32,8 +32,8 @@ from _Celery_ and supplies them to the demand calculator.
 
 ```python
 celery_d = celery_status()
-dcalc = demandcalculator.new_demand_calculator(CONFIG, 
-                existing_nodes=celery_d.scheduler_nodes, 
+dcalc = demandcalculator.new_demand_calculator(CONFIG,
+                existing_nodes=celery_d.scheduler_nodes,
                 node_history=SQLiteNodeHistory())
 dcalc.add_jobs(celery_d.jobs)
 ```
@@ -49,11 +49,11 @@ celery_d.jobs.append(job)
 
 Other resources are available by default for job constraints
 
-| Default Constraint | Description  | 
-|---|---| 
+| Default Constraint | Description  |
+|---|---|
 | ncpus | virtual CPUs  |
-| pcpus  | physical (non-hyperthreaded) CPUs  | 
-| ngpus  | physical GPUs  |  
+| pcpus  | physical (non-hyperthreaded) CPUs  |
+| ngpus  | physical GPUs  |
 | memmb | Memory in MB |
 | memgb | Memory in GB |
 | memtb | Memory in TB |
@@ -75,7 +75,7 @@ How to expose node capabilities as a resource to constrain.
 | colocated  | Boolean  | If colocated, use a single placement group for the nodes which host the job.  |
 | exclusive | Boolean  | If true, reserve the entire node even if there are unused resources on the node.
 
-Then the constrain can use any and all of these in any combination. So that the job `Job("my-job", constraints={"ncpus":1, "memgb":200, "ngpus":1}, node_count=2, colacated=True, exclusive=True)` will exclusively reserve 2 nodes which meet the minimum constraints and will create them 
+Then the constrain can use any and all of these in any combination. So that the job `Job("my-job", constraints={"ncpus":1, "memgb":200, "ngpus":1}, node_count=2, colacated=True, exclusive=True)` will exclusively reserve 2 nodes which meet the minimum constraints and will create them
 within a single placement group.
 
 ### Demand Result
@@ -93,8 +93,8 @@ ip-0A050010 ip-0A050010             False          unknown         1          ru
 
 ### Scale-down behavior
 
-The only stateful aspect of the _scalelib_ is the built-in tracker of idle nodes. 
-Jobs can be assigned one or more execution hosts. 
+The only stateful aspect of the _scalelib_ is the built-in tracker of idle nodes.
+Jobs can be assigned one or more execution hosts.
 When the demand calculator processes jobs that include a `executing_hostnames` attribute
 the node will be marked as active and the idle timer will be reset.
 
@@ -130,11 +130,11 @@ Once running, the _/root_ directory has all the scripts to operate
 the cluster and activate autoscaling.  Before running the scripts however, you must start a celery worker to add tasks to.
 
 ```bash
-source ./.venv/celery/bin/activate
+source /opt/cycle/scalelib/venv/celery/bin/activate
 celery -A tasks worker -D
 ```
-Once celery is running, the scripts below can be run in any order to add work, 
-scale to meet demand, and check on the status of submitted tasks. 
+Once celery is running, the scripts below can be run in any order to add work,
+scale to meet demand, and check on the status of submitted tasks.
 
 ```bash
 python add_task.py
