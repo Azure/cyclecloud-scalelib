@@ -65,8 +65,8 @@ def auto():
     # Get hosts / tasks
     celery_d = celery_status()
 
-    dcalc = demandcalculator.new_demand_calculator(CONFIG, 
-                    existing_nodes=celery_d.scheduler_nodes, 
+    dcalc = demandcalculator.new_demand_calculator(CONFIG,
+                    existing_nodes=celery_d.scheduler_nodes,
                     node_history=SQLiteNodeHistory())
 
     dcalc.add_jobs(celery_d.jobs)
@@ -74,7 +74,7 @@ def auto():
     n_add_jobs = max(n_jobs + WARM_BUFFER, max(n_jobs, MIN_CORE_COUNT))
     if n_add_jobs > 0:
         # RIGHT-SIZE based on Min Count and Buffer
-        # It's possible that the padded jobs will float around extending the timer 
+        # It's possible that the padded jobs will float around extending the timer
         # but it seems like they're placed in some kind of normal order that's
         # preserved across autoscale runs
         print("add padding of %d jobs, to existing %d" % (n_add_jobs, n_jobs))
@@ -91,9 +91,10 @@ def auto():
     "vcpu_count",
     "state"
     ]
-    
+
     print_demand(output_columns, demand_result)
     dcalc.bootup()
+    dcalc.update_history()
     delete_result = dcalc.find_unmatched_for(at_least=180)
     if delete_result:
         try:
