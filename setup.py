@@ -315,7 +315,7 @@ setup(
         "certifi==2023.7.22",
         "chardet==5.2.0",
     ]
-    + ["urllib3==2.5.0"],  # noqa: W503
+    + ["urllib3==2.7.0"],  # noqa: W503
     tests_require=["pytest==3.2.3"],
     cmdclass={
         "test": PyTest,
