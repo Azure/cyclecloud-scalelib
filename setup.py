@@ -312,7 +312,7 @@ setup(
         "immutabledict==1.0.0",
         "jsonpickle==1.5.2",
         "argcomplete==1.12.2",
-        "certifi==2023.7.22",
+        "certifi==2024.7.4",
         "chardet==5.2.0",
     ]
     + ["urllib3==2.7.0"],  # noqa: W503
