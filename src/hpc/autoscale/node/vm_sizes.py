@@ -89,7 +89,17 @@ __AUX_CACHE = {}
 
 @_initialize
 def get_aux_vm_size_info(location: str, vm_size: str) -> AuxVMSizeInfo:
+    if location not in VM_SIZES:
+        proxied_location = VM_SIZES.get("proxied-locations", {}).get(location)
+        logging.debug("Using proxied-location %s instead of %s to get auxiliary VM Size information for %s",
+                    proxied_location,
+                    location,
+                    vm_size)
+        if proxied_location:
+            location = proxied_location
+
     key = (location, vm_size)
+
     if key not in __AUX_CACHE:
         by_name = VM_SIZES.get(location)
 

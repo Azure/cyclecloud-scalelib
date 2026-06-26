@@ -50,6 +50,7 @@ fi
 
 export PATH=$(python3 -c '
 import os
+
 paths = os.environ["PATH"].split(os.pathsep)
 cc_home = os.getenv("CYCLECLOUD_HOME", "/opt/cycle/jetpack")
 print(os.pathsep.join(

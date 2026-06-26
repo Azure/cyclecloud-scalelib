@@ -49,6 +49,95 @@ The project includes several helpers for contributors to validate, test and form
 
 
 # Resources
+
+## Default Resources
+The cyclecloud-scalelib application matches scheduler resources to azure cloud resources to provide rich autoscaling and cluster configuration tools. We call these `default_resources` because they exist even for nodes that have not been materialized, versus resources that are defined after the node has joined the cluster, and potentially overrides these.
+
+Here is an example for matching PBSPro:
+```json
+{"default_resources": [
+   {
+      "select": {},
+      "name": "ncpus",
+      "value": "node.vcpu_count"
+   },
+   {
+      "select": {},
+      "name": "group_id",
+      "value": "node.placement_group"
+   },
+   {
+      "select": {},
+      "name": "host",
+      "value": "node.hostname"
+   },
+   {
+      "select": {},
+      "name": "mem",
+      "value": "node.memory"
+   },
+   {
+      "select": {},
+      "name": "vm_size",
+      "value": "node.vm_size"
+   },
+   {
+      "select": {},
+      "name": "disk",
+      "value": "size::20g"
+   }]
+}
+```
+
+Note that disk is currently hardcoded to size::20g because of platform limitations to determine how much disk a node will have. In the select statement, we can filter how the resources are applied, i.e. by VM Size or nodearray etc. Here is an example of handling VM Size specific disk size and gpus for a nodearray.
+
+```json
+   {
+      "select": {"node.vm_size": "Standard_F2"},
+      "name": "disk",
+      "value": "size::20g"
+   },
+   {
+      "select": {"node.vm_size": "Standard_H44rs"},
+      "name": "disk",
+      "value": "size::2t"
+   },
+   {
+      "select": {"node.nodearray": "gpuarray"},
+      "name": "ngpus",
+      "value": 8
+   }
+   ```
+
+   **Note that these are applied in order , and once a default value is defined for a matching potential node, other defaults are ignored**. This means that you should always use your most restrictive select filters first.
+
+   In other words, if we want to override the pcpu_count for just one nodearray, doing this will work:
+   ```json
+   {
+    "select": "node.nodearray": "special-nodearray",
+    "name": "ncpus",
+    "value": 42
+   },
+   {"select": {},
+   "name": "ncpus",
+   "value": "node.pcpu_count"
+   }
+   ```
+
+   However, this will ignore the second definition.
+   ```json
+   {"select": {},
+   "name": "ncpus",
+   "value": "node.pcpu_count"
+   },
+   {
+    "select": "node.nodearray": "special-nodearray",
+    "name": "ncpus",
+    "value": 42
+   },
+   ```
+
+
 # Node Properties
 
 | Property | Type | Description |
@@ -320,6 +409,42 @@ region but we ensure that only one of them is valid at a time.
          {"node.location": "eastus"}]
 }
 ```
+
+# Timeouts
+By default we set idle and boot timeouts across all nodes.
+```"idle_timeout": 300,
+   "boot_timeout": 3600
+```
+You can also set these per nodearray.
+```"idle_timeout": {"default": 300, "nodearray1": 600, "nodearray2": 900},
+   "boot_timeout": {"default": 3600, "nodearray1": 7200, "nodearray2": 900},
+```
+
+# Incorrect VM Size Information
+In some regions or subscriptions, CycleCloud cannot get the proper VM Size information for all VM Sizes. Often this results in an incorrect number of GPUs being reported, otherwise all attributes are incorrect. By default, as of 1.0.2, an internal record of all public regions and vm_sizes - `hpc/autoscale/node/vm_sizes.json` - will fallback on a common US region for US Gov/DOD regions. 
+
+At the top of this file, you will find the following
+```json
+{
+  "proxied-locations": {
+    "_comment_": "This is a mapping of locations that are not available in the Azure API, but are proxied to another location.",
+    "usdodcentral": "southcentralus",
+    "usdodeast": "southcentralus",
+    "usdodtexas": "southcentralus",
+    "usgovarizona": "southcentralus",
+    "usgoviowa": "southcentralus",
+    "usgovtexas": "southcentralus",
+    "usgovvirginia": "southcentralus",
+    "usseceast": "southcentralus",
+    "ussecwest": "southcentralus"
+  },
+```
+
+This states that for these locations we should just use the data on hand for southcentralus. A user can modify this however they want after installation, there is no requirement that these map to southcentralus.
+
+_Note_ Please remember that you can also always define a `default_resource` for your gpu resource with an explicit integer. This is the preferred way to deal with this issue, however this can become painful when dealing with many VM Sizes that are simply missing basic information.
+
+Lastly, it should be noted that if the GPUs defined in this file are higher than CycleCloud reports, then this file takes precedence. This is due to the subscription that CycleCloud is using is being told that the VM Size has 0 GPUs in some locked down regions when the GPU count should be higher.
     
 
 # Contributing
