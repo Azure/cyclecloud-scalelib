@@ -130,9 +130,7 @@ def initialize_db(path: str, read_only: bool, uri: bool = False) -> sqlite3.Conn
     if version_result:
         version = version_result[0][0]
     else:
-        conn.execute(
-            "INSERT INTO metadata (version) VALUES ('{}')".format(SQLITE_VERSION)
-        )
+        conn.execute("INSERT INTO metadata (version) VALUES (?)", (SQLITE_VERSION,))
         version = SQLITE_VERSION
 
     if version != SQLITE_VERSION:
@@ -232,7 +230,7 @@ class SQLiteNodeHistory(NodeHistory):
                     )
 
         if rows_by_id:
-            exprs = []
+            params = []
             for row in rows_by_id.values():
                 (
                     node_id,
@@ -244,26 +242,43 @@ class SQLiteNodeHistory(NodeHistory):
                     ignore,
                 ) = row
                 ignore_int = SQL_TRUE if ignore else SQL_FALSE
-                expr = f"('{node_id}', '{instance_id}', '{hostname}', {create_time}, {match_time}, {ready_time}, NULL, {ignore_int})".lower()
-
-                exprs.append(expr)
+                params.append(
+                    (
+                        str(node_id).lower(),
+                        str(instance_id).lower(),
+                        str(hostname).lower(),
+                        create_time,
+                        match_time,
+                        ready_time,
+                        None,
+                        ignore_int,
+                    )
+                )
             block_size = int(os.getenv("SCALELIB_SQLITE_INSERT_BLOCK", "25"))
-            for i in range(0, len(exprs), block_size):
-                sub_exprs = exprs[i : i + block_size]
-                values_expr = ",".join(sub_exprs)
+            if block_size <= 0:
+                raise ValueError("SCALELIB_SQLITE_INSERT_BLOCK must be positive")
+            block_size = min(block_size, self._parameter_limit() // 8)
+            for offset in range(0, len(params), block_size):
+                sub_params = params[offset : offset + block_size]
+                values_expr = ",".join(["(?, ?, ?, ?, ?, ?, ?, ?)"] * len(sub_params))
                 stmt = "INSERT OR REPLACE INTO nodes (node_id, instance_id, hostname, create_time, last_match_time, ready_time, delete_time, ignore) VALUES {}".format(
                     values_expr
                 )
-                self._execute(stmt)
+                self._execute(stmt, [value for row in sub_params for value in row])
 
         if to_delete:
-            to_delete_expr = " OR ".join(
-                ['node_id="{}"'.format(node_id) for node_id in to_delete]
-            )
+            node_ids = list(to_delete)
+            block_size = self._parameter_limit() - 1
             now = self.now()
-            self._execute(
-                "UPDATE nodes set delete_time={} where {}".format(now, to_delete_expr)
-            )
+            for offset in range(0, len(node_ids), block_size):
+                sub_ids = node_ids[offset : offset + block_size]
+                placeholders = ",".join(["?"] * len(sub_ids))
+                self._execute(
+                    "UPDATE nodes set delete_time=? where node_id IN ({})".format(
+                        placeholders
+                    ),
+                    [now] + sub_ids,
+                )
 
         self.retire_records(commit=True)
 
@@ -275,9 +290,8 @@ class SQLiteNodeHistory(NodeHistory):
 
         retire_omega = self.now() - timeout
         cursor = self._execute(
-            """DELETE from nodes where delete_time is not null AND delete_time < {} AND delete_time > 0""".format(
-                retire_omega
-            )
+            """DELETE from nodes where delete_time is not null AND delete_time < ? AND delete_time > 0""",
+            (retire_omega,),
         )
         deleted = list(cursor)
         logging.info(
@@ -291,9 +305,8 @@ class SQLiteNodeHistory(NodeHistory):
         omega = now - for_at_least
         return list(
             self._execute(
-                "SELECT node_id, hostname, last_match_time from nodes where last_match_time < {}".format(
-                    omega
-                )
+                "SELECT node_id, hostname, last_match_time from nodes where last_match_time < ?",
+                (omega,),
             )
         )
 
@@ -303,13 +316,15 @@ class SQLiteNodeHistory(NodeHistory):
 
         return list(
             self._execute(
-                f"SELECT node_id, hostname, create_time as ctime from nodes where ctime < {omega} AND ready_time < create_time"
+                "SELECT node_id, hostname, create_time as ctime from nodes where ctime < ? AND ready_time < create_time",
+                (omega,),
             )
         )
 
     def decorate(self, nodes: typing.List[Node], config: typing.Dict = {}) -> None:
-        for i in range(0, len(nodes), 100):
-            nodes_sublist = nodes[i: i + 100]
+        block_size = min(100, self._parameter_limit())
+        for offset in range(0, len(nodes), block_size):
+            nodes_sublist = nodes[offset : offset + block_size]
             self._decorate(nodes_sublist)
 
     def _decorate(self, nodes: typing.List[Node], config: typing.Dict = {}) -> None:
@@ -317,18 +332,16 @@ class SQLiteNodeHistory(NodeHistory):
             nodes = []
 
         nodes = [n for n in nodes if n.exists]
-        equalities = [
-            " (node_id == '{}') ".format(n.delayed_node_id.node_id) for n in nodes
-        ]
+        node_ids = [node.delayed_node_id.node_id for node in nodes]
 
-        if not equalities:
+        if not node_ids:
             return
 
-        stmt = "select node_id, create_time, last_match_time, ready_time, delete_time from nodes where {}".format(
-            "{}".format(" OR ".join(equalities))
+        stmt = "select node_id, create_time, last_match_time, ready_time, delete_time from nodes where node_id IN ({})".format(
+            ",".join(["?"] * len(node_ids))
         )
 
-        rows = self._execute(stmt)
+        rows = self._execute(stmt, node_ids)
         rows_by_id = partition_single(list(rows), lambda r: r[0])
 
         now = self.now()
@@ -376,7 +389,7 @@ class SQLiteNodeHistory(NodeHistory):
     def find_ignored(self) -> NodeHistoryResult:
         return list(
             self._execute(
-                f"SELECT node_id, hostname, create_time as ctime from nodes where ignore"
+                "SELECT node_id, hostname, create_time as ctime from nodes where ignore"
             )
         )
 
@@ -384,7 +397,8 @@ class SQLiteNodeHistory(NodeHistory):
         for n in nodes:
             if n.delayed_node_id:
                 self._execute(
-                    f"UPDATE nodes SET ignore={SQL_TRUE} WHERE node_id='{n.delayed_node_id.node_id}'"
+                    "UPDATE nodes SET ignore=? WHERE node_id=?",
+                    (SQL_TRUE, n.delayed_node_id.node_id),
                 )
         self.conn.commit()
 
@@ -392,13 +406,22 @@ class SQLiteNodeHistory(NodeHistory):
         for n in nodes:
             if n.delayed_node_id:
                 self._execute(
-                    f"UPDATE nodes SET ignore={SQL_FALSE} WHERE node_id='{n.delayed_node_id.node_id}'"
+                    "UPDATE nodes SET ignore=? WHERE node_id=?",
+                    (SQL_FALSE, n.delayed_node_id.node_id),
                 )
         self.conn.commit()
 
-    def _execute(self, stmt: str) -> sqlite3.Cursor:
+    def _parameter_limit(self) -> int:
+        getlimit = getattr(self.conn, "getlimit", None)
+        if getlimit is not None:
+            return getlimit(getattr(sqlite3, "SQLITE_LIMIT_VARIABLE_NUMBER"))
+        return 999
+
+    def _execute(
+        self, stmt: str, params: typing.Sequence[typing.Any] = ()
+    ) -> sqlite3.Cursor:
         logging.debug(stmt)
-        return self.conn.execute(stmt)
+        return self.conn.execute(stmt, params)
 
     def __repr__(self) -> str:
         return "SQLiteNodeHistory({}, read_only={})".format(self.path, self.read_only)
