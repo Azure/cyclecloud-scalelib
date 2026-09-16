@@ -10,8 +10,8 @@ from argparse import Namespace
 from subprocess import check_call
 from typing import Dict, List, Optional
 
-CYCLECLOUD_SCALELIB_VERSION = "1.0.10"
-CYCLECLOUD_API_VERSION = "8.9.0"
+CYCLECLOUD_SCALELIB_VERSION = "1.0.12"
+CYCLECLOUD_API_VERSION = "8.9.3"
 
 
 def build_swagger() -> str:
@@ -34,6 +34,14 @@ def build_sdist() -> str:
     
     cmd = [sys.executable, "setup.py", "sdist"]
     check_call(cmd)
+    normalized_sdist = "dist/cyclecloud_scalelib-{}.tar.gz".format(
+        CYCLECLOUD_SCALELIB_VERSION
+    )
+    if os.path.exists(normalized_sdist):
+        os.replace(
+            normalized_sdist,
+            "dist/cyclecloud-scalelib-{}.tar.gz".format(CYCLECLOUD_SCALELIB_VERSION),
+        )
     sdists = glob.glob(
         "dist/cyclecloud-scalelib-{}.tar.gz".format(CYCLECLOUD_SCALELIB_VERSION)
     )

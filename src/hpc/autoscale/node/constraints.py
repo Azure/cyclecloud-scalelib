@@ -1135,11 +1135,21 @@ class SharedConsumableConstraint(SharedConstraint):
         self,
         shared_resources: List[SharedConsumableResource],
         amount: Union[int, float],
+        decrement_once: bool = False,
     ) -> None:
         self.shared_resources = shared_resources
         self.amount = amount
+        # When True, this constraint will decrement the shared resource(s) at
+        # most once for the lifetime of this instance, even when do_decrement is
+        # called multiple times (e.g. once per node a multi-node job spans, or
+        # once per packed iteration). This models a resource that is consumed
+        # a single time for the whole job rather than per-node.
+        self.decrement_once = decrement_once
+        self._decremented = False
 
     def satisfied_by_node(self, node: "Node") -> SatisfiedResult:
+        if self.decrement_once and self._decremented:
+            return SatisfiedResult("success", self, node)
         for shared_resource in self.shared_resources:
             if self.amount > shared_resource.current_value:
                 return SatisfiedResult(
@@ -1159,6 +1169,9 @@ class SharedConsumableConstraint(SharedConstraint):
         return SatisfiedResult("success", self, node)
 
     def do_decrement(self, node: "Node") -> bool:
+        if self.decrement_once and self._decremented:
+            return True
+
         for shared_resource in self.shared_resources:
             if self.amount > shared_resource.current_value:
                 return False
@@ -1166,6 +1179,7 @@ class SharedConsumableConstraint(SharedConstraint):
         for shared_resource in self.shared_resources:
             shared_resource.current_value -= self.amount
 
+        self._decremented = True
         return True
 
     def __str__(self) -> str:

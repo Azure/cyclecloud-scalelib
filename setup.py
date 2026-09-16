@@ -12,7 +12,7 @@ from setuptools.command.test import test as TestCommand  # noqa: N812
 
 import inspect
 
-__version__ = "1.0.10"
+__version__ = "1.0.12"
 
 SWAGGER_URL = "https://oss.sonatype.org/content/repositories/releases/io/swagger/swagger-codegen-cli/2.2.1/swagger-codegen-cli-2.2.1.jar"
 SWAGGER_CLI = SWAGGER_URL.split("/")[-1]
@@ -315,7 +315,7 @@ setup(
         "certifi==2023.7.22",
         "chardet==5.2.0",
     ]
-    + ["urllib3==2.5.0"],  # noqa: W503
+    + ["urllib3==2.7.0"],  # noqa: W503
     tests_require=["pytest==9.0.3"],
     cmdclass={
         "test": PyTest,
