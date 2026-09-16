@@ -6,7 +6,6 @@ The cyclecloud-scalelib project provides Python helpers to simplify autoscaler d
 ## Autoscale Example
 
 The primary use-case of this library is to facilitate and standardize scheduler autoscale integrations.
-An example of such an integration with [_Celery_](https://github.com/celery/celery) is included [in this project](example-celery/README.md).
 
 ## Building the project
 
