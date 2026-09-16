@@ -34,6 +34,14 @@ def build_sdist() -> str:
     
     cmd = [sys.executable, "setup.py", "sdist"]
     check_call(cmd)
+    normalized_sdist = "dist/cyclecloud_scalelib-{}.tar.gz".format(
+        CYCLECLOUD_SCALELIB_VERSION
+    )
+    if os.path.exists(normalized_sdist):
+        os.replace(
+            normalized_sdist,
+            "dist/cyclecloud-scalelib-{}.tar.gz".format(CYCLECLOUD_SCALELIB_VERSION),
+        )
     sdists = glob.glob(
         "dist/cyclecloud-scalelib-{}.tar.gz".format(CYCLECLOUD_SCALELIB_VERSION)
     )

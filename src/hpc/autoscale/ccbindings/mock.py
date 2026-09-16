@@ -153,6 +153,7 @@ class MockClusterBinding(ClusterBindingInterface):
 
         bucket_status = NodearrayBucketStatus()
         bucket_status.valid = valid
+        bucket_status.last_capacity_failure = -1.0
         bucket_status.bucket_id = str(uuid.uuid4())
         bucket_status.available_count = available_count
         bucket_status.max_count = max_count
