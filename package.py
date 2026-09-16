@@ -10,8 +10,8 @@ from argparse import Namespace
 from subprocess import check_call
 from typing import Dict, List, Optional
 
-CYCLECLOUD_SCALELIB_VERSION = "1.0.11"
-CYCLECLOUD_API_VERSION = "8.9.0"
+CYCLECLOUD_SCALELIB_VERSION = "1.0.12"
+CYCLECLOUD_API_VERSION = "8.9.3"
 
 
 def build_swagger() -> str:
