@@ -3,10 +3,6 @@
 The cyclecloud-scalelib project provides Python helpers to simplify autoscaler development for any scheduler in Azure using [Azure CycleCloud](https://docs.microsoft.com/en-us/azure/cyclecloud/overview?view=cyclecloud-8) and the [Azure CycleCloud REST API](https://docs.microsoft.com/en-us/azure/cyclecloud/api?view=cyclecloud-8) to orchestrate resource creation in Microsoft Azure.
 
 
-## Autoscale Example
-
-The primary use-case of this library is to facilitate and standardize scheduler autoscale integrations.
-An example of such an integration with [_Celery_](https://github.com/celery/celery) is included [in this project](example-celery/README.md).
 
 ## Building the project
 
