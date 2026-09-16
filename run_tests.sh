@@ -24,4 +24,5 @@ TEST_PYTHON="$PROJECT_ROOT/.testenv/bin/python"
 
 cd "$PROJECT_ROOT"
 export HPC_RUNTIME_CHECKS=${HPC_RUNTIME_CHECKS:-true}
+mkdir -p "$PROJECT_ROOT/build/test-results"
 exec "$TEST_PYTHON" -m pytest -s test --junitxml=build/test-results/pytest.xml -k 'not hypothesis' "$@"
