@@ -1,3 +1,4 @@
+from contextlib import closing
 from hashlib import md5
 from typing import List, Optional
 
@@ -5,7 +6,21 @@ import pytest
 from hpc.autoscale import hpctypes as ht
 from hpc.autoscale.node.delayednodeid import DelayedNodeId
 from hpc.autoscale.node.node import Node
-from hpc.autoscale.node.nodehistory import SQLiteNodeHistory
+from hpc.autoscale.node.nodehistory import SQLITE_VERSION, SQLiteNodeHistory
+
+
+def test_initialization_commits_schema(tmp_path) -> None:
+    path = str(tmp_path / "nodehistory.db")
+    first_history = SQLiteNodeHistory(path)
+    with closing(first_history.conn) as first_connection:
+        assert not first_connection.in_transaction
+        second_history = SQLiteNodeHistory(path)
+        with closing(second_history.conn) as second_connection:
+            assert not second_connection.in_transaction
+            assert second_connection.execute("SELECT version FROM metadata").fetchall() == [
+                (SQLITE_VERSION,)
+            ]
+            assert second_connection.execute("SELECT * FROM nodes").fetchall() == []
 
 
 class EasyNode(Node):

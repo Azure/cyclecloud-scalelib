@@ -155,6 +155,7 @@ def initialize_db(path: str, read_only: bool, uri: bool = False) -> sqlite3.Conn
         if "table nodes already exists" not in e.args:
             raise
 
+    conn.commit()
     return conn
 
 
