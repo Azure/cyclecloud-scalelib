@@ -42,7 +42,9 @@ def _bindings():
     return mock_bindings
 
 
-def test_basic_integration():
+def test_basic_integration(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
     def run_test(scheduler_nodes, jobs, unmatched, matched, new, mock_bindings=None):
         current_frame = inspect.currentframe()
         caller_frame = inspect.getouterframes(current_frame, 2)
