@@ -24,6 +24,16 @@ The instructions below assume that you have copied the cyclecloud-api.tar.gz to 
 
 ## Creating the virtualenv
 
+To build the distributable package using an isolated `.buildenv`:
+
+```bash
+./build.sh --cyclecloud-api /path/to/cyclecloud_api.whl
+```
+
+The script forwards arguments to `package.py` and writes the package to `dist/`.
+Set `PYTHON` to select a Python interpreter; the default is `python3`.
+For a development environment, use the manual setup below.
+
 ```bash
     # If Cyclecloud is installed on the current machine:
     # cp /opt/cycle_server/tools/cyclecloud_api*.whl .
@@ -37,6 +47,19 @@ The instructions below assume that you have copied the cyclecloud-api.tar.gz to 
 ```
 
 ## Testing the project:
+
+Run tests using an isolated `.testenv`:
+
+```bash
+CYCLECLOUD_API=/path/to/cyclecloud_api.whl ./run_tests.sh
+./run_tests.sh -k test_name
+```
+
+The API wheel can also be placed in the project root or `libs/` instead of setting
+`CYCLECLOUD_API`. Both script environments are reused and ignored by Git.
+Additional arguments are passed to pytest. Hypothesis tests are excluded by
+default, matching `setup.py test`; to run them, use
+`HPC_RUNTIME_CHECKS=false ./run_tests.sh -k hypothesis`.
 
 The project includes several helpers for contributors to validate, test and format changes to the code.
 
