@@ -47,18 +47,21 @@ def typecheck_function(
     function: Callable, apitrace: Callable[[Callable], Callable]
 ) -> Callable:
     def typecheck_wrap(*args: Any, **kwargs: Any) -> Any:
-
+        if not RUNTIME_TYPE_CHECKING:
+            # Allow tests to disable this.
+            logging.warning("RUNTIME_TYPE_CHECKING now disabled!")
+            return function(*args, **kwargs)
         from hpc.autoscale.node.node import Node  # noqa
         from hpc.autoscale.node.bucket import NodeBucket  # noqa
+        from hpc.autoscale.hpctypes import Size  # noqa
 
         from hpc.autoscale.job.job import Job  # noqa
 
         # let's not require that this is installed unless
         # they turn on runtime type checking
         from typeguard import typechecked
-
         return typechecked(function)(*args, **kwargs)
-
+            
     return typecheck_wrap
 
 

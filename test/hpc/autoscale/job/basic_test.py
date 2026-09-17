@@ -30,10 +30,12 @@ def bindings():
 def _bindings():
     mock_bindings = MockClusterBinding()
     mock_bindings.add_nodearray(
-        "htc2", {"slots": 2, "customer_htc_flag": True},
+        "htc2",
+        {"slots": 2, "customer_htc_flag": True},
     )
     mock_bindings.add_nodearray(
-        "htc4", {"slots": 4, "customer_htc_flag": True},
+        "htc4",
+        {"slots": 4, "customer_htc_flag": True},
     )
     mock_bindings.add_bucket("htc2", "Standard_F2", 10, 8)
     mock_bindings.add_bucket("htc4", "Standard_F4", 5, 4)
