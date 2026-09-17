@@ -1,0 +1,77 @@
+name: Upload Release Assets
+
+on:
+  push:
+    tags:
+      - '1*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Check release version
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          from package import CYCLECLOUD_API_VERSION, CYCLECLOUD_SCALELIB_VERSION
+
+          if os.environ['GITHUB_REF_NAME'] != CYCLECLOUD_SCALELIB_VERSION:
+              raise SystemExit('Release tag must match CYCLECLOUD_SCALELIB_VERSION')
+          with open(os.environ['GITHUB_ENV'], 'a') as environment:
+              environment.write(f'SCALELIB_VERSION={CYCLECLOUD_SCALELIB_VERSION}\n')
+              environment.write(f'API_VERSION={CYCLECLOUD_API_VERSION}\n')
+              environment.write(f'API_WHEEL=cyclecloud_api-{CYCLECLOUD_API_VERSION}-py2.py3-none-any.whl\n')
+          PY
+      - name: Download CycleCloud API wheel
+        shell: bash
+        env:
+          CYCLECLOUD_DEB_VERSION: 8.9.3-3874
+        run: |
+          work_dir=$(mktemp -d)
+          trap 'rm -rf "$work_dir"' EXIT
+          mkdir -p libs
+          if [[ -n "${CYCLECLOUD_API:-}" ]]; then
+            cp -- "$CYCLECLOUD_API" "libs/$API_WHEEL"
+          else
+            curl --fail --location --silent --show-error \
+              --output "$work_dir/cyclecloud.deb" \
+              "https://packages.microsoft.com/repos/cyclecloud/pool/main/c/cyclecloud8/cyclecloud8_${CYCLECLOUD_DEB_VERSION}_amd64.deb"
+            dpkg-deb --fsys-tarfile "$work_dir/cyclecloud.deb" \
+              | tar --extract --to-stdout --file=- --wildcards --no-anchored "$API_WHEEL" \
+              > "libs/$API_WHEEL"
+          fi
+          python3 - <<'PY'
+          import os
+          import zipfile
+          from email.parser import BytesParser
+
+          with zipfile.ZipFile('libs/' + os.environ['API_WHEEL']) as wheel:
+              metadata_files = [name for name in wheel.namelist() if name.endswith('.dist-info/METADATA')]
+              if len(metadata_files) != 1:
+                  raise SystemExit('Expected one API wheel metadata file')
+              metadata = BytesParser().parsebytes(wheel.read(metadata_files[0]))
+              if metadata['Name'] not in ('cyclecloud-api', 'cyclecloud_api') or metadata['Version'] != os.environ['API_VERSION']:
+                  raise SystemExit('API wheel metadata does not match the required version')
+          PY
+      - name: Build package
+        shell: bash
+        run: |
+          python3 -m venv .buildenv
+          source .buildenv/bin/activate
+          python -m pip install --upgrade pip 'setuptools<72' wheel
+          python package.py --cyclecloud-api "libs/$API_WHEEL"
+      - name: Create release with package and API wheel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/cyclecloud-scalelib-pkg-${SCALELIB_VERSION}.tar.gz" \
+            "libs/$API_WHEEL" \
+            --verify-tag --title "Release $GITHUB_REF_NAME" --generate-notes --prerelease

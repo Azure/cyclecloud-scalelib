@@ -24,15 +24,33 @@ The instructions below assume that you have copied the cyclecloud-api.tar.gz to 
 
 ## Creating the virtualenv
 
-To build the distributable package using an isolated `.buildenv`:
+To build the release assets locally in Docker without creating a GitHub release
+or uploading anything:
+
+```bash
+./build.sh
+```
+
+Docker must be running. The script uses an Ubuntu 24.04 container to execute the
+release workflow's preparation and build steps, downloading the required API
+wheel automatically. The package archive and standalone API wheel are written
+to `dist/`. Source files are copied into the container; host build environments
+and existing artifacts are not used. No GitHub credentials are needed.
+
+To supply a local API wheel instead (its version must match the required API):
 
 ```bash
 ./build.sh --cyclecloud-api /path/to/cyclecloud_api.whl
 ```
 
-The script forwards arguments to `package.py` and writes the package to `dist/`.
-Set `PYTHON` to select a Python interpreter; the default is `python3`.
 For a development environment, use the manual setup below.
+
+Pushing a `1*` tag matching `CYCLECLOUD_SCALELIB_VERSION` in `package.py` runs
+the GitHub release workflow and creates a prerelease containing the scalelib
+package archive and the required `cyclecloud_api` wheel as separate assets.
+The workflow extracts the wheel from Microsoft's CycleCloud DEB and verifies
+its metadata before building. When updating `CYCLECLOUD_API_VERSION`, also
+update `CYCLECLOUD_DEB_VERSION` in `.github/workflows/release.yml`.
 
 ```bash
     # If Cyclecloud is installed on the current machine:
@@ -56,7 +74,7 @@ CYCLECLOUD_API=/path/to/cyclecloud_api.whl ./run_tests.sh
 ```
 
 The API wheel can also be placed in the project root or `libs/` instead of setting
-`CYCLECLOUD_API`. Both script environments are reused and ignored by Git.
+`CYCLECLOUD_API`. The test environment is reused and ignored by Git.
 Additional arguments are passed to pytest. Hypothesis tests are excluded by
 default, matching `setup.py test`; to run them, use
 `HPC_RUNTIME_CHECKS=false ./run_tests.sh -k hypothesis`.
