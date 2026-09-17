@@ -4,6 +4,10 @@ The cyclecloud-scalelib project provides Python helpers to simplify autoscaler d
 
 
 
+### Initial Configuration Credentials
+
+The common `initconfig` CLI reads environment variable `SCALELIB_PASSWORD` when `--password` is omitted, and is the recommended use for automation as `cmdline` is readable by non-owner users.
+
 ## Building the project
 
 The cyclecloud-scalelib project is generally used in a Python 3 virtualenv and has several standard python dependencies, but it also depends on the [Azure CycleCloud Python Client Library](https://docs.microsoft.com/en-us/azure/cyclecloud/python-api?view=cyclecloud-8).

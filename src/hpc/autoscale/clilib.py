@@ -1414,7 +1414,7 @@ class CommonCLI(ABC):
     def initconfig_parser(self, parser: ArgumentParser) -> None:
         parser.add_argument("--cluster-name", required=True)
         parser.add_argument("--username", required=True)
-        parser.add_argument("--password")
+        parser.add_argument("--password", default=os.environ.get("SCALELIB_PASSWORD"))
         parser.add_argument("--url", required=True)
         default_home = self.autoscale_home
 
