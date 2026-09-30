@@ -338,3 +338,41 @@ def test_shared_constraint() -> None:
     assert not qcons.do_decrement(node)
     assert global_qres.current_value == 70
     assert queue_qres.current_value == 20
+
+
+def test_shared_constraint_decrement_once() -> None:
+    # decrement_once=True: a single constraint instance consumes the shared
+    # resource at most once, no matter how many times do_decrement is called
+    # (e.g. once per node a multi-node job spans).
+    qres = SharedConsumableResource("qres", "queue", 100, 100)
+    cons = SharedConsumableConstraint([qres], 40, decrement_once=True)
+    node = SchedulerNode("tux", {})
+
+    assert cons.satisfied_by_node(node)
+    assert cons.do_decrement(node)
+    assert qres.current_value == 60
+
+    # subsequent calls on the same instance are no-ops and the value stays put
+    assert cons.satisfied_by_node(node)
+    assert cons.do_decrement(node)
+    assert qres.current_value == 60
+
+    assert cons.do_decrement(node)
+    assert qres.current_value == 60
+
+    # a fresh instance (e.g. a different job) decrements the shared value again
+    cons2 = SharedConsumableConstraint([qres], 40, decrement_once=True)
+    assert cons2.satisfied_by_node(node)
+    assert cons2.do_decrement(node)
+    assert qres.current_value == 20
+
+    # and it too only decrements once
+    assert cons2.do_decrement(node)
+    assert qres.current_value == 20
+
+    # default behavior (decrement_once=False) is unchanged: decrements every call
+    counting = SharedConsumableResource("qres", "queue", 100, 100)
+    cons3 = SharedConsumableConstraint([counting], 10)
+    assert cons3.do_decrement(node)
+    assert cons3.do_decrement(node)
+    assert counting.current_value == 80

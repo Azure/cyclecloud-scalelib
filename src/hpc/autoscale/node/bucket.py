@@ -33,6 +33,7 @@ class NodeDefinition:
         spot: bool,
         subnet: ht.SubnetId,
         vcpu_count: int,
+        gpu_count: int,
         memory: ht.Memory,
         placement_group: Optional[ht.PlacementGroup],
         resources: ht.ResourceDict,
@@ -52,6 +53,8 @@ class NodeDefinition:
         self.subnet = subnet
         assert vcpu_count is not None
         self.vcpu_count = vcpu_count
+        assert gpu_count is not None
+        self.gpu_count = gpu_count
         assert memory is not None
         assert isinstance(memory, ht.Memory), "expected Memory, got {}".format(
             type(memory)
@@ -88,6 +91,10 @@ class NodeBucket:
         max_placement_group_size: int,
         nodes: List["Node"],
         artificial: bool = False,
+        priority: int = 0,
+        last_capacity_failure: float = -1.0,
+        valid: bool = True,
+        spot_placement_score: Optional[str] = None,
     ) -> None:
         # example node to be used to see if your job would match this
         self.__definition = definition
@@ -95,12 +102,15 @@ class NodeBucket:
         assert limits
         self.limits = limits
         self.max_placement_group_size = max_placement_group_size
-        self.priority = 0
+        self.priority = priority
+        self.__last_capacity_failure = last_capacity_failure
+        self.__spot_placement_score = spot_placement_score
         # list of nodes cyclecloud currently says are in this bucket
         self.nodes = nodes
         self.__decrement_counter = 0
         example_node_name = ht.NodeName("{}-0".format(definition.nodearray))
         self._artificial = artificial
+        self._valid = valid
 
         # TODO infiniband
         from hpc.autoscale.node.node import Node
@@ -117,6 +127,7 @@ class NodeBucket:
             location=self.location,
             spot=definition.spot,
             vcpu_count=self.vcpu_count,
+            gpu_count=definition.gpu_count,
             memory=self.memory,
             infiniband=False,
             state=ht.NodeStatus("Off"),
@@ -136,7 +147,6 @@ class NodeBucket:
         ), "Requested too many nodes: %s > %s" % (count, self.available_count)
         assert self.family_available_count >= 0
         self.__decrement_counter += count
-        # self.limits.decrement(self.vcpu_count, count)
 
     def increment(self, count: int = 1) -> None:
         return self.decrement(-count)
@@ -150,12 +160,18 @@ class NodeBucket:
         self.__decrement_counter = 0
 
     @property
+    def max_count(self) -> int:
+        if self.placement_group:
+            self.max_placement_group_size
+        return self.limits.max_count
+
+    @property
     def available_count(self) -> int:
         # non-pg buckets return -1
         pg_available = self.limits.placement_group_available_count
 
         if pg_available < 0:
-            pg_available = 2 ** 32
+            pg_available = 2**32
 
         return (
             min(
@@ -249,8 +265,23 @@ class NodeBucket:
     @property
     def supports_colocation(self) -> bool:
         return self.software_configuration.get("autoscale", {}).get("is_hpc", True)
+    
+    @property
+    def valid(self) -> bool:
+        return self._valid
+
+    @property
+    def last_capacity_failure(self) -> Optional[float]:
+        if self.__last_capacity_failure < 0:
+            return None
+        return self.__last_capacity_failure
+
+    @property
+    def spot_placement_score(self) -> Optional[str]:
+        return self.__spot_placement_score
 
     def add_nodes(self, nodes: List["Node"]) -> None:
+        assert self.valid
         new_by_id = partition(nodes, lambda n: n.delayed_node_id.transient_id)
         cur_by_id = partition(self.nodes, lambda n: n.delayed_node_id.transient_id)
 
@@ -267,6 +298,7 @@ class NodeBucket:
                 self.nodes.append(new_nodes[0])
 
     def clone_with_placement_group(self, pg_name: PlacementGroup) -> "NodeBucket":
+        assert self.valid
         if self.placement_group:
             # This will help us avoid available_count issues with existing pg limits
             # when no placement group is defined, the pg limit will be None so
@@ -309,6 +341,10 @@ class NodeBucket:
             self.max_placement_group_size,
             nodes=[],
             artificial=False,
+            priority=self.priority,
+            last_capacity_failure=self.__last_capacity_failure,
+            valid=True,
+            spot_placement_score=self.__spot_placement_score,
         )
 
     def __str__(self) -> str:
@@ -325,10 +361,15 @@ class NodeBucket:
 
 
 def bucket_candidates(
-    candidates: List["NodeBucket"], constraints: List["constraintslib.NodeConstraint"],
+    candidates: List["NodeBucket"],
+    constraints: List["constraintslib.NodeConstraint"],
 ) -> CandidatesResult:
+    candidates = [c for c in candidates if c.valid]
     if not candidates:
-        return CandidatesResult("NoBucketsDefined", child_results=[],)
+        return CandidatesResult(
+            "NoBucketsDefined",
+            child_results=[],
+        )
 
     for c in candidates:
         assert isinstance(c, NodeBucket)

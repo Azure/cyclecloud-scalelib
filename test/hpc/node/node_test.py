@@ -57,6 +57,11 @@ def test_custom_node_attrs_and_node_config() -> None:
     assert node.software_configuration.get("test_thing") is None
     node.node_attribute_overrides["Configuration"] = {"test_thing": "is set"}
     assert node.software_configuration.get("test_thing") == "is set"
+    try:
+        node.software_configuration["willfail"] = 123
+        assert not node.software_configuration.get("willfail")
+    except TypeError:
+        pass
 
     # we won't handle dict merges here.
     assert node.software_configuration.get("myscheduler") == {"A": 1}

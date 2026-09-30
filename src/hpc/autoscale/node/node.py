@@ -108,9 +108,14 @@ class Node(ABC):
         self.__create_time = self.__last_match_time = self.__delete_time = 0.0
         self.__create_time_remaining = self.__idle_time_remaining = 0.0
         self.__keep_alive = keep_alive
-        self.__gpu_count = (
-            gpu_count if gpu_count is not None else self.__aux_vm_info.gpu_count
-        )
+        gpu_count = gpu_count if gpu_count is not None else 0
+        # only use the aux info if cyclecloud provided 0 gpus. We used to use a max() here
+        # but that prevented cyclecloud from fixing the raw data from azure, so we were overwriting
+        # the corrected data with data from the same source -rdh
+        self.__gpu_count = gpu_count if gpu_count > 0 else self.__aux_vm_info.gpu_count
+        
+        self.name_format: Optional[str] = None  # f"{self.nodearray}-%s"
+        self.name_offset: Optional[int] = None
 
     @property
     def required(self) -> bool:
@@ -161,13 +166,18 @@ class Node(ABC):
 
     @nodeproperty
     def hostname(self) -> Optional[ht.Hostname]:
-        """Hostname for this node. May be `None` if the node has not been given one yet"""
+        if not self.__hostname:
+            return self.__hostname
+        return ht.Hostname(self.__hostname.split(".")[0])
+
+    @nodeproperty
+    def fqdn(self) -> Optional[ht.Hostname]:
         return self.__hostname
 
     @nodeproperty
     def hostname_or_uuid(self) -> Optional[ht.Hostname]:
         """Hostname or a UUID. Useful when partitioning a mixture of real and potential nodes by hostname"""
-        return ht.Hostname(self.__hostname or self.delayed_node_id.transient_id)
+        return ht.Hostname(self.hostname or self.delayed_node_id.transient_id)
 
     @property
     def hostname_required(self) -> ht.Hostname:
@@ -196,6 +206,8 @@ class Node(ABC):
     @nodeproperty
     def vcpu_count(self) -> int:
         """Virtual CPU Count"""
+        if self.__vcpu_count < 0:
+            return self.__aux_vm_info.pcpu_count
         return self.__vcpu_count
 
     @nodeproperty
@@ -270,7 +282,7 @@ class Node(ABC):
         self, value: Optional[ht.PlacementGroup]
     ) -> Optional[ht.PlacementGroup]:
         if value:
-            value = ht.PlacementGroup(re.sub("[^a-zA-z0-9-_]", "_", value))
+            value = ht.PlacementGroup(re.sub("[^a-zA-Z0-9-_]", "_", value))
         self.placement_group = value
         return self.placement_group
 
@@ -321,6 +333,8 @@ class Node(ABC):
     @nodeproperty
     def pcpu_count(self) -> int:
         """Physical CPU count"""
+        if self.__aux_vm_info.pcpu_count < 0:
+            return self.__vcpu_count
         return self.__aux_vm_info.pcpu_count
 
     @nodeproperty
@@ -487,7 +501,11 @@ class Node(ABC):
         """
 
         if self.closed:
-            return MatchResult("NodeClosed", node=self, slots=iterations,)
+            return MatchResult(
+                "NodeClosed",
+                node=self,
+                slots=iterations,
+            )
 
         assignment_id = assignment_id or str(uuid4())
 
@@ -504,7 +522,10 @@ class Node(ABC):
         if is_unsatisfied:
             # TODO log why things are rejected at fine detail
             return MatchResult(
-                "NodeRejected", node=self, slots=iterations, reasons=reasons,
+                "NodeRejected",
+                node=self,
+                slots=iterations,
+                reasons=reasons,
             )
 
         min_space = minimum_space(constraints, self)
@@ -522,7 +543,10 @@ class Node(ABC):
                 assert constraint.do_decrement(
                     self
                 ), "calculated minimum space of {} but failed at index {} {} {}".format(
-                    to_pack, i, constraint, constraint.satisfied_by_node(self),
+                    to_pack,
+                    i,
+                    constraint,
+                    constraint.satisfied_by_node(self),
                 )
 
         self._allocated = True
