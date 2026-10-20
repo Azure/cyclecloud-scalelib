@@ -1,7 +1,7 @@
 import functools
 import re
 from copy import deepcopy
-from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, TypeVar, Union
 
 from cyclecloud.model.ClusterStatusModule import ClusterStatus
 from cyclecloud.model.NodearrayBucketStatusModule import NodearrayBucketStatus
@@ -61,6 +61,17 @@ ResourceModifier = Literal["add", "subtract", "multiply", "divide", "divide_floo
 
 
 T = TypeVar("T")
+
+
+class _RegionalQuotaKey(NamedTuple):
+    account_name: Optional[str]
+    region: str
+
+
+class _FamilyQuotaKey(NamedTuple):
+    account_name: Optional[str]
+    region: str
+    vm_family: str
 
 
 @hpcwrapclass
@@ -1373,9 +1384,9 @@ def _new_node_manager_79(
     cc_nodes_by_template = partition(nodes_list.nodes, lambda n: n["Template"])
 
     nodearray_limits: Dict[str, _SharedLimit] = {}
-    regional_limits: Dict[str, _SharedLimit] = {}
-    regional_spot_limits: Dict[str, _SharedLimit] = {}
-    family_limits: Dict[str, _SharedLimit] = {}
+    regional_limits: Dict[_RegionalQuotaKey, _SharedLimit] = {}
+    regional_spot_limits: Dict[_RegionalQuotaKey, _SharedLimit] = {}
+    family_limits: Dict[_FamilyQuotaKey, _SharedLimit] = {}
 
     default_priority = 1
 
@@ -1399,6 +1410,8 @@ def _new_node_manager_79(
             continue
 
         region = nodearray["Region"]
+        account_name = nodearray.get("AccountName")
+        regional_key = _RegionalQuotaKey(account_name=account_name, region=region)
 
         custom_resources = deepcopy(
             ht.ResourceDict(
@@ -1452,15 +1465,18 @@ def _new_node_manager_79(
             else:
                 target_regional_limits = regional_limits
 
-            if region not in target_regional_limits:
-                target_regional_limits[region] = _SharedLimit(
+            if regional_key not in target_regional_limits:
+                target_regional_limits[regional_key] = _SharedLimit(
                     "Region({})".format(region),
                     bucket.regional_consumed_core_count,
                     bucket.regional_quota_core_count,
                 )
 
-            if vm_family not in family_limits and not spot:
-                family_limits[vm_family] = _SharedLimit(
+            family_key = _FamilyQuotaKey(
+                account_name=account_name, region=region, vm_family=vm_family
+            )
+            if family_key not in family_limits and not spot:
+                family_limits[family_key] = _SharedLimit(
                     "VM Family({})".format(vm_family),
                     bucket.family_consumed_core_count,
                     bucket.family_quota_core_count,
@@ -1537,10 +1553,10 @@ def _new_node_manager_79(
                     # as the regional limit is supposed to be used in its place,
                     # however that responsibility is on the caller and not the
                     # REST api. For this library we handle that for them.
-                    family_limit = _SpotLimit(target_regional_limits[region])
+                    family_limit = _SpotLimit(target_regional_limits[regional_key])
                 else:
                     family_limit: Union[_SpotLimit, _SharedLimit] = family_limits[
-                        vm_family
+                        family_key
                     ]
 
                 na_limit = nodearray_limits[nodearray_name]
@@ -1554,7 +1570,7 @@ def _new_node_manager_79(
                 avail_core_count_with_na = min(na_limit._available_count(1), bucket.available_core_count)
                 bucket_limit = BucketLimits(
                     vcpu_count,
-                    target_regional_limits[region],
+                    target_regional_limits[regional_key],
                     cluster_limit,
                     na_limit,
                     family_limit,
