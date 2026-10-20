@@ -78,6 +78,7 @@ class MockClusterBinding(ClusterBindingInterface):
         spot: bool = False,
         software_configuration: Dict = {},
         max_placement_group_size: int = 100,
+        account_name: str = "mock-account",
     ) -> ClusterNodearrayStatus:
         nodearray_status = ClusterNodearrayStatus()
         nodearray_status.buckets = []
@@ -86,6 +87,7 @@ class MockClusterBinding(ClusterBindingInterface):
         nodearray_status.max_count = max_count
         nodearray_status.nodearray = {
             "Name": name,
+            "AccountName": account_name,
             "Status": self.state,
             "Region": location,
             "SubnetId": self.subnet_id,

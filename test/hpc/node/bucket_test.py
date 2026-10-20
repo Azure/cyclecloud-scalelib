@@ -8,6 +8,7 @@ def test_basic() -> None:
     binding.add_bucket("hpc", "Standard_F4", max_count=100, available_count=100)
     node_mgr = new_node_manager({"_mock_bindings": binding})
     bucket = node_mgr.get_buckets()[0]
+    assert bucket.account_name == "mock-account"
 
     assert 100 == bucket.available_count
     bucket.decrement(5)
