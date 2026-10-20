@@ -64,12 +64,12 @@ T = TypeVar("T")
 
 
 class _RegionalQuotaKey(NamedTuple):
-    account_name: Optional[str]
+    account_name: str
     region: str
 
 
 class _FamilyQuotaKey(NamedTuple):
-    account_name: Optional[str]
+    account_name: str
     region: str
     vm_family: str
 
@@ -649,6 +649,7 @@ class NodeManager:
             # unique set of unmanaged nodes
             node_def = NodeDefinition(
                 nodearray=ht.NodeArrayName("__unmanaged__"),
+                account_name="unknown",
                 bucket_id=ht.BucketId(bucket_id),
                 vm_size=ht.VMSize("unknown"),
                 location=ht.Location("unknown"),
@@ -848,28 +849,63 @@ class NodeManager:
         ), "We need at least one bucket defined to get cluster limits"
         return self.get_buckets()[0].limits.cluster_consumed_core_count
 
-    def get_regional_max_core_count(self, location: Optional[str] = None) -> int:
-        for bucket in self.get_buckets():
-            if bucket.location == location:
-                return self.get_buckets()[0].limits.regional_quota_core_count
-        raise RuntimeError(
-            "No bucket found in location {} so we do not have the regional limits.".format(
-                location
-            )
-        )
+    def get_regional_max_core_count(
+        self,
+        location: Optional[str] = None,
+        account_name: Optional[str] = None,
+        spot: Optional[bool] = None,
+    ) -> int:
+        """Return quota for one scope; omitted selectors must be unambiguous."""
+        bucket = self._get_regional_bucket(location, account_name, spot)
+        return bucket.limits.regional_quota_core_count
 
     def get_locations(self) -> List[ht.Location]:
         return list(partition(self.get_buckets(), lambda b: b.location).keys())
 
-    def get_regional_consumed_core_count(self, location: Optional[str] = None) -> int:
-        for bucket in self.get_buckets():
-            if bucket.location == location:
-                return self.get_buckets()[0].limits.regional_consumed_core_count
-        raise RuntimeError(
-            "No bucket found in location {} so we do not have the regional limits.".format(
-                location
-            )
+    def get_regional_consumed_core_count(
+        self,
+        location: Optional[str] = None,
+        account_name: Optional[str] = None,
+        spot: Optional[bool] = None,
+    ) -> int:
+        """Return usage for one scope; omitted selectors must be unambiguous."""
+        bucket = self._get_regional_bucket(location, account_name, spot)
+        return bucket.limits.regional_consumed_core_count
+
+    def _get_regional_bucket(
+        self,
+        location: Optional[str],
+        account_name: Optional[str],
+        spot: Optional[bool],
+    ) -> NodeBucket:
+        matches = [
+            bucket
+            for bucket in self.get_buckets()
+            if (location is None or bucket.location == location)
+            and (account_name is None or bucket.account_name == account_name)
+            and (spot is None or bucket.spot == spot)
+        ]
+        selection = "location={}, account_name={}, spot={}".format(
+            location, account_name, spot
         )
+        if not matches:
+            raise RuntimeError(
+                "No bucket found for regional quota lookup: {}".format(selection)
+            )
+        first = matches[0]
+        if any(
+            bucket.location != first.location
+            or bucket.account_name != first.account_name
+            or bucket.spot != first.spot
+            for bucket in matches[1:]
+        ):
+            raise RuntimeError(
+                "Ambiguous regional quota lookup: {}. "
+                "Specify location, account_name and spot to select one quota scope.".format(
+                    selection
+                )
+            )
+        return first
 
     @apitrace
     def add_default_resource(
@@ -1410,7 +1446,13 @@ def _new_node_manager_79(
             continue
 
         region = nodearray["Region"]
-        account_name = nodearray.get("AccountName")
+        account_name = nodearray["AccountName"]
+        if not isinstance(account_name, str) or not account_name:
+            raise ValueError(
+                "Nodearray {} requires a nonempty AccountName string.".format(
+                    nodearray_name
+                )
+            )
         regional_key = _RegionalQuotaKey(account_name=account_name, region=region)
 
         custom_resources = deepcopy(
@@ -1599,6 +1641,7 @@ def _new_node_manager_79(
 
                 node_def = NodeDefinition(
                     nodearray=nodearray_name,
+                    account_name=account_name,
                     bucket_id=bucket_id,
                     vm_size=vm_size,
                     location=location,

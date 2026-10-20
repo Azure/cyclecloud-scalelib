@@ -38,6 +38,7 @@ class NodeDefinition:
         placement_group: Optional[ht.PlacementGroup],
         resources: ht.ResourceDict,
         software_configuration: ImmutableOrderedDict,
+        account_name: str,
     ) -> None:
         assert nodearray is not None
         self.nodearray = nodearray
@@ -65,6 +66,8 @@ class NodeDefinition:
         self.resources = deepcopy(resources)
         assert software_configuration is not None
         self.software_configuration = software_configuration
+        assert account_name is not None
+        self.account_name = account_name
 
     def __str__(self) -> str:
         attr_exprs: List[str] = []
@@ -197,6 +200,10 @@ class NodeBucket:
     @property
     def location(self) -> ht.Location:
         return self.__definition.location
+
+    @property
+    def account_name(self) -> str:
+        return self.__definition.account_name
 
     @property
     def spot(self) -> bool:
