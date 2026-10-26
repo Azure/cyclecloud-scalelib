@@ -222,7 +222,11 @@ class azurecost:
                 sku_list.append((e[sku],e[region]))
         return sku_list
 
-    def get_usage(self, start: str, end: str, granularity: str, verify: bool = False) -> dict:
+    def get_usage(
+        self, start: str, end: str, granularity: str, verify: Optional[bool] = None
+    ) -> dict:
+        if verify is None:
+            verify = self.config.get("verify_certificates", False)
 
         clustername = self.config['cluster_name']
         endpoint = f"{self.config['url']}/clusters/{clustername}/usage?expand=details"
