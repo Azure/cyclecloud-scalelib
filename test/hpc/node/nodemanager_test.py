@@ -812,6 +812,7 @@ def test_unmanaged_nodes(node_mgr: NodeManager) -> None:
     tux = SchedulerNode("tux", bucket_id=ht.BucketId("tuxid"))
     node_mgr.add_unmanaged_nodes([tux])
     assert len(node_mgr.get_buckets()) == 3
+    assert node_mgr.get_buckets_by_id()[tux.bucket_id].account_name == "unknown"
     assert node_mgr.get_buckets_by_id()[tux.bucket_id].nodes == [tux]
 
     tux2 = SchedulerNode("tux2", bucket_id=tux.bucket_id)
