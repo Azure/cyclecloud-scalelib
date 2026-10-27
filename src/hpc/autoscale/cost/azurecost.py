@@ -202,7 +202,7 @@ class azurecost:
                 continue
             return e
 
-    def get_info_from_retail(self, meterId: str)-> list:
+    def get_info_from_retail(self, meterId: str) -> list:
 
         sku = 'armSkuName'
         region = 'armRegionName'
@@ -222,7 +222,11 @@ class azurecost:
                 sku_list.append((e[sku],e[region]))
         return sku_list
 
-    def get_usage(self, start: str, end: str, granularity: str)-> dict:
+    def get_usage(
+        self, start: str, end: str, granularity: str, verify: Optional[bool] = None
+    ) -> dict:
+        if verify is None:
+            verify = self.config.get("verify_certificates", False)
 
         clustername = self.config['cluster_name']
         endpoint = f"{self.config['url']}/clusters/{clustername}/usage?expand=details"
@@ -235,7 +239,7 @@ class azurecost:
         pw = self.config['password']
 
         urllib3.disable_warnings(InsecureRequestWarning)
-        res = requests.get(url=endpoint, params=params, auth=(uname,pw), verify=False) # CodeQL [SM03157] both endpoints are under user control and users may choose a self-signed certificate
+        res = requests.get(url=endpoint, params=params, auth=(uname,pw), verify=verify)  # CodeQL [SM03157] both endpoints are under user control and users may choose a self-signed certificate
         if res.status_code != 200:
             log.error(res.reason)
             res.raise_for_status()

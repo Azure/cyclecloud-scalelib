@@ -306,7 +306,7 @@ setup(
     package_dir={"": "src", "conf": "conf"},
     include_package_data=True,
     install_requires=[
-        "requests == 2.32.5",
+        "requests == 2.33.0",
         "requests-cache == 0.7.5",
         "typing_extensions==3.7.4.3",
         "immutabledict==1.0.0",
@@ -315,7 +315,7 @@ setup(
         "certifi==2023.7.22",
         "chardet==5.2.0",
     ]
-    + ["urllib3==2.7.0"],  # noqa: W503
+    + ["urllib3==2.8.0"],  # noqa: W503
     tests_require=["pytest==3.2.3"],
     cmdclass={
         "test": PyTest,
