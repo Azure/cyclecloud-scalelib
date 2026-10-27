@@ -19,3 +19,7 @@ build
 **/*.db
 .env
 .myenv
+.testenv/
+.buildenv/
+.tools
+clusters

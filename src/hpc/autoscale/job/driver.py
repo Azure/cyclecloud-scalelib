@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 from hpc.autoscale import hpclogging as logging
 from hpc.autoscale import hpctypes as ht
+from hpc.autoscale import util as hpcutil
 from hpc.autoscale.job.job import Job
 from hpc.autoscale.job.nodequeue import NodeQueue
 from hpc.autoscale.job.schedulernode import SchedulerNode
@@ -23,12 +24,13 @@ class SchedulerDriver(ABC):
         self.name = name
         self.__jobs_cache: Optional[List[Job]] = None
         self.__scheduler_nodes_cache: Optional[List[SchedulerNode]] = None
+        self.__node_history: Optional[NodeHistory] = None
 
     @property
     def autoscale_home(self) -> str:
         if os.getenv("AUTOSCALE_HOME"):
             return os.environ["AUTOSCALE_HOME"]
-        return os.path.join("/opt", "cycle", self.name)
+        return os.path.join("/opt", "azurehpc", self.name)
 
     @abstractmethod
     def initialize(self) -> None:
@@ -49,6 +51,14 @@ class SchedulerDriver(ABC):
         add_ccnodeid_default_resource(node_mgr)
         add_default_placement_groups(config, node_mgr)
 
+    def validate_nodes(
+        self, scheduler_nodes: List[SchedulerNode], cc_nodes: List[Node]
+    ) -> None:
+        """Before any demand calculations are done, validate gives a chance
+        to validate / preprocess nodes.
+        """
+        ...
+
     @abstractmethod
     def handle_failed_nodes(self, nodes: List[Node]) -> List[Node]:
         """
@@ -57,7 +67,9 @@ class SchedulerDriver(ABC):
         ...
 
     @abstractmethod
-    def add_nodes_to_cluster(self, nodes: List[Node]) -> List[Node]:
+    def add_nodes_to_cluster(
+        self, nodes: List[Node], include_permanent: bool = False
+    ) -> List[Node]:
         """
         These nodes are ready to join. They MAY already be a part of the cluster,
         so this should be monotonic - you can call it multiple times without issue.
@@ -113,24 +125,23 @@ class SchedulerDriver(ABC):
 
         lock_path = config.get("lock_file", default_path)
 
-        if lock_path:
+        if lock_path and not config.get("read_only", False):
             # TODO RDH check file perms
             return SingletonFileLock(lock_path)
 
         return NullSingletonLock()
 
     def new_node_history(self, config: Dict) -> NodeHistory:
+        if self.__node_history:
+            return self.__node_history
         db_path = config.get("nodehistorydb")
         if not db_path:
             db_path = os.path.join(self.autoscale_home, "nodehistory.db")
 
         read_only = config.get("read_only", False)
-        node_history = SQLiteNodeHistory(db_path, read_only)
+        self.__node_history = SQLiteNodeHistory(db_path, read_only)
 
-        node_history.create_timeout = config.get("boot_timeout", 3600)
-        node_history.last_match_timeout = config.get("idle_timeout", 300)
-
-        return node_history
+        return self.__node_history
 
     def read_jobs_and_nodes(
         self, config: Dict, force: bool = False
@@ -192,6 +203,13 @@ def add_default_placement_groups(config: Dict, node_mgr: NodeManager) -> None:
         buf_size = int(
             nas.get(nodearray, {}).get("generated_placement_group_buffer", 2)
         )
+        max_placement_groups = int(
+            nas.get(nodearray, {}).get("max_placement_groups", 10000)
+        )
+
+        node_mgr.add_placement_group
+        existing_pgs = len(node_mgr.get_placement_groups(bucket))
+        buf_size = min(max_placement_groups - existing_pgs, buf_size)
         buf_remaining = buf_size
         pgi = 0
         while buf_remaining > 0:
@@ -212,4 +230,6 @@ def add_ccnodeid_default_resource(node_mgr: NodeManager) -> None:
     def get_node_id(n: Node) -> Optional[str]:
         return n.delayed_node_id.node_id
 
-    node_mgr.add_default_resource({}, "ccnodeid", get_node_id)
+    resource_name = "ccnodeid"
+
+    node_mgr.add_default_resource({}, resource_name, get_node_id)

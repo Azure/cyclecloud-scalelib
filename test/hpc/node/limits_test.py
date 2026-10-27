@@ -97,7 +97,7 @@ def test_family_and_spots() -> None:
     # spot instances replace family with regional
     assert htcspot.limits.family_max_count == 25
     assert htcspot.limits.family_available_count == 13
-
+    
     assert node_mgr.allocate(
         {"node.nodearray": "htc", "node.vm_size": "Standard_F4s"}, node_count=1
     )
@@ -112,9 +112,10 @@ def test_family_and_spots() -> None:
     # nodearray limit affects htc2 since max_count=10
     assert htc2.available_count == 9
 
-    # now the regional is affected by our allocation
+    # spot instances replace family with regional
     assert htcspot.limits.family_max_count == 25
-    assert htcspot.limits.family_available_count == 13 - 1
+    # note: unaffected because it is a _spot_ not VM family limit.
+    assert htcspot.limits.family_available_count == 13
 
     assert hpc_pg.available_count == 7
 
